@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Shield, ExternalLink, CheckCircle2, AlertCircle, ChevronRight, Bookmark, Copy, RefreshCw, Key } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Shield, ExternalLink, CheckCircle2, AlertCircle, ChevronRight, Bookmark, Copy, RefreshCw } from 'lucide-react';
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:5000';
 const DIARY_URL  = 'https://dnevnik.egov66.ru';
