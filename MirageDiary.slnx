@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="MirageDiary/MirageDiary.csproj" Id="46ed0cb7-1e56-4d31-8679-9900ac56724c" />
+  <Project Path="MirageDiary.Core/MirageDiary.Core.csproj" />
+  <Project Path="MirageDiary.Server/MirageDiary.Server.csproj" />
+</Solution>
