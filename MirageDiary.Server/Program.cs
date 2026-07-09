@@ -50,6 +50,7 @@ builder.Services.AddScoped<DiaryInteractionService>();
 builder.Services.AddScoped<BotCommandService>();
 builder.Services.AddScoped<MaxCommandService>();
 builder.Services.AddSingleton<BookmarkletAuthService>();
+builder.Services.AddSingleton<PlaywrightAuthManager>();
 
 var app = builder.Build();
 

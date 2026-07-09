@@ -18,17 +18,20 @@ public class MiniAppController : ControllerBase
     private readonly AppDbContext _context;
     private readonly IHttpClientFactory _httpFactory;
     private readonly BookmarkletAuthService _bookmarkletAuth;
+    private readonly PlaywrightAuthManager _playwrightAuth;
 
     public MiniAppController(
         ITokenStore tokenStore,
         AppDbContext context,
         IHttpClientFactory httpFactory,
-        BookmarkletAuthService bookmarkletAuth)
+        BookmarkletAuthService bookmarkletAuth,
+        PlaywrightAuthManager playwrightAuth)
     {
         _tokenStore      = tokenStore;
         _context         = context;
         _httpFactory     = httpFactory;
         _bookmarkletAuth = bookmarkletAuth;
+        _playwrightAuth  = playwrightAuth;
     }
 
     /// <summary>
@@ -231,6 +234,100 @@ public class MiniAppController : ControllerBase
         bool done = !_bookmarkletAuth.IsPending(code);
         return Ok(new { done });
     }
+
+    // =========================================================================
+    // HEADLESS BROWSER (PLAYWRIGHT) AUTH FLOW
+    // =========================================================================
+
+    [HttpPost("auth/start")]
+    public async Task<IActionResult> StartAuth([FromBody] StartAuthRequest request)
+    {
+        var session = await _playwrightAuth.StartAuthAsync(request.TelegramUserId, request.Login, request.Password);
+        return Ok(new { sessionId = session.SessionId, status = session.Status.ToString() });
+    }
+
+    [HttpGet("auth/status/{sessionId}")]
+    public async Task<IActionResult> GetAuthStatus(string sessionId)
+    {
+        var session = _playwrightAuth.GetSession(sessionId);
+        if (session == null) return NotFound(new { error = "Session not found or expired" });
+
+        if (session.Status == AuthStatus.Success && !string.IsNullOrEmpty(session.AccessToken))
+        {
+            // Try to resolve studentId
+            string studentId = "", className = "", orgName = "";
+            try
+            {
+                var client = _httpFactory.CreateClient();
+                client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", session.AccessToken);
+                var resp = await client.GetAsync("https://dnevnik.egov66.ru/api/students");
+                if (resp.IsSuccessStatusCode)
+                {
+                    var json = await resp.Content.ReadAsStringAsync();
+                    using var doc = JsonDocument.Parse(json);
+                    if (doc.RootElement.TryGetProperty("students", out var students) && students.GetArrayLength() > 0)
+                    {
+                        var s = students[0];
+                        studentId = s.TryGetProperty("id", out var id) ? id.GetString() ?? "" : "";
+                        className = s.TryGetProperty("className", out var cn) ? cn.GetString() ?? "" : "";
+                        orgName = s.TryGetProperty("orgName", out var org) ? org.GetString() ?? "" : "";
+                    }
+                }
+            }
+            catch { }
+
+            await _tokenStore.SaveTokensAsync(session.TelegramUserId, new TokenData
+            {
+                AccessToken = session.AccessToken,
+                RefreshToken = session.RefreshToken,
+                StudentId = studentId
+            });
+
+            var user = await _context.Users.FindAsync(session.TelegramUserId);
+            if (user != null)
+            {
+                user.ClassName = className;
+                user.OrgName = orgName;
+                await _context.SaveChangesAsync();
+            }
+
+            return Ok(new
+            {
+                status = session.Status.ToString(),
+                studentId,
+                className,
+                orgName
+            });
+        }
+
+        return Ok(new
+        {
+            status = session.Status.ToString(),
+            errorMessage = session.ErrorMessage,
+            captchaImage = session.CaptchaImageBase64
+        });
+    }
+
+    [HttpPost("auth/submit-input")]
+    public IActionResult SubmitInput([FromBody] SubmitInputRequest request)
+    {
+        var success = _playwrightAuth.SubmitUserInput(request.SessionId, request.Input);
+        if (!success) return BadRequest(new { error = "Failed to submit input. Session may be expired or not waiting for input." });
+        return Ok(new { success = true });
+    }
+}
+
+public class StartAuthRequest
+{
+    public string TelegramUserId { get; set; } = "";
+    public string Login { get; set; } = "";
+    public string Password { get; set; } = "";
+}
+
+public class SubmitInputRequest
+{
+    public string SessionId { get; set; } = "";
+    public string Input { get; set; } = "";
 }
 
 public class CreateCodeRequest

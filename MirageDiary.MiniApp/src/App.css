@@ -535,6 +535,60 @@ html, body, #root {
 .mt-2 { margin-top: 8px; }
 .mt-4 { margin-top: 16px; }
 
+/* ─── Forms & Inputs ────────────────────────────────────────── */
+
+.input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  max-width: 320px;
+}
+
+.input-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-align: left;
+}
+
+.text-input {
+  width: 100%;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 16px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.text-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+}
+
+.text-center { text-align: center; }
+.text-lg { font-size: 24px; letter-spacing: 2px; }
+
+.mt-6 { margin-top: 24px; }
+
+.captcha-container {
+  background: var(--surface);
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.captcha-img {
+  max-width: 100%;
+  border-radius: 4px;
+}
+
 /* ─── Success / Error ───────────────────────────────────────────── */
 
 .success-circle {
