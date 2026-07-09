@@ -103,7 +103,7 @@ public class PlaywrightAuthManager
             
             session.Browser = await session.PlaywrightInstance.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
             {
-                Headless = false, // Покажем браузер юзеру, чтобы он видел, что происходит!
+                Headless = false,
                 ExecutablePath = System.IO.Path.GetFullPath(System.IO.Path.Combine(Environment.CurrentDirectory, "chrome", "chrome-win64", "chrome.exe")),
                 Args = new[] { "--disable-blink-features=AutomationControlled" }
             });
@@ -117,11 +117,9 @@ public class PlaywrightAuthManager
             var page = await session.Context.NewPageAsync();
             Console.WriteLine($"[Playwright] Страница создана. Переход на login...");
 
-            // 1. Navigate to Dnevnik Login page
             await page.GotoAsync("https://dnevnik.egov66.ru/login/", new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
-            Console.WriteLine($"[Playwright] Страница открыта. Ждем NetworkIdle...");
+            Console.WriteLine($"[Playwright] Страница открыта.");
 
-            // 2. Click "Войти через Госуслуги"
             Console.WriteLine($"[Playwright] Ищем кнопку Госуслуг...");
             var loginBtn = await page.QuerySelectorAsync("a[href*='esia'], button:has-text('Госуслуги'), button:has-text('Войти')");
             if (loginBtn != null)
@@ -132,103 +130,114 @@ public class PlaywrightAuthManager
             }
 
             Console.WriteLine($"[Playwright] Текущий URL: {page.Url}");
-
             Console.WriteLine($"[Playwright] Вводим логин и пароль...");
-            // 4. Input login
+
             var loginInput = page.Locator("input[id='login']");
             await loginInput.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Visible });
-            await Task.Delay(1000); 
+            await Task.Delay(1000);
             
             await loginInput.FillAsync(login);
             await page.FillAsync("input[id='password']", password);
-            // Press Enter
             await page.PressAsync("input[id='password']", "Enter");
             
             Console.WriteLine($"[Playwright] Данные отправлены. Ожидаем ответ...");
             
-            // Loop to handle redirects, captchas, and errors
-            for (int i = 0; i < 30; i++)
+            // Main loop: wait for redirect or error
+            for (int i = 0; i < 60; i++)
             {
-                var url = page.Url;
-                Console.WriteLine($"[Playwright] Итерация проверки {i + 1}. URL: {url}");
+                await Task.Delay(2000);
                 
-                // Get page text to check for Angular error messages
-                var pageText = "";
-                try { pageText = await page.EvaluateAsync<string>("document.body.innerText") ?? ""; } catch { }
+                string url;
+                try { url = page.Url; } catch { break; }
+                Console.WriteLine($"[Playwright] Итерация {i + 1}. URL: {url}");
+                
+                // Read page text safely
+                string pageText = "";
+                try { pageText = await page.EvaluateAsync<string>("document.body?.innerText || ''") ?? ""; } catch { }
 
-                // Check for generic error message on ESIA (wrong password)
-                if (pageText.Contains("Неверный логин") || pageText.Contains("учетная запись не найдена") || pageText.Contains("Неверный пароль") || pageText.Contains("Неверно указан логин"))
+                // Wrong password
+                if (pageText.Contains("Неверный") || pageText.Contains("не найден") || pageText.Contains("Неправильн"))
                 {
-                    Console.WriteLine("[Playwright] Обнаружена ошибка авторизации: Неверный логин или пароль.");
+                    Console.WriteLine("[Playwright] Ошибка: Неверный логин или пароль.");
                     session.ErrorMessage = "Неверный логин или пароль.";
                     session.Status = AuthStatus.Failed;
-                    await CleanupSession(session);
-                    return;
+                    break;
                 }
 
-                // Check for CAPTCHA
-                if (pageText.Contains("Введите символы") || pageText.Contains("капча") || url.Contains("captcha"))
+                // Captcha
+                if (pageText.Contains("Введите символы") || url.Contains("captcha"))
                 {
                     Console.WriteLine("[Playwright] Обнаружена капча!");
                     session.Status = AuthStatus.RequiresCaptcha;
-                    return;
+                    break;
                 }
                 
-                // Check for 2FA / OTP
+                // 2FA / OTP
                 if (pageText.Contains("Введите код") || url.Contains("otp") || url.Contains("login/mfa"))
                 {
-                    Console.WriteLine("[Playwright] Обнаружено окно 2FA/ОТП!");
+                    Console.WriteLine("[Playwright] Обнаружено окно 2FA!");
                     session.Status = AuthStatus.RequiresOtp;
-                    return;
+                    break;
                 }
 
+                // Check if we're on the diary main page (NOT /login)
                 if (url.Contains("dnevnik.egov66.ru") && !url.Contains("login"))
                 {
-                    Console.WriteLine($"[Playwright] Успешный редирект на главную дневника! Ждем появления токена в localStorage (до 15 сек)...");
+                    Console.WriteLine($"[Playwright] Мы на главной дневника! Ждем полной загрузки страницы...");
                     
-                    string token = null;
-                    string refresh = null;
-                    for (int j = 0; j < 15; j++)
+                    // Wait for the SPA to fully load and populate localStorage
+                    try { await page.WaitForLoadStateAsync(LoadState.NetworkIdle); } catch { }
+                    Console.WriteLine($"[Playwright] NetworkIdle достигнут. Ждём 5 секунд для SPA...");
+                    await Task.Delay(5000);
+                    
+                    // Now try reading localStorage multiple times
+                    string? token = null;
+                    string? refresh = null;
+                    
+                    for (int attempt = 1; attempt <= 10; attempt++)
                     {
-                        await Task.Delay(1000);
-                        try 
+                        try
                         {
                             token = await page.EvaluateAsync<string>("localStorage.getItem('Auth__token')");
                             refresh = await page.EvaluateAsync<string>("localStorage.getItem('Auth__refresh')");
-                        } 
-                        catch (Exception e) 
-                        { 
-                            Console.WriteLine($"[Playwright] Ошибка при чтении localStorage (возможно, страница еще грузится): {e.Message}");
+                            Console.WriteLine($"[Playwright] Попытка {attempt}: token={(string.IsNullOrEmpty(token) || token == "null" ? "ПУСТО" : token.Substring(0, Math.Min(15, token.Length)) + "...")}");
                         }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"[Playwright] Попытка {attempt}: Ошибка JS: {ex.Message}");
+                        }
+                        
                         if (!string.IsNullOrEmpty(token) && token != "null") break;
+                        await Task.Delay(2000);
                     }
 
+                    // Clean up JSON quotes
                     if (!string.IsNullOrEmpty(token) && token.StartsWith("\"")) token = token.Trim('"');
                     if (!string.IsNullOrEmpty(refresh) && refresh.StartsWith("\"")) refresh = refresh.Trim('"');
 
-                    if (!string.IsNullOrEmpty(token))
+                    if (!string.IsNullOrEmpty(token) && token != "null")
                     {
+                        Console.WriteLine($"[Playwright] ТОКЕН ПОЛУЧЕН! Длина: {token.Length}");
                         session.AccessToken = token;
                         session.RefreshToken = refresh ?? "";
                         session.Status = AuthStatus.Success;
                     }
                     else
                     {
-                        Console.WriteLine($"[Playwright] ОШИБКА: Токен пустой!");
-                        session.ErrorMessage = "Не удалось извлечь токен из Дневника.";
+                        Console.WriteLine($"[Playwright] Токен так и не появился в localStorage!");
+                        session.ErrorMessage = "Не удалось извлечь токен из дневника.";
                         session.Status = AuthStatus.Failed;
                     }
-
-                    await CleanupSession(session);
-                    return;
+                    break;
                 }
-
-                await Task.Delay(2000);
             }
-
-            Console.WriteLine($"[Playwright] Истек таймаут авторизации!");
-            session.ErrorMessage = "Таймаут авторизации.";
-            session.Status = AuthStatus.Failed;
+            
+            if (session.Status == AuthStatus.InProgress)
+            {
+                Console.WriteLine($"[Playwright] Таймаут авторизации!");
+                session.ErrorMessage = "Таймаут авторизации.";
+                session.Status = AuthStatus.Failed;
+            }
         }
         catch (Exception ex)
         {
@@ -236,10 +245,10 @@ public class PlaywrightAuthManager
             session.ErrorMessage = "Ошибка браузера: " + ex.Message;
             session.Status = AuthStatus.Failed;
         }
-        finally
-        {
-            await CleanupSession(session);
-        }
+        
+        Console.WriteLine($"[Playwright] Финальный статус: {session.Status}. Закрываем браузер через 3 секунды...");
+        await Task.Delay(3000); // Даём Mini App время получить статус
+        await CleanupSession(session);
     }
 
     public bool SubmitUserInput(string sessionId, string input)
