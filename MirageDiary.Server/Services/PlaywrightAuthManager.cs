@@ -191,8 +191,15 @@ public class PlaywrightAuthManager
                     for (int j = 0; j < 15; j++)
                     {
                         await Task.Delay(1000);
-                        token = await page.EvaluateAsync<string>("localStorage.getItem('Auth__token')");
-                        refresh = await page.EvaluateAsync<string>("localStorage.getItem('Auth__refresh')");
+                        try 
+                        {
+                            token = await page.EvaluateAsync<string>("localStorage.getItem('Auth__token')");
+                            refresh = await page.EvaluateAsync<string>("localStorage.getItem('Auth__refresh')");
+                        } 
+                        catch (Exception e) 
+                        { 
+                            Console.WriteLine($"[Playwright] Ошибка при чтении localStorage (возможно, страница еще грузится): {e.Message}");
+                        }
                         if (!string.IsNullOrEmpty(token) && token != "null") break;
                     }
 
