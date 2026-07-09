@@ -97,13 +97,17 @@ public class PlaywrightAuthManager
     {
         try
         {
+            Console.WriteLine($"[Playwright] Запуск сессии для {telegramUserId}...");
             session.PlaywrightInstance = await Playwright.CreateAsync();
+            Console.WriteLine($"[Playwright] Playwright создан. Запуск Chromium...");
+            
             session.Browser = await session.PlaywrightInstance.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
             {
                 Headless = true,
                 ExecutablePath = System.IO.Path.GetFullPath(System.IO.Path.Combine(Environment.CurrentDirectory, "chrome", "chrome-win64", "chrome.exe")),
-                Args = new[] { "--disable-blink-features=AutomationControlled" } // Try to evade basic bot detection
+                Args = new[] { "--disable-blink-features=AutomationControlled" }
             });
+            Console.WriteLine($"[Playwright] Chromium запущен. Создаем контекст...");
 
             session.Context = await session.Browser.NewContextAsync(new BrowserNewContextOptions
             {
@@ -111,46 +115,56 @@ public class PlaywrightAuthManager
             });
 
             var page = await session.Context.NewPageAsync();
+            Console.WriteLine($"[Playwright] Страница создана. Переход на login...");
 
             // 1. Go to Diary login page
             await page.GotoAsync("https://dnevnik.egov66.ru/login");
+            Console.WriteLine($"[Playwright] Страница открыта. Ждем NetworkIdle...");
             
-            // 2. Click "Войти через Госуслуги"
-            // Let's assume there's a button or link that goes to ESIA.
-            // Often dnevnik redirects immediately or has a specific login button.
-            // Wait for network idle to let any auto-redirects happen
             await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+            Console.WriteLine($"[Playwright] Ищем кнопку Госуслуг...");
 
             var loginBtn = await page.QuerySelectorAsync("a[href*='esia'], button:has-text('Госуслуги'), button:has-text('Войти')");
             if (loginBtn != null)
             {
+                Console.WriteLine($"[Playwright] Кнопка найдена. Кликаем...");
                 await loginBtn.ClickAsync();
                 await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
             }
+            else
+            {
+                Console.WriteLine($"[Playwright] ВНИМАНИЕ: Кнопка входа на Госуслуги не найдена!");
+            }
 
-            // 3. We should now be on Gosuslugi login page
+            Console.WriteLine($"[Playwright] Текущий URL: {page.Url}");
             if (!page.Url.Contains("esia.gosuslugi.ru"))
             {
+                Console.WriteLine($"[Playwright] ОШИБКА: Мы не на странице ЕСИА. URL: {page.Url}");
                 session.Status = AuthStatus.Failed;
                 session.ErrorMessage = "Не удалось перейти на страницу Госуслуг.";
                 await CleanupSession(session);
                 return;
             }
 
+            Console.WriteLine($"[Playwright] Вводим логин и пароль...");
             // 4. Input login
             await page.FillAsync("input[id='login']", login);
             await page.FillAsync("input[id='password']", password);
             await page.ClickAsync("button[type='submit']");
             
+            Console.WriteLine($"[Playwright] Данные отправлены. Ожидаем ответ...");
             // 5. Wait for the next screen (could be success, CAPTCHA, or 2FA)
             await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
             
+            Console.WriteLine($"[Playwright] Проверяем экраны 2FA / Капчи...");
             // Loop to handle Captcha & 2FA if they appear
             for (int i = 0; i < 3; i++) // Max 3 iterations of challenge
             {
+                Console.WriteLine($"[Playwright] Итерация проверки {i+1}. URL: {page.Url}");
                 // Check if we got redirected back to dnevnik
                 if (page.Url.Contains("dnevnik.egov66.ru"))
                 {
+                    Console.WriteLine($"[Playwright] Успешный редирект в дневник!");
                     break; // Success!
                 }
 
@@ -158,6 +172,7 @@ public class PlaywrightAuthManager
                 var captchaImg = await page.QuerySelectorAsync("img[class*='captcha']"); // Adjust selector based on ESIA
                 if (captchaImg != null)
                 {
+                    Console.WriteLine($"[Playwright] Обнаружена КАПЧА!");
                     var buffer = await captchaImg.ScreenshotAsync();
                     session.CaptchaImageBase64 = Convert.ToBase64String(buffer);
                     session.Status = AuthStatus.RequiresCaptcha;
@@ -166,6 +181,7 @@ public class PlaywrightAuthManager
                     session.UserInputTcs = new TaskCompletionSource<string>();
                     var captchaText = await session.UserInputTcs.Task;
                     
+                    Console.WriteLine($"[Playwright] Вводим КАПЧУ...");
                     await page.FillAsync("input[id='captcha']", captchaText); // Adjust selector
                     await page.ClickAsync("button[type='submit']");
                     await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
@@ -176,12 +192,14 @@ public class PlaywrightAuthManager
                 var otpInput = await page.QuerySelectorAsync("input[id='otp'], input[name='otp'], input[id='code']"); // Adjust selector
                 if (otpInput != null)
                 {
+                    Console.WriteLine($"[Playwright] Обнаружена проверка СМС (OTP)!");
                     session.Status = AuthStatus.RequiresOtp;
                     
                     // Wait for user input from API
                     session.UserInputTcs = new TaskCompletionSource<string>();
                     var otpCode = await session.UserInputTcs.Task;
                     
+                    Console.WriteLine($"[Playwright] Вводим СМС...");
                     await otpInput.FillAsync(otpCode);
                     await page.ClickAsync("button[type='submit']");
                     await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
@@ -193,16 +211,18 @@ public class PlaywrightAuthManager
                 if (errorElem != null)
                 {
                     session.ErrorMessage = await errorElem.InnerTextAsync();
+                    Console.WriteLine($"[Playwright] ОШИБКА ГОСУСЛУГ: {session.ErrorMessage}");
                     session.Status = AuthStatus.Failed;
                     await CleanupSession(session);
                     return;
                 }
 
+                Console.WriteLine($"[Playwright] Никаких известных элементов не найдено. Ждём 2 секунды...");
                 // Wait a bit and check again if page is still loading
                 await Task.Delay(2000);
             }
 
-            // 6. After breaking loop, verify we are on dnevnik
+            Console.WriteLine($"[Playwright] Парсим localStorage на странице {page.Url}...");
             if (page.Url.Contains("dnevnik.egov66.ru"))
             {
                 // Extract tokens from localStorage
@@ -211,24 +231,28 @@ public class PlaywrightAuthManager
 
                 if (!string.IsNullOrEmpty(token))
                 {
+                    Console.WriteLine($"[Playwright] ТОКЕН УСПЕШНО ПОЛУЧЕН!");
                     session.AccessToken = token;
                     session.RefreshToken = refresh ?? "";
                     session.Status = AuthStatus.Success;
                 }
                 else
                 {
+                    Console.WriteLine($"[Playwright] Токен не найден в localStorage!");
                     session.Status = AuthStatus.Failed;
                     session.ErrorMessage = "Авторизация прошла, но токен не найден.";
                 }
             }
             else
             {
+                Console.WriteLine($"[Playwright] Время вышло, мы не на странице дневника.");
                 session.Status = AuthStatus.Failed;
                 session.ErrorMessage = "Превышено время ожидания или неизвестный экран.";
             }
         }
         catch (Exception ex)
         {
+            Console.WriteLine($"[Playwright] ИСКЛЮЧЕНИЕ: {ex}");
             session.Status = AuthStatus.Failed;
             session.ErrorMessage = "Внутренняя ошибка: " + ex.Message;
         }
