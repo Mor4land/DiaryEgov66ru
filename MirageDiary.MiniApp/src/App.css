@@ -589,6 +589,34 @@ html, body, #root {
   border-radius: 4px;
 }
 
+/* ─── Progress Bar ────────────────────────────────────────────── */
+
+.progress-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+
+.progress-bar-bg {
+  width: 100%;
+  height: 6px;
+  background-color: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), #818cf8);
+  border-radius: 3px;
+  transition: width 0.3s ease-in-out;
+}
+
+.w-full { width: 100%; }
+.max-w-sm { max-width: 320px; }
+.mb-4 { margin-bottom: 16px; }
+
 /* ─── Success / Error ───────────────────────────────────────────── */
 
 .success-circle {

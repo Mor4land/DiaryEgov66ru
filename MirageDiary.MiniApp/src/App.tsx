@@ -18,6 +18,10 @@ export default function App() {
   const [captchaImg, setCaptchaImg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
+  // Progress bar state for polling
+  const [progressPercent, setProgressPercent] = useState(0);
+  const [progressText, setProgressText] = useState('Открываем безопасное соединение...');
+
   useEffect(() => {
     try {
       const tg = (window as any).Telegram?.WebApp;
@@ -34,9 +38,26 @@ export default function App() {
     } catch { setTgUserId('123456789'); setTgFirstName('Тест'); }
   }, []);
 
-  // Poll for auth status
+  // Polling logic
   useEffect(() => {
     if (step !== 'polling' || !sessionId) return;
+    
+    // Animate progress bar (assume ~25 seconds max for playwright, if no OTP)
+    let percent = 0;
+    const progressInterval = setInterval(() => {
+      percent += 1;
+      if (percent > 95) percent = 95; // Wait at 95% until server responds
+      setProgressPercent(percent);
+
+      if (percent === 3) setProgressText('Запускаем защищённый браузер...');
+      else if (percent === 8) setProgressText('Переходим на страницу авторизации...');
+      else if (percent === 15) setProgressText('Вводим логин и пароль...');
+      else if (percent === 25) setProgressText('Ожидаем ответ от Госуслуг...');
+      else if (percent === 40) setProgressText('Проверяем наличие СМС-защиты...');
+      else if (percent === 55) setProgressText('Связываемся с Дневником...');
+      else if (percent === 70) setProgressText('Получаем токен доступа...');
+      else if (percent === 85) setProgressText('Завершаем настройку...');
+    }, 250); // Updates 4 times a second
     
     const interval = setInterval(async () => {
       try {
@@ -45,30 +66,41 @@ export default function App() {
           const data = await res.json();
           if (data.status === 'Success') {
             clearInterval(interval);
+            clearInterval(progressInterval);
+            setProgressPercent(100);
             setStep('success');
             setTimeout(() => (window as any).Telegram?.WebApp?.close?.(), 3000);
           } else if (data.status === 'RequiresOtp') {
             clearInterval(interval);
+            clearInterval(progressInterval);
             setUserInput('');
             setStep('otp');
           } else if (data.status === 'RequiresCaptcha') {
             clearInterval(interval);
+            clearInterval(progressInterval);
             setCaptchaImg(data.captchaImage);
             setUserInput('');
             setStep('captcha');
           } else if (data.status === 'Failed' || data.status === 'Expired') {
             clearInterval(interval);
+            clearInterval(progressInterval);
             setErrorMsg(data.errorMessage || 'Сессия истекла или произошла ошибка');
             setStep('error');
           }
         }
       } catch { /* ignore poll errors */ }
     }, 2000);
-    return () => clearInterval(interval);
+    
+    return () => {
+      clearInterval(interval);
+      clearInterval(progressInterval);
+    };
   }, [step, sessionId]);
 
   const handleStartAuth = async () => {
     if (!login || !password) return;
+    setProgressPercent(0);
+    setProgressText('Открываем безопасное соединение...');
     setStep('polling');
     setErrorMsg('');
     try {
@@ -88,6 +120,8 @@ export default function App() {
 
   const handleSubmitInput = async () => {
     if (!userInput) return;
+    setProgressPercent(40); // Resume progress from middle
+    setProgressText('Проверяем введённый код...');
     setStep('polling');
     try {
       const res = await fetch(`${SERVER_URL}/api/miniapp/auth/submit-input`, {
@@ -224,11 +258,17 @@ export default function App() {
   // ─── POLLING (LOADING) ───────────────────────────────────────────────────
   if (step === 'polling') return (
     <div className="screen screen-center">
-      <div className="spinner-wrap">
+      <div className="spinner-wrap mb-4">
         <div className="spinner-ring" />
       </div>
-      <p className="sync-title">Связываюсь с Госуслугами...</p>
-      <p className="sync-sub mt-2">Пожалуйста, подождите. Это может занять до 30 секунд.</p>
+      
+      <div className="progress-container w-full max-w-sm mt-6">
+        <div className="progress-bar-bg">
+          <div className="progress-bar-fill" style={{ width: `${progressPercent}%` }}></div>
+        </div>
+        <p className="sync-title mt-4">{progressText}</p>
+        <p className="sync-sub mt-2">Пожалуйста, подождите. Это может занять до 30 секунд.</p>
+      </div>
     </div>
   );
 
