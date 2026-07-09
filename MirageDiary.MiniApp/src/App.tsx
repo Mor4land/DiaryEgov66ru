@@ -3,10 +3,10 @@ import { Shield, CheckCircle2, AlertCircle, ChevronRight, RefreshCw, Lock, Phone
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:5000';
 
-type Step = 'welcome' | 'login' | 'polling' | 'otp' | 'captcha' | 'success' | 'error';
+type Step = 'loading' | 'welcome' | 'login' | 'polling' | 'otp' | 'captcha' | 'success' | 'error' | 'already_authorized';
 
 export default function App() {
-  const [step, setStep] = useState<Step>('welcome');
+  const [step, setStep] = useState<Step>('loading');
   const [tgUserId, setTgUserId] = useState('');
   const [tgFirstName, setTgFirstName] = useState('');
 
@@ -36,6 +36,28 @@ export default function App() {
       }
     } catch { setTgUserId('123456789'); setTgFirstName('Тест'); }
   }, []);
+
+  // Check auth on start
+  useEffect(() => {
+    if (!tgUserId) return;
+    
+    const checkAuth = async () => {
+      try {
+        const res = await fetch(`${SERVER_URL}/api/miniapp/auth/check/${tgUserId}`, {
+          headers: { 'ngrok-skip-browser-warning': 'true' }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.isAuthorized) {
+            setStep('already_authorized');
+            return;
+          }
+        }
+      } catch (e) { console.error('Auth check error:', e); }
+      setStep('welcome');
+    };
+    checkAuth();
+  }, [tgUserId]);
 
   // Polling logic
   useEffect(() => {
@@ -296,6 +318,32 @@ export default function App() {
       <p className="error-sub mt-2">{errorMsg}</p>
       <button className="btn-primary mt-4" onClick={() => setStep('login')}>
         <RefreshCw size={16} /> Попробовать снова
+      </button>
+    </div>
+  );
+
+  // ─── LOADING (APP START) ──────────────────────────────────────
+  if (step === 'loading') return (
+    <div className="screen screen-center">
+      <div className="spinner-wrap">
+        <div className="spinner-ring" />
+      </div>
+    </div>
+  );
+
+  // ─── ALREADY AUTHORIZED ───────────────────────────────────────
+  if (step === 'already_authorized') return (
+    <div className="screen screen-center">
+      <div className="success-circle">
+        <CheckCircle2 size={44} className="success-icon" />
+      </div>
+      <h2 className="success-title">Вы уже авторизованы</h2>
+      <p className="success-sub mt-2">Ваш электронный дневник успешно подключён. Вы можете закрыть это окно и продолжить общение с ботом.</p>
+      <button className="btn-primary mt-6" onClick={() => (window as any).Telegram?.WebApp?.close?.()}>
+        Вернуться в Telegram
+      </button>
+      <button className="btn-ghost mt-4" onClick={() => setStep('welcome')}>
+        Войти под другим аккаунтом
       </button>
     </div>
   );

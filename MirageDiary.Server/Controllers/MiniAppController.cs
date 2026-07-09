@@ -240,6 +240,13 @@ public class MiniAppController : ControllerBase
     // HEADLESS BROWSER (PLAYWRIGHT) AUTH FLOW
     // =========================================================================
 
+    [HttpGet("auth/check/{telegramUserId}")]
+    public async Task<IActionResult> CheckAuth(string telegramUserId)
+    {
+        var tokens = await _tokenStore.GetTokensAsync(telegramUserId);
+        return Ok(new { isAuthorized = tokens != null && !string.IsNullOrEmpty(tokens.AccessToken) });
+    }
+
     [HttpPost("auth/start")]
     public async Task<IActionResult> StartAuth([FromBody] StartAuthRequest request)
     {
