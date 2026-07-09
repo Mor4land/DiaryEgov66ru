@@ -7,6 +7,7 @@ using MirageDiary.Core;
 using MirageDiary.Server.Services;
 using MirageDiary.Server.Data;
 using Microsoft.EntityFrameworkCore;
+using Telegram.Bot;
 
 namespace MirageDiary.Server.Controllers;
 
@@ -247,65 +248,84 @@ public class MiniAppController : ControllerBase
     }
 
     [HttpGet("auth/status/{sessionId}")]
-    public async Task<IActionResult> GetAuthStatus(string sessionId)
+    public async Task<IActionResult> GetAuthStatus(string sessionId, [FromServices] Telegram.Bot.ITelegramBotClient botClient)
     {
-        var session = _playwrightAuth.GetSession(sessionId);
-        if (session == null) return NotFound(new { error = "Session not found or expired" });
-
-        if (session.Status == AuthStatus.Success && !string.IsNullOrEmpty(session.AccessToken))
+        try
         {
-            // Try to resolve studentId
-            string studentId = "", className = "", orgName = "";
-            try
+            var session = _playwrightAuth.GetSession(sessionId);
+            if (session == null) return NotFound(new { error = "Session not found or expired" });
+
+            if (session.Status == AuthStatus.Success && !string.IsNullOrEmpty(session.AccessToken))
             {
-                var client = _httpFactory.CreateClient();
-                client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", session.AccessToken);
-                var resp = await client.GetAsync("https://dnevnik.egov66.ru/api/students");
-                if (resp.IsSuccessStatusCode)
+                // Prevent multiple triggers
+                if (session.ErrorMessage == "Processed")
+                    return Ok(new { status = "Success" });
+                
+                session.ErrorMessage = "Processed"; // simple flag
+
+                // Try to resolve studentId
+                string studentId = "", className = "", orgName = "";
+                try
                 {
-                    var json = await resp.Content.ReadAsStringAsync();
-                    using var doc = JsonDocument.Parse(json);
-                    if (doc.RootElement.TryGetProperty("students", out var students) && students.GetArrayLength() > 0)
+                    var client = _httpFactory.CreateClient();
+                    client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", session.AccessToken);
+                    var resp = await client.GetAsync("https://dnevnik.egov66.ru/api/students");
+                    if (resp.IsSuccessStatusCode)
                     {
-                        var s = students[0];
-                        studentId = s.TryGetProperty("id", out var id) ? id.GetString() ?? "" : "";
-                        className = s.TryGetProperty("className", out var cn) ? cn.GetString() ?? "" : "";
-                        orgName = s.TryGetProperty("orgName", out var org) ? org.GetString() ?? "" : "";
+                        var json = await resp.Content.ReadAsStringAsync();
+                        using var doc = JsonDocument.Parse(json);
+                        if (doc.RootElement.TryGetProperty("students", out var students) && students.GetArrayLength() > 0)
+                        {
+                            var s = students[0];
+                            studentId = s.TryGetProperty("id", out var id) ? id.GetString() ?? "" : "";
+                            className = s.TryGetProperty("className", out var cn) ? cn.GetString() ?? "" : "";
+                            orgName = s.TryGetProperty("orgName", out var org) ? org.GetString() ?? "" : "";
+                        }
                     }
                 }
+                catch (Exception ex) { Console.WriteLine($"[MiniApp] Ошибка получения профиля: {ex.Message}"); }
+
+                await _tokenStore.SaveTokensAsync(session.TelegramUserId, new TokenData
+                {
+                    AccessToken = session.AccessToken,
+                    RefreshToken = session.RefreshToken,
+                    StudentId = studentId
+                });
+
+                var user = await _context.Users.FindAsync(session.TelegramUserId);
+                if (user != null)
+                {
+                    user.ClassName = className;
+                    user.OrgName = orgName;
+                    await _context.SaveChangesAsync();
+                }
+
+                // Send a telegram message
+                try
+                {
+                    await botClient.SendMessage(
+                        chatId: session.TelegramUserId,
+                        text: "✅ *Авторизация успешно завершена!*\n\nТеперь бот может получать ваше расписание и оценки.",
+                        parseMode: Telegram.Bot.Types.Enums.ParseMode.Markdown);
+                }
+                catch (Exception ex) { Console.WriteLine($"[MiniApp] Ошибка отправки ТГ сообщения: {ex.Message}"); }
+
+                return Ok(new
+                {
+                    status = "Success",
+                    studentId,
+                    className,
+                    orgName
+                });
             }
-            catch { }
-
-            await _tokenStore.SaveTokensAsync(session.TelegramUserId, new TokenData
-            {
-                AccessToken = session.AccessToken,
-                RefreshToken = session.RefreshToken,
-                StudentId = studentId
-            });
-
-            var user = await _context.Users.FindAsync(session.TelegramUserId);
-            if (user != null)
-            {
-                user.ClassName = className;
-                user.OrgName = orgName;
-                await _context.SaveChangesAsync();
-            }
-
-            return Ok(new
-            {
-                status = session.Status.ToString(),
-                studentId,
-                className,
-                orgName
-            });
+            
+            return Ok(new { status = session.Status.ToString(), captchaImage = session.CaptchaImageBase64, errorMessage = session.ErrorMessage });
         }
-
-        return Ok(new
+        catch (Exception ex)
         {
-            status = session.Status.ToString(),
-            errorMessage = session.ErrorMessage,
-            captchaImage = session.CaptchaImageBase64
-        });
+            Console.WriteLine($"[MiniApp] ОШИБКА в GetAuthStatus: {ex}");
+            return StatusCode(500, new { status = "Failed", errorMessage = "Внутренняя ошибка сервера: " + ex.Message });
+        }
     }
 
     [HttpPost("auth/submit-input")]
