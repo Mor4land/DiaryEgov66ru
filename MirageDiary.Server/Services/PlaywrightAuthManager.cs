@@ -148,9 +148,16 @@ public class PlaywrightAuthManager
 
             Console.WriteLine($"[Playwright] Вводим логин и пароль...");
             // 4. Input login
-            await page.FillAsync("input[id='login']", login);
+            // Gosuslugi uses Angular, which often re-renders (detaches) elements right after loading.
+            // Wait for the input to be stable and visible, then add a tiny delay for scripts to finish.
+            var loginInput = page.Locator("input[id='login']");
+            await loginInput.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Visible });
+            await Task.Delay(1000); // Give Angular a second to calm down
+            
+            await loginInput.FillAsync(login);
             await page.FillAsync("input[id='password']", password);
-            await page.ClickAsync("button[type='submit']");
+            // Press Enter instead of relying on a specific submit button selector which might change
+            await page.PressAsync("input[id='password']", "Enter");
             
             Console.WriteLine($"[Playwright] Данные отправлены. Ожидаем ответ...");
             // 5. Wait for the next screen (could be success, CAPTCHA, or 2FA)
