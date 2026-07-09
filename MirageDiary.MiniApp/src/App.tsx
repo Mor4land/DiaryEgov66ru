@@ -61,7 +61,9 @@ export default function App() {
     
     const interval = setInterval(async () => {
       try {
-        const res = await fetch(`${SERVER_URL}/api/miniapp/auth/status/${sessionId}`);
+        const res = await fetch(`${SERVER_URL}/api/miniapp/auth/status/${sessionId}`, {
+          headers: { 'ngrok-skip-browser-warning': 'true' }
+        });
         if (res.ok) {
           const data = await res.json();
           if (data.status === 'Success') {
@@ -112,7 +114,7 @@ export default function App() {
     try {
       const res = await fetch(`${SERVER_URL}/api/miniapp/auth/start`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
         body: JSON.stringify({ TelegramUserId: tgUserId, Login: login, Password: password }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -132,7 +134,7 @@ export default function App() {
     try {
       const res = await fetch(`${SERVER_URL}/api/miniapp/auth/submit-input`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
         body: JSON.stringify({ SessionId: sessionId, Input: userInput }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
