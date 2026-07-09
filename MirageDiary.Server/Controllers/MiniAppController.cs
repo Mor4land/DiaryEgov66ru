@@ -253,6 +253,7 @@ public class MiniAppController : ControllerBase
         try
         {
             var session = _playwrightAuth.GetSession(sessionId);
+            Console.WriteLine($"[MiniApp] Polling status for {sessionId}. Session found: {session != null}, Status: {session?.Status}");
             if (session == null) return NotFound(new { error = "Session not found or expired" });
 
             if (session.Status == AuthStatus.Success && !string.IsNullOrEmpty(session.AccessToken))

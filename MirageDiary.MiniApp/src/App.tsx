@@ -87,9 +87,15 @@ export default function App() {
             setErrorMsg(data.errorMessage || 'Сессия истекла или произошла ошибка');
             setStep('error');
           }
+        } else {
+          // res is not ok, probably 429 Too Many Requests or 500
+          console.error(`Status HTTP ${res.status}`);
+          // Do not fail immediately, keep trying (ngrok limits)
         }
-      } catch { /* ignore poll errors */ }
-    }, 2000);
+      } catch (e: any) { 
+        console.error('Poll error:', e);
+      }
+    }, 4000); // Polling every 4 seconds instead of 2 to avoid ngrok rate limits
     
     return () => {
       clearInterval(interval);
