@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Shield, CheckCircle2, AlertCircle, ChevronRight, RefreshCw, Lock, Phone } from 'lucide-react';
+import { Shield, CheckCircle2, AlertCircle, ChevronRight, RefreshCw, Lock, Phone, Sparkles } from 'lucide-react';
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:5000';
 
@@ -18,7 +18,6 @@ export default function App() {
   const [captchaImg, setCaptchaImg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
-  // Progress bar state for polling
   const [progressPercent, setProgressPercent] = useState(0);
   const [progressText, setProgressText] = useState('Открываем безопасное соединение...');
 
@@ -42,22 +41,21 @@ export default function App() {
   useEffect(() => {
     if (step !== 'polling' || !sessionId) return;
     
-    // Animate progress bar (assume ~25 seconds max for playwright, if no OTP)
     let percent = 0;
     const progressInterval = setInterval(() => {
       percent += 1;
-      if (percent > 95) percent = 95; // Wait at 95% until server responds
+      if (percent > 95) percent = 95;
       setProgressPercent(percent);
 
       if (percent === 3) setProgressText('Запускаем защищённый браузер...');
-      else if (percent === 8) setProgressText('Переходим на страницу авторизации...');
-      else if (percent === 15) setProgressText('Вводим логин и пароль...');
+      else if (percent === 8) setProgressText('Открываем страницу авторизации...');
+      else if (percent === 15) setProgressText('Вводим данные для входа...');
       else if (percent === 25) setProgressText('Ожидаем ответ от Госуслуг...');
-      else if (percent === 40) setProgressText('Проверяем наличие СМС-защиты...');
-      else if (percent === 55) setProgressText('Связываемся с Дневником...');
+      else if (percent === 40) setProgressText('Проверяем двухфакторную защиту...');
+      else if (percent === 55) setProgressText('Подключаемся к Дневнику...');
       else if (percent === 70) setProgressText('Получаем токен доступа...');
-      else if (percent === 85) setProgressText('Завершаем настройку...');
-    }, 250); // Updates 4 times a second
+      else if (percent === 85) setProgressText('Финализируем авторизацию...');
+    }, 300);
     
     const interval = setInterval(async () => {
       try {
@@ -70,8 +68,9 @@ export default function App() {
             clearInterval(interval);
             clearInterval(progressInterval);
             setProgressPercent(100);
-            setStep('success');
-            setTimeout(() => (window as any).Telegram?.WebApp?.close?.(), 3000);
+            setProgressText('Готово!');
+            setTimeout(() => setStep('success'), 600);
+            setTimeout(() => (window as any).Telegram?.WebApp?.close?.(), 4000);
           } else if (data.status === 'RequiresOtp') {
             clearInterval(interval);
             clearInterval(progressInterval);
@@ -89,15 +88,11 @@ export default function App() {
             setErrorMsg(data.errorMessage || 'Сессия истекла или произошла ошибка');
             setStep('error');
           }
-        } else {
-          // res is not ok, probably 429 Too Many Requests or 500
-          console.error(`Status HTTP ${res.status}`);
-          // Do not fail immediately, keep trying (ngrok limits)
         }
       } catch (e: any) { 
         console.error('Poll error:', e);
       }
-    }, 4000); // Polling every 4 seconds instead of 2 to avoid ngrok rate limits
+    }, 4000);
     
     return () => {
       clearInterval(interval);
@@ -121,14 +116,14 @@ export default function App() {
       const data = await res.json();
       setSessionId(data.sessionId);
     } catch (e: any) {
-      setErrorMsg('Ошибка связи с сервером. ' + e.message);
+      setErrorMsg('Не удалось связаться с сервером. ' + e.message);
       setStep('error');
     }
   };
 
   const handleSubmitInput = async () => {
     if (!userInput) return;
-    setProgressPercent(40); // Resume progress from middle
+    setProgressPercent(45);
     setProgressText('Проверяем введённый код...');
     setStep('polling');
     try {
@@ -144,37 +139,37 @@ export default function App() {
     }
   };
 
-  // ─── WELCOME ─────────────────────────────────────────────────────────────
+  // ─── WELCOME ──────────────────────────────────────────────────
   if (step === 'welcome') return (
     <div className="screen">
       <div className="logo-wrap">
-        <div className="logo-circle"><Shield size={38} className="logo-icon" /></div>
+        <div className="logo-circle"><Sparkles size={30} className="logo-icon" /></div>
         <h1 className="app-title">Mirage Diary</h1>
         <p className="app-sub">
           {tgFirstName ? `Привет, ${tgFirstName}! ` : ''}
-          Подключите дневник через Госуслуги.
+          Подключите электронный дневник для получения расписания и оценок.
         </p>
       </div>
 
       <div className="steps-card">
         <div className="step-row"><span className="step-badge">1</span><span>Введите логин и пароль от Госуслуг</span></div>
         <div className="step-row"><span className="step-badge">2</span><span>Мы безопасно получим токен дневника</span></div>
-        <div className="step-row"><span className="step-badge">3</span><span>Пароль нигде не сохраняется</span></div>
+        <div className="step-row"><span className="step-badge">3</span><span>Ваш пароль нигде не сохраняется</span></div>
       </div>
 
       <button className="btn-primary" onClick={() => setStep('login')}>
-        Продолжить <ChevronRight size={18} />
+        Начать <ChevronRight size={18} />
       </button>
     </div>
   );
 
-  // ─── LOGIN ─────────────────────────────────────────────────────────────
+  // ─── LOGIN ────────────────────────────────────────────────────
   if (step === 'login') return (
     <div className="screen">
       <div className="logo-wrap">
-        <div className="logo-circle logo-circle--amber"><Lock size={32} className="logo-icon" /></div>
+        <div className="logo-circle logo-circle--amber"><Lock size={28} className="logo-icon" /></div>
         <h1 className="app-title">Госуслуги</h1>
-        <p className="app-sub">Введите данные для входа</p>
+        <p className="app-sub">Введите данные вашей учётной записи</p>
       </div>
 
       <div className="input-group">
@@ -184,11 +179,11 @@ export default function App() {
           className="text-input" 
           value={login} 
           onChange={(e) => setLogin(e.target.value)} 
-          placeholder="Например, +7 (999) 000-00-00" 
+          placeholder="example@mail.ru" 
         />
       </div>
 
-      <div className="input-group mt-4">
+      <div className="input-group mt-2">
         <label className="input-label">Пароль</label>
         <input 
           type="password" 
@@ -199,20 +194,20 @@ export default function App() {
         />
       </div>
 
-      <button className="btn-primary mt-6" onClick={handleStartAuth} disabled={!login || !password}>
-        Войти
+      <button className="btn-primary mt-4" onClick={handleStartAuth} disabled={!login || !password}>
+        Войти через Госуслуги
       </button>
-      <button className="btn-ghost mt-2" onClick={() => setStep('welcome')}>Отмена</button>
+      <button className="btn-ghost" onClick={() => setStep('welcome')}>Назад</button>
     </div>
   );
 
-  // ─── OTP / 2FA ─────────────────────────────────────────────────────────────
+  // ─── OTP / 2FA ────────────────────────────────────────────────
   if (step === 'otp') return (
     <div className="screen">
       <div className="logo-wrap">
-        <div className="logo-circle logo-circle--amber"><Phone size={32} className="logo-icon" /></div>
-        <h1 className="app-title">Проверка безопасности</h1>
-        <p className="app-sub">Введите код из СМС или TOTP приложения</p>
+        <div className="logo-circle logo-circle--amber"><Phone size={28} className="logo-icon" /></div>
+        <h1 className="app-title">Код подтверждения</h1>
+        <p className="app-sub">Введите код из СМС или приложения-аутентификатора</p>
       </div>
 
       <div className="input-group mt-4">
@@ -227,18 +222,18 @@ export default function App() {
         />
       </div>
 
-      <button className="btn-primary mt-6" onClick={handleSubmitInput} disabled={userInput.length < 4}>
+      <button className="btn-primary mt-4" onClick={handleSubmitInput} disabled={userInput.length < 4}>
         Подтвердить
       </button>
     </div>
   );
 
-  // ─── CAPTCHA ─────────────────────────────────────────────────────────────
+  // ─── CAPTCHA ──────────────────────────────────────────────────
   if (step === 'captcha') return (
     <div className="screen">
       <div className="logo-wrap">
-        <div className="logo-circle logo-circle--amber"><Shield size={32} className="logo-icon" /></div>
-        <h1 className="app-title">Защита от роботов</h1>
+        <div className="logo-circle logo-circle--amber"><Shield size={28} className="logo-icon" /></div>
+        <h1 className="app-title">Проверка безопасности</h1>
         <p className="app-sub">Введите текст с картинки</p>
       </div>
 
@@ -257,49 +252,49 @@ export default function App() {
         />
       </div>
 
-      <button className="btn-primary mt-6" onClick={handleSubmitInput} disabled={!userInput}>
+      <button className="btn-primary mt-4" onClick={handleSubmitInput} disabled={!userInput}>
         Продолжить
       </button>
     </div>
   );
 
-  // ─── POLLING (LOADING) ───────────────────────────────────────────────────
+  // ─── POLLING (LOADING) ────────────────────────────────────────
   if (step === 'polling') return (
     <div className="screen screen-center">
-      <div className="spinner-wrap mb-4">
+      <div className="spinner-wrap">
         <div className="spinner-ring" />
       </div>
       
-      <div className="progress-container w-full max-w-sm mt-6">
+      <div className="progress-container mt-4">
         <div className="progress-bar-bg">
           <div className="progress-bar-fill" style={{ width: `${progressPercent}%` }}></div>
         </div>
         <p className="sync-title mt-4">{progressText}</p>
-        <p className="sync-sub mt-2">Пожалуйста, подождите. Это может занять до 30 секунд.</p>
+        <p className="sync-sub mt-2">Это может занять до 30 секунд</p>
       </div>
     </div>
   );
 
-  // ─── SUCCESS ─────────────────────────────────────────────────────────────
+  // ─── SUCCESS ──────────────────────────────────────────────────
   if (step === 'success') return (
     <div className="screen screen-center">
       <div className="success-circle">
-        <CheckCircle2 size={52} className="success-icon" />
+        <CheckCircle2 size={44} className="success-icon" />
       </div>
-      <h2 className="success-title">Успешно!</h2>
-      <p className="success-sub mt-2">Вы вошли в систему. Окно закроется автоматически.</p>
+      <h2 className="success-title">Авторизация завершена</h2>
+      <p className="success-sub mt-2">Дневник подключён. Окно закроется автоматически.</p>
     </div>
   );
 
-  // ─── ERROR ───────────────────────────────────────────────────────────────
+  // ─── ERROR ────────────────────────────────────────────────────
   if (step === 'error') return (
     <div className="screen screen-center">
       <div className="error-circle">
-        <AlertCircle size={52} className="error-icon" />
+        <AlertCircle size={44} className="error-icon" />
       </div>
-      <h2 className="error-title">Ошибка входа</h2>
+      <h2 className="error-title">Не удалось войти</h2>
       <p className="error-sub mt-2">{errorMsg}</p>
-      <button className="btn-primary mt-6" onClick={() => setStep('login')}>
+      <button className="btn-primary mt-4" onClick={() => setStep('login')}>
         <RefreshCw size={16} /> Попробовать снова
       </button>
     </div>
