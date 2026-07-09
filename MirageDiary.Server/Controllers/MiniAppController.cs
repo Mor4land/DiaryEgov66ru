@@ -262,6 +262,7 @@ public class MiniAppController : ControllerBase
                 if (session.ErrorMessage == "Processed")
                     return Ok(new { status = "Success" });
                 
+                Console.WriteLine($"[MiniApp] Статус Success! Токен длина: {session.AccessToken.Length}, Refresh: {session.RefreshToken?.Length ?? 0}");
                 session.ErrorMessage = "Processed"; // simple flag
 
                 // Try to resolve studentId
@@ -271,9 +272,11 @@ public class MiniAppController : ControllerBase
                     var client = _httpFactory.CreateClient();
                     client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", session.AccessToken);
                     var resp = await client.GetAsync("https://dnevnik.egov66.ru/api/students");
+                    Console.WriteLine($"[MiniApp] Diary API ответ: {resp.StatusCode}");
                     if (resp.IsSuccessStatusCode)
                     {
                         var json = await resp.Content.ReadAsStringAsync();
+                        Console.WriteLine($"[MiniApp] Diary API body: {json.Substring(0, Math.Min(200, json.Length))}...");
                         using var doc = JsonDocument.Parse(json);
                         if (doc.RootElement.TryGetProperty("students", out var students) && students.GetArrayLength() > 0)
                         {
@@ -286,12 +289,14 @@ public class MiniAppController : ControllerBase
                 }
                 catch (Exception ex) { Console.WriteLine($"[MiniApp] Ошибка получения профиля: {ex.Message}"); }
 
+                Console.WriteLine($"[MiniApp] Сохраняем токен для userId={session.TelegramUserId}, studentId={studentId}");
                 await _tokenStore.SaveTokensAsync(session.TelegramUserId, new TokenData
                 {
                     AccessToken = session.AccessToken,
                     RefreshToken = session.RefreshToken,
                     StudentId = studentId
                 });
+                Console.WriteLine($"[MiniApp] Токен сохранён!");
 
                 var user = await _context.Users.FindAsync(session.TelegramUserId);
                 if (user != null)
@@ -299,6 +304,7 @@ public class MiniAppController : ControllerBase
                     user.ClassName = className;
                     user.OrgName = orgName;
                     await _context.SaveChangesAsync();
+                    Console.WriteLine($"[MiniApp] Профиль пользователя обновлён!");
                 }
 
                 // Send a telegram message
@@ -308,9 +314,11 @@ public class MiniAppController : ControllerBase
                         chatId: session.TelegramUserId,
                         text: "✅ *Авторизация успешно завершена!*\n\nТеперь бот может получать ваше расписание и оценки.",
                         parseMode: Telegram.Bot.Types.Enums.ParseMode.Markdown);
+                    Console.WriteLine($"[MiniApp] Telegram сообщение отправлено!");
                 }
                 catch (Exception ex) { Console.WriteLine($"[MiniApp] Ошибка отправки ТГ сообщения: {ex.Message}"); }
 
+                Console.WriteLine($"[MiniApp] Отправляем Success ответ клиенту.");
                 return Ok(new
                 {
                     status = "Success",

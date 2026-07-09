@@ -130,6 +130,22 @@ public class PlaywrightAuthManager
             }
 
             Console.WriteLine($"[Playwright] Текущий URL: {page.Url}");
+            Console.WriteLine($"[Playwright] Проверяем, не показан ли QR-код...");
+            
+            // Госуслуги могут показать QR-код вместо логина. Нажимаем "Логин и пароль"
+            try
+            {
+                var loginPasswordBtn = page.Locator("text=Логин и пароль");
+                if (await loginPasswordBtn.CountAsync() > 0)
+                {
+                    Console.WriteLine($"[Playwright] QR-код обнаружен! Нажимаем 'Логин и пароль'...");
+                    await loginPasswordBtn.ClickAsync();
+                    await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+                    Console.WriteLine($"[Playwright] Переключились на форму логина.");
+                }
+            }
+            catch { }
+
             Console.WriteLine($"[Playwright] Вводим логин и пароль...");
 
             var loginInput = page.Locator("input[id='login']");
