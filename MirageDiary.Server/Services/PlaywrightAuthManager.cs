@@ -97,7 +97,7 @@ public class PlaywrightAuthManager
     {
         try
         {
-            Console.WriteLine($"[Playwright] Запуск сессии для {telegramUserId}...");
+            Console.WriteLine($"[Playwright] Запуск сессии для {session.TelegramUserId}...");
             session.PlaywrightInstance = await Playwright.CreateAsync();
             Console.WriteLine($"[Playwright] Playwright создан. Запуск Chromium...");
             
