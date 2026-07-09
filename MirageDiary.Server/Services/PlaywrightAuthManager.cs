@@ -182,9 +182,9 @@ public class PlaywrightAuthManager
                     return;
                 }
 
-                if (url.Contains("dnevnik.egov66.ru"))
+                if (url.Contains("dnevnik.egov66.ru") && !url.Contains("login"))
                 {
-                    Console.WriteLine($"[Playwright] Успешный редирект в дневник!");
+                    Console.WriteLine($"[Playwright] Успешный редирект на главную дневника!");
                     await Task.Delay(2000);
                     
                     var token = await page.EvaluateAsync<string>("localStorage.getItem('access_token')");
