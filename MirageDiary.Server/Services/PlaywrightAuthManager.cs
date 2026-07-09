@@ -187,8 +187,8 @@ public class PlaywrightAuthManager
                     Console.WriteLine($"[Playwright] Успешный редирект на главную дневника!");
                     await Task.Delay(2000);
                     
-                    var token = await page.EvaluateAsync<string>("localStorage.getItem('access_token')");
-                    var refresh = await page.EvaluateAsync<string>("localStorage.getItem('refresh_token')");
+                    var token = await page.EvaluateAsync<string>("localStorage.getItem('Auth__token')");
+                    var refresh = await page.EvaluateAsync<string>("localStorage.getItem('Auth__refresh')");
 
                     if (!string.IsNullOrEmpty(token) && token.StartsWith("\"")) token = token.Trim('"');
                     if (!string.IsNullOrEmpty(refresh) && refresh.StartsWith("\"")) refresh = refresh.Trim('"');
