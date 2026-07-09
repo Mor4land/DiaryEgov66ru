@@ -103,7 +103,7 @@ public class PlaywrightAuthManager
             
             session.Browser = await session.PlaywrightInstance.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
             {
-                Headless = false,
+                Headless = true,
                 ExecutablePath = System.IO.Path.GetFullPath(System.IO.Path.Combine(Environment.CurrentDirectory, "chrome", "chrome-win64", "chrome.exe")),
                 Args = new[] { "--disable-blink-features=AutomationControlled" }
             });
