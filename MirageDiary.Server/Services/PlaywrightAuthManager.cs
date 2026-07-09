@@ -184,11 +184,17 @@ public class PlaywrightAuthManager
 
                 if (url.Contains("dnevnik.egov66.ru") && !url.Contains("login"))
                 {
-                    Console.WriteLine($"[Playwright] Успешный редирект на главную дневника!");
-                    await Task.Delay(2000);
+                    Console.WriteLine($"[Playwright] Успешный редирект на главную дневника! Ждем появления токена в localStorage (до 15 сек)...");
                     
-                    var token = await page.EvaluateAsync<string>("localStorage.getItem('Auth__token')");
-                    var refresh = await page.EvaluateAsync<string>("localStorage.getItem('Auth__refresh')");
+                    string token = null;
+                    string refresh = null;
+                    for (int j = 0; j < 15; j++)
+                    {
+                        await Task.Delay(1000);
+                        token = await page.EvaluateAsync<string>("localStorage.getItem('Auth__token')");
+                        refresh = await page.EvaluateAsync<string>("localStorage.getItem('Auth__refresh')");
+                        if (!string.IsNullOrEmpty(token) && token != "null") break;
+                    }
 
                     if (!string.IsNullOrEmpty(token) && token.StartsWith("\"")) token = token.Trim('"');
                     if (!string.IsNullOrEmpty(refresh) && refresh.StartsWith("\"")) refresh = refresh.Trim('"');
