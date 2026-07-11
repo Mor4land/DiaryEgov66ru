@@ -406,8 +406,8 @@ export default function App() {
             </div>
           </div>
 
-          <div className="screen-body glass-card backdrop-filter p-6">
-            <div className="form-fields">
+          <div className="screen-body p-4">
+            <div className="form-fields--grouped">
               <div className="field-floating">
                 <input
                   type="text"
@@ -421,9 +421,6 @@ export default function App() {
                 <label className="floating-label">
                   Телефон, Email или СНИЛС
                 </label>
-                <svg className="input-glow-border">
-                  <rect pathLength={1} />
-                </svg>
               </div>
 
               <div className="field-floating">
@@ -438,10 +435,11 @@ export default function App() {
                 <label className="floating-label">
                   Пароль
                 </label>
-                <svg className="input-glow-border">
-                  <rect pathLength={1} />
-                </svg>
               </div>
+
+              <svg className="input-glow-border">
+                <rect pathLength={1} />
+              </svg>
             </div>
           </div>
 

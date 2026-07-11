@@ -119,7 +119,7 @@ body {
   width: 100%;
   max-width: 400px;
   margin: 0 auto;
-  padding: var(--space-xl) var(--space-lg) calc(var(--space-xl) + env(safe-area-inset-bottom, 16px));
+  padding: var(--space-md) var(--space-md) calc(var(--space-md) + env(safe-area-inset-bottom, 12px));
   box-sizing: border-box;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
@@ -139,8 +139,8 @@ body {
   flex-direction: column;
   align-items: center;
   text-align: center;
-  gap: var(--space-md);
-  margin-bottom: var(--space-xl);
+  gap: var(--space-xs);
+  margin-bottom: var(--space-md);
   width: 100%;
 }
 
@@ -148,8 +148,9 @@ body {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: var(--space-lg);
+  gap: var(--space-md);
   width: 100%;
+  justify-content: flex-start;
 }
 
 .screen-footer {
@@ -157,7 +158,8 @@ body {
   flex-direction: column;
   gap: var(--space-sm);
   width: 100%;
-  margin-top: var(--space-xl);
+  margin-top: auto; /* Push to bottom adaptively without forcing overflow */
+  padding-top: var(--space-md);
 }
 
 .status-wrapper {
@@ -297,6 +299,43 @@ body {
   width: 100%;
 }
 
+/* iOS/Telegram style stacked grouped inputs */
+.form-fields--grouped {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-default);
+  border-radius: 14px;
+  overflow: hidden;
+  position: relative;
+}
+
+.form-fields--grouped .field-floating {
+  border-bottom: 1px solid var(--border-default);
+  position: relative;
+}
+
+.form-fields--grouped .field-floating:last-child {
+  border-bottom: none;
+}
+
+.form-fields--grouped .field-input,
+.form-fields--grouped .input-enhanced {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  height: 48px;
+}
+
+/* Disable default focus border for grouped inputs and rely on the custom SVG border overlay */
+.form-fields--grouped .field-input:focus,
+.form-fields--grouped .input-enhanced:focus {
+  outline: none;
+  border: none;
+  background: rgba(255, 255, 255, 0.01);
+}
+
 .status-text-group {
   display: flex;
   flex-direction: column;
@@ -334,14 +373,14 @@ body {
 
 .field-floating .field-input,
 .field-floating .input-enhanced {
-  height: 52px;
-  padding: 20px 16px 6px 16px;
-  border-radius: 14px;
+  height: 46px;
+  padding: 16px 14px 4px 14px;
+  border-radius: 12px;
 }
 
 .field-floating .floating-label {
   position: absolute;
-  left: 16px;
+  left: 14px;
   top: 50%;
   transform: translateY(-50%);
   font-size: 13px;
@@ -355,8 +394,8 @@ body {
 .field-floating .field-input:not(:placeholder-shown) ~ .floating-label,
 .field-floating .input-enhanced:focus ~ .floating-label,
 .field-floating .input-enhanced:not(:placeholder-shown) ~ .floating-label {
-  top: 14px;
-  font-size: 9px;
+  top: 12px;
+  font-size: 8px;
   font-weight: 600;
   color: var(--fg-muted);
   text-transform: uppercase;
@@ -379,8 +418,8 @@ body {
   y: 1px;
   width: calc(100% - 2px);
   height: calc(100% - 2px);
-  rx: 13px;
-  ry: 13px;
+  rx: 11px;
+  ry: 11px;
   stroke: var(--fg-primary);
   stroke-width: 1.5px;
   fill: none;
@@ -393,9 +432,19 @@ body {
 
 .field-floating .field-input:focus ~ .input-glow-border rect,
 .field-floating .input-enhanced:focus ~ .input-glow-border rect,
-.field-input--code:focus ~ .input-glow-border rect {
+.field-input--code:focus ~ .input-glow-border rect,
+.form-fields--grouped:focus-within .input-glow-border rect {
   stroke-dasharray: 1 0;
   stroke-dashoffset: 0.5;
+}
+
+.form-fields--grouped:focus-within {
+  border-color: transparent;
+}
+
+.form-fields--grouped .input-glow-border rect {
+  rx: 13px;
+  ry: 13px;
 }
 
 .field-input::placeholder, .input-enhanced::placeholder {
