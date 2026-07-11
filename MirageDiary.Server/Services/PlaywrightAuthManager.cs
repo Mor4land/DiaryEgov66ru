@@ -189,11 +189,45 @@ public class PlaywrightAuthManager
                 }
                 
                 // 2FA / OTP
-                if (pageText.Contains("Введите код") || url.Contains("otp") || url.Contains("login/mfa"))
+                if (pageText.Contains("Введите код") || pageText.Contains("СМС") || pageText.Contains("Подтверждение входа") || url.Contains("otp") || url.Contains("login/mfa"))
                 {
                     Console.WriteLine("[Playwright] Обнаружено окно 2FA!");
                     session.Status = AuthStatus.RequiresOtp;
-                    break;
+                    
+                    session.UserInputTcs = new TaskCompletionSource<string>();
+                    // Wait for the user to submit OTP via MiniApp
+                    var otpCode = await session.UserInputTcs.Task;
+                    
+                    Console.WriteLine($"[Playwright] Получен OTP от пользователя: {otpCode}");
+                    
+                    // Reset state
+                    session.Status = AuthStatus.InProgress;
+                    session.UserInputTcs = null;
+
+                    // Try to enter OTP. Gosuslugi usually autofocuses the field. 
+                    // We can also try to find the input if needed.
+                    try 
+                    {
+                        var input = page.Locator("input[id='otp'], input[name='otp'], input[type='tel'], input[type='text'], input[type='number']").First;
+                        await input.FillAsync(otpCode);
+                    }
+                    catch 
+                    {
+                        // Fallback: just type it and hope the field was focused
+                        await page.Keyboard.TypeAsync(otpCode);
+                    }
+                    
+                    await Task.Delay(500);
+                    await page.Keyboard.PressAsync("Enter");
+                    
+                    Console.WriteLine("[Playwright] OTP отправлен. Продолжаем ожидание...");
+                    continue;
+                }
+                
+                // Logging for debug
+                if (i % 5 == 0)
+                {
+                    Console.WriteLine($"[Playwright DEBUG] PageText: {pageText.Substring(0, Math.Min(100, pageText.Length)).Replace("\n", " ")}");
                 }
 
                 // Check if we're on the diary main page (NOT /login)

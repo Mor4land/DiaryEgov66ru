@@ -1,217 +1,135 @@
-:root {
-  --color-primary: #92400E;
-  --color-secondary: #A16207;
-  --color-accent: #6366F1;
-  --color-bg-deep: #0B0F19;
-  --color-bg-card: rgba(20, 25, 38, 0.55);
-  --color-text-primary: #ffffff;
-  --color-text-muted: #94A3B8;
-  --color-border: rgba(255, 255, 255, 0.08);
-  --color-error: #EF4444;
-  --color-success: #10B981;
-}
+/* Base styles and CSS resets */
 
-* {
+/* CSS Reset for consistent baseline */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
   margin: 0;
   padding: 0;
+}
+
+/* Improve text rendering and accessibility */
+html {
+  font-size: 16px;
+  scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%; /* Prevent font scaling in landscape */
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Ensure body has proper baseline */
+body {
+  margin: 0;
+  min-width: 320px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* Improve form element consistency */
+button,
+input,
+optgroup,
+select,
+textarea {
+  font-family: inherit;
+  font-size: 100%;
+  line-height: 1.15;
+  margin: 0;
+}
+
+/* Remove inner padding and border in Firefox 4+ */
+button::-moz-focus-inner,
+[type="button"]::-moz-focus-inner,
+[type="reset"]::-moz-focus-inner,
+[type="submit"]::-moz-focus-inner {
+  border-style: none;
+  padding: 0;
+}
+
+/* Restore focus styles overridden by the above */
+button:-moz-focusring,
+[type="button"]:-moz-focusring,
+[type="reset"]:-moz-focusring,
+[type="submit"]:-moz-focusring {
+  outline: 1px dotted ButtonText;
+}
+
+/* Corrected cursor for disabled elements */
+button:disabled,
+[disabled] {
+  cursor: default;
+}
+
+/* Remove infinite scroll in IE/Edge */
+textarea {
+  overflow: auto;
+}
+
+/* Correct textarea inheritance in Edge and IE */
+input::-ms-reveal,
+input::-ms-clear {
+  display: none;
+}
+
+/* Remove inner padding in Chrome/Safari */
+input[type="search"]::-webkit-search-decoration {
+  display: none;
+}
+
+/* Ensure consistent box sizing */
+html {
   box-sizing: border-box;
 }
 
-body {
-  font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-  background-color: var(--color-bg-deep);
-  background-image: url('/bg.png');
-  background-size: cover;
-  background-position: center;
-  background-attachment: fixed;
-  color: var(--color-text-primary);
-  min-height: 100vh;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  overflow: hidden;
-  position: relative;
+/* Ensure images don't overflow their containers */
+img,
+picture,
+video,
+canvas,
+svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
 }
 
-/* --- MAIN CONTAINER --- */
-#root {
-  width: 100%;
-  max-width: 400px;
-  padding: 24px;
-  position: relative;
-  z-index: 1;
-}
-
-/* --- GLASS CARD --- */
-.glass-card {
-  background: var(--color-bg-card);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  border: 1px solid var(--color-border);
-  border-radius: 24px;
-  padding: 32px 24px;
-  box-shadow: 0 24px 40px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1);
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-  animation: slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) backwards;
-}
-
-@keyframes slideUp {
-  from { opacity: 0; transform: translateY(20px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-/* --- TYPOGRAPHY --- */
-.header-container {
-  text-align: center;
-  margin-bottom: 8px;
-}
-
-.title {
-  font-size: 28px;
-  font-weight: 700;
-  letter-spacing: -0.5px;
-  margin-bottom: 8px;
-  background: linear-gradient(to right, #fff, var(--color-text-muted));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
-
-.subtitle {
-  font-size: 14px;
-  color: var(--color-text-muted);
-  font-weight: 400;
-}
-
-/* --- FORM ELEMENTS --- */
-.form-group {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.input-wrapper {
-  position: relative;
-  display: flex;
-  align-items: center;
-}
-
-.input-icon {
-  position: absolute;
-  left: 16px;
-  color: var(--color-text-muted);
-  transition: color 0.3s ease;
-  width: 20px;
-  height: 20px;
-}
-
-.glass-input {
-  width: 100%;
-  background: rgba(0, 0, 0, 0.2);
-  border: 1px solid var(--color-border);
-  border-radius: 16px;
-  padding: 16px 16px 16px 48px;
-  color: #fff;
+/* Ensure form elements respect font inheritance */
+button,
+input,
+select,
+optgroup,
+textarea {
+  margin: 0;
   font-family: inherit;
-  font-size: 15px;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  outline: none;
+  font-size: 100%;
 }
 
-.glass-input::placeholder {
-  color: var(--color-text-muted);
+/* Improve textarea resize */
+textarea {
+  resize: vertical;
 }
 
-.glass-input:focus {
-  background: rgba(0, 0, 0, 0.4);
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.15);
-}
-
-.glass-input:focus + .input-icon {
-  color: var(--color-accent);
-}
-
-/* --- BUTTONS --- */
-.btn-primary {
-  background: linear-gradient(135deg, var(--color-accent) 0%, #4338ca 100%);
-  color: #fff;
-  border: none;
-  border-radius: 16px;
-  padding: 16px;
-  font-size: 16px;
-  font-weight: 600;
-  font-family: inherit;
+/* Consistent cursor for clickable elements */
+button,
+[role="button"],
+label[for],
+select,
+input[type="checkbox"],
+input[type="radio"] {
   cursor: pointer;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 8px;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 8px 20px rgba(99, 102, 241, 0.3);
-  position: relative;
-  overflow: hidden;
 }
 
-.btn-primary:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 12px 24px rgba(99, 102, 241, 0.4);
+/* Prevent sub-pixel rendering issues */
+* {
+  image-rendering: -webkit-optimize-contrast;
 }
 
-.btn-primary:active:not(:disabled) {
-  transform: translateY(0);
-}
-
-.btn-primary:disabled {
-  opacity: 0.7;
-  cursor: not-allowed;
-  transform: none;
-}
-
-.loader {
-  border: 2px solid rgba(255, 255, 255, 0.2);
-  border-top-color: #fff;
-  border-radius: 50%;
-  width: 20px;
-  height: 20px;
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-/* --- STATUS ALERTS --- */
-.status-alert {
-  padding: 14px 16px;
-  border-radius: 12px;
-  font-size: 14px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  animation: fadeIn 0.4s ease forwards;
-}
-
-.status-error {
-  background: rgba(239, 68, 68, 0.1);
-  border: 1px solid rgba(239, 68, 68, 0.2);
-  color: #FCA5A5;
-}
-
-.status-success {
-  background: rgba(16, 185, 129, 0.1);
-  border: 1px solid rgba(16, 185, 129, 0.2);
-  color: #6EE7B7;
-}
-
-.status-icon {
-  flex-shrink: 0;
-  width: 18px;
-  height: 18px;
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(-10px); }
-  to { opacity: 1; transform: translateY(0); }
+/* Media query for reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

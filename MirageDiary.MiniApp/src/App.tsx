@@ -1,29 +1,117 @@
 import { useState, useEffect } from 'react';
-import { Shield, CheckCircle2, AlertCircle, ChevronRight, RefreshCw, Lock, Phone, Sparkles } from 'lucide-react';
+import { AnimatePresence, motion } from 'framer-motion';
+import {
+  Fingerprint,
+  ShieldCheck,
+  Send,
+  ArrowRight,
+} from 'lucide-react';
+
+declare global {
+  interface Window {
+    Telegram?: {
+      WebApp?: {
+        ready: () => void;
+        expand: () => void;
+        close: () => void;
+        initDataUnsafe?: {
+          user?: { id: number; first_name: string };
+        };
+      };
+    };
+  }
+}
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:5000';
 
-type Step = 'loading' | 'welcome' | 'login' | 'polling' | 'otp' | 'captcha' | 'success' | 'error' | 'already_authorized';
+type Step =
+  | 'loading'
+  | 'welcome'
+  | 'login'
+  | 'polling'
+  | 'otp'
+  | 'captcha'
+  | 'success'
+  | 'error'
+  | 'already_authorized';
+
+const screenVariants = {
+  initial: (direction: 'forward' | 'backward') => ({
+    x: direction === 'forward' ? '100%' : '-100%',
+    rotateY: direction === 'forward' ? 25 : -25,
+    scale: 0.92,
+    opacity: 0,
+  }),
+  animate: {
+    x: 0,
+    rotateY: 0,
+    scale: 1,
+    opacity: 1,
+    transition: {
+      type: 'spring' as const,
+      stiffness: 280,
+      damping: 26,
+      mass: 0.85
+    },
+  },
+  exit: (direction: 'forward' | 'backward') => ({
+    x: direction === 'forward' ? '-100%' : '100%',
+    rotateY: direction === 'forward' ? -25 : 25,
+    scale: 0.92,
+    opacity: 0,
+    transition: {
+      type: 'spring' as const,
+      stiffness: 280,
+      damping: 26,
+      mass: 0.85
+    },
+  }),
+};
+
+// Framer Motion Stagger Animation Variants for Welcome screen
+const staggerContainer = {
+  animate: {
+    transition: {
+      staggerChildren: 0.06,
+    },
+  },
+};
+
+const staggerItem = {
+  initial: { y: 15, opacity: 0 },
+  animate: {
+    y: 0,
+    opacity: 1,
+    transition: {
+      type: 'spring' as const,
+      stiffness: 300,
+      damping: 24,
+    },
+  },
+};
+
+const buttonSpring = {
+  hover: { scale: 1.01, y: -1 },
+  tap: { scale: 0.975 },
+};
 
 export default function App() {
   const [step, setStep] = useState<Step>('loading');
+  const [direction, setDirection] = useState<'forward' | 'backward'>('forward');
   const [tgUserId, setTgUserId] = useState('');
   const [tgFirstName, setTgFirstName] = useState('');
-
   const [login, setLogin] = useState('');
   const [password, setPassword] = useState('');
-  
   const [sessionId, setSessionId] = useState('');
   const [userInput, setUserInput] = useState('');
   const [captchaImg, setCaptchaImg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
-
-  const [progressPercent, setProgressPercent] = useState(0);
   const [progressText, setProgressText] = useState('Открываем безопасное соединение...');
+  const [progressStep, setProgressStep] = useState(1);
 
   useEffect(() => {
     try {
-      const tg = (window as any).Telegram?.WebApp;
+      const tg = window.Telegram?.WebApp;
       if (tg) {
         tg.ready();
         tg.expand();
@@ -34,17 +122,18 @@ export default function App() {
         setTgUserId('123456789');
         setTgFirstName('Тест');
       }
-    } catch { setTgUserId('123456789'); setTgFirstName('Тест'); }
+    } catch {
+      setTgUserId('123456789');
+      setTgFirstName('Тест');
+    }
   }, []);
 
-  // Check auth on start
   useEffect(() => {
     if (!tgUserId) return;
-    
     const checkAuth = async () => {
       try {
         const res = await fetch(`${SERVER_URL}/api/miniapp/auth/check/${tgUserId}`, {
-          headers: { 'ngrok-skip-browser-warning': 'true' }
+          headers: { 'ngrok-skip-browser-warning': 'true' },
         });
         if (res.ok) {
           const data = await res.json();
@@ -53,300 +142,591 @@ export default function App() {
             return;
           }
         }
-      } catch (e) { console.error('Auth check error:', e); }
+      } catch (e: unknown) {
+        console.error(e);
+      }
       setStep('welcome');
+      setProgressStep(1);
     };
     checkAuth();
   }, [tgUserId]);
 
-  // Polling logic
   useEffect(() => {
     if (step !== 'polling' || !sessionId) return;
-    
-    let percent = 0;
-    const progressInterval = setInterval(() => {
-      percent += 1;
-      if (percent > 95) percent = 95;
-      setProgressPercent(percent);
 
-      if (percent === 3) setProgressText('Запускаем защищённый браузер...');
-      else if (percent === 8) setProgressText('Открываем страницу авторизации...');
-      else if (percent === 15) setProgressText('Вводим данные для входа...');
-      else if (percent === 25) setProgressText('Ожидаем ответ от Госуслуг...');
-      else if (percent === 40) setProgressText('Проверяем двухфакторную защиту...');
-      else if (percent === 55) setProgressText('Подключаемся к Дневнику...');
-      else if (percent === 70) setProgressText('Получаем токен доступа...');
-      else if (percent === 85) setProgressText('Финализируем авторизацию...');
+    let pct = 0;
+    const progTimer = setInterval(() => {
+      pct = Math.min(pct + 1, 95);
+      if (pct === 3) setProgressText('Запускаем защищённый браузер...');
+      else if (pct === 8) setProgressText('Открываем страницу авторизации...');
+      else if (pct === 15) setProgressText('Вводим данные для входа...');
+      else if (pct === 25) setProgressText('Ожидаем ответ от Госуслуг...');
+      else if (pct === 40) setProgressText('Проверяем двухфакторную защиту...');
+      else if (pct === 55) setProgressText('Подключаемся к Дневнику...');
+      else if (pct === 70) setProgressText('Получаем токен доступа...');
+      else if (pct === 85) setProgressText('Финализируем авторизацию...');
     }, 300);
-    
-    const interval = setInterval(async () => {
+
+    const pollTimer = setInterval(async () => {
       try {
         const res = await fetch(`${SERVER_URL}/api/miniapp/auth/status/${sessionId}`, {
-          headers: { 'ngrok-skip-browser-warning': 'true' }
+          headers: { 'ngrok-skip-browser-warning': 'true' },
         });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.status === 'Success') {
-            clearInterval(interval);
-            clearInterval(progressInterval);
-            setProgressPercent(100);
-            setProgressText('Готово!');
-            setTimeout(() => setStep('success'), 600);
-            setTimeout(() => (window as any).Telegram?.WebApp?.close?.(), 4000);
-          } else if (data.status === 'RequiresOtp') {
-            clearInterval(interval);
-            clearInterval(progressInterval);
-            setUserInput('');
-            setStep('otp');
-          } else if (data.status === 'RequiresCaptcha') {
-            clearInterval(interval);
-            clearInterval(progressInterval);
-            setCaptchaImg(data.captchaImage);
-            setUserInput('');
-            setStep('captcha');
-          } else if (data.status === 'Failed' || data.status === 'Expired') {
-            clearInterval(interval);
-            clearInterval(progressInterval);
-            setErrorMsg(data.errorMessage || 'Сессия истекла или произошла ошибка');
-            setStep('error');
-          }
+        if (!res.ok) return;
+        const data = await res.json();
+        const clear = () => {
+          clearInterval(pollTimer);
+          clearInterval(progTimer);
+        };
+
+        if (data.status === 'Success') {
+          clear();
+          setProgressText('Готово!');
+          setProgressStep(3);
+          setTimeout(() => {
+            setDirection('forward');
+            setStep('success');
+          }, 600);
+          setTimeout(() => window.Telegram?.WebApp?.close?.(), 4000);
+        } else if (data.status === 'RequiresOtp') {
+          clear();
+          setUserInput('');
+          setProgressStep(2);
+          setDirection('forward');
+          setStep('otp');
+        } else if (data.status === 'RequiresCaptcha') {
+          clear();
+          setCaptchaImg(data.captchaImage);
+          setUserInput('');
+          setProgressStep(2);
+          setDirection('forward');
+          setStep('captcha');
+        } else if (data.status === 'Failed' || data.status === 'Expired') {
+          clear();
+          setErrorMsg(data.errorMessage || 'Сессия истекла или произошла ошибка');
+          setDirection('forward');
+          setStep('error');
         }
-      } catch (e: any) { 
-        console.error('Poll error:', e);
+      } catch (e: unknown) {
+        console.error(e);
       }
     }, 4000);
-    
+
     return () => {
-      clearInterval(interval);
-      clearInterval(progressInterval);
+      clearInterval(pollTimer);
+      clearInterval(progTimer);
     };
   }, [step, sessionId]);
 
   const handleStartAuth = async () => {
     if (!login || !password) return;
-    setProgressPercent(0);
     setProgressText('Открываем безопасное соединение...');
+    setProgressStep(1);
+    setDirection('forward');
     setStep('polling');
     setErrorMsg('');
     try {
       const res = await fetch(`${SERVER_URL}/api/miniapp/auth/start`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
-        body: JSON.stringify({ TelegramUserId: tgUserId, Login: login, Password: password }),
+        headers: {
+          'Content-Type': 'application/json',
+          'ngrok-skip-browser-warning': 'true',
+        },
+        body: JSON.stringify({
+          TelegramUserId: tgUserId,
+          Login: login,
+          Password: password,
+        }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setSessionId(data.sessionId);
-    } catch (e: any) {
-      setErrorMsg('Не удалось связаться с сервером. ' + e.message);
+    } catch (e: unknown) {
+      setErrorMsg(
+        'Не удалось связаться с сервером. ' +
+          (e instanceof Error ? e.message : String(e))
+      );
+      setDirection('forward');
       setStep('error');
     }
   };
 
   const handleSubmitInput = async () => {
     if (!userInput) return;
-    setProgressPercent(45);
     setProgressText('Проверяем введённый код...');
+    setProgressStep(2);
+    setDirection('forward');
     setStep('polling');
     try {
       const res = await fetch(`${SERVER_URL}/api/miniapp/auth/submit-input`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+        headers: {
+          'Content-Type': 'application/json',
+          'ngrok-skip-browser-warning': 'true',
+        },
         body: JSON.stringify({ SessionId: sessionId, Input: userInput }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    } catch (e: any) {
-      setErrorMsg('Ошибка отправки кода. ' + e.message);
+    } catch (e: unknown) {
+      setErrorMsg(
+        'Ошибка отправки кода. ' + (e instanceof Error ? e.message : String(e))
+      );
+      setDirection('forward');
       setStep('error');
     }
   };
 
-  // ─── WELCOME ──────────────────────────────────────────────────
-  if (step === 'welcome') return (
-    <div className="screen">
-      <div className="logo-wrap">
-        <div className="logo-circle"><Sparkles size={30} className="logo-icon" /></div>
-        <h1 className="app-title">Mirage Diary</h1>
-        <p className="app-sub">
-          {tgFirstName ? `Привет, ${tgFirstName}! ` : ''}
-          Подключите электронный дневник для получения расписания и оценок.
-        </p>
-      </div>
+  const renderProgressHeader = () => {
+    if (step === 'welcome' || step === 'loading') return null;
+    
+    const getFillWidth = (seg: number) => {
+      if (seg <= progressStep) return '100%';
+      return '0%';
+    };
 
-      <div className="steps-card">
-        <div className="step-row"><span className="step-badge">1</span><span>Введите логин и пароль от Госуслуг</span></div>
-        <div className="step-row"><span className="step-badge">2</span><span>Мы безопасно получим токен дневника</span></div>
-        <div className="step-row"><span className="step-badge">3</span><span>Ваш пароль нигде не сохраняется</span></div>
+    return (
+      <div className="segmented-progress">
+        {[1, 2, 3].map((seg) => (
+          <div key={seg} className="progress-segment">
+            <motion.div
+              className="progress-segment-fill"
+              initial={{ width: '0%' }}
+              animate={{ width: getFillWidth(seg) }}
+              transition={{ duration: 0.35, ease: 'easeInOut' }}
+            />
+          </div>
+        ))}
       </div>
+    );
+  };
 
-      <button className="btn-primary" onClick={() => setStep('login')}>
-        Начать <ChevronRight size={18} />
-      </button>
-    </div>
+  return (
+    <AnimatePresence mode="popLayout" custom={direction}>
+      {step === 'loading' && (
+        <motion.div
+          key="loading"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="screen screen--center"
+        >
+          <div className="spinner" />
+        </motion.div>
+      )}
+
+      {step === 'welcome' && (
+        <motion.div
+          key="welcome"
+          custom={direction}
+          variants={screenVariants}
+          initial="initial"
+          animate="animate"
+          exit="exit"
+          className="screen"
+        >
+          <div className="screen-content">
+            <div className="brand">
+              <h1 className="brand-title">Mirage Diary</h1>
+              <p className="brand-sub">
+                {tgFirstName ? `Привет, ${tgFirstName}! ` : ''}
+                Подключите электронный дневник, чтобы получать расписание и оценки прямо в Telegram.
+              </p>
+            </div>
+          </div>
+
+          <motion.div
+            variants={staggerContainer}
+            initial="initial"
+            animate="animate"
+            className="screen-body glass-card backdrop-filter p-6"
+          >
+            <motion.div variants={staggerItem} className="feature-item">
+              <div className="feature-icon">
+                <Fingerprint size={18} strokeWidth={2} />
+              </div>
+              <div className="feature-text">
+                <h3 className="feature-title">Безопасный вход</h3>
+                <p className="feature-desc">Авторизация происходит через официальный портал Госуслуг</p>
+              </div>
+            </motion.div>
+
+            <motion.div variants={staggerItem} className="feature-item">
+              <div className="feature-icon">
+                <ShieldCheck size={18} strokeWidth={2} />
+              </div>
+              <div className="feature-text">
+                <h3 className="feature-title">Защита данных</h3>
+                <p className="feature-desc">Ваши пароли не сохраняются на сервере и передаются в зашифрованном виде</p>
+              </div>
+            </motion.div>
+
+            <motion.div variants={staggerItem} className="feature-item">
+              <div className="feature-icon">
+                <Send size={18} strokeWidth={2} />
+              </div>
+              <div className="feature-text">
+                <h3 className="feature-title">Удобство в Telegram</h3>
+                <p className="feature-desc">Оценки, домашнее задание и расписание всегда под рукой в один клик</p>
+              </div>
+            </motion.div>
+          </motion.div>
+
+          <div className="screen-footer">
+            <motion.button
+              whileHover={buttonSpring.hover}
+              whileTap={buttonSpring.tap}
+              className="btn btn--primary btn-enhanced"
+              onClick={() => {
+                setDirection('forward');
+                setStep('login');
+              }}
+            >
+             Продолжить
+              <ArrowRight size={14} strokeWidth={2.5} className="ml-2 h-4 w-4" />
+            </motion.button>
+          </div>
+        </motion.div>
+      )}
+
+      {step === 'login' && (
+        <motion.div
+          key="login"
+          custom={direction}
+          variants={screenVariants}
+          initial="initial"
+          animate="animate"
+          exit="exit"
+          className="screen"
+        >
+          <div className="screen-content">
+            {renderProgressHeader()}
+            <div className="brand">
+              <h1 className="brand-title">Авторизация</h1>
+              <p className="brand-sub">Введите данные от аккаунта Госуслуг для безопасной синхронизации</p>
+            </div>
+          </div>
+
+          <div className="screen-body glass-card backdrop-filter p-6">
+            <div className="form-fields">
+              <div className="field-floating">
+                <input
+                  type="text"
+                  className="field-input input-enhanced"
+                  value={login}
+                  onChange={(e) => setLogin(e.target.value)}
+                  placeholder=" "
+                  autoComplete="username"
+                  autoFocus
+                />
+                <label className="floating-label">
+                  Телефон, Email или СНИЛС
+                </label>
+                <svg className="input-glow-border">
+                  <rect pathLength={1} />
+                </svg>
+              </div>
+
+              <div className="field-floating">
+                <input
+                  type="password"
+                  className="field-input input-enhanced"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder=" "
+                  autoComplete="current-password"
+                />
+                <label className="floating-label">
+                  Пароль
+                </label>
+                <svg className="input-glow-border">
+                  <rect pathLength={1} />
+                </svg>
+              </div>
+            </div>
+          </div>
+
+          <div className="screen-footer">
+            <motion.button
+              whileHover={buttonSpring.hover}
+              whileTap={buttonSpring.tap}
+              className="btn btn--primary btn-enhanced"
+              onClick={handleStartAuth}
+              disabled={!login || !password}
+            >
+              Войти
+              <ArrowRight size={14} strokeWidth={2.5} className="ml-2 h-4 w-4" />
+            </motion.button>
+            <motion.button
+              whileHover={buttonSpring.hover}
+              whileTap={buttonSpring.tap}
+              className="btn btn--ghost btn-enhanced"
+              onClick={() => {
+                setDirection('backward');
+                setStep('welcome');
+              }}
+            >
+              Назад
+            </motion.button>
+          </div>
+        </motion.div>
+      )}
+
+      {step === 'otp' && (
+        <motion.div
+          key="otp"
+          custom={direction}
+          variants={screenVariants}
+          initial="initial"
+          animate="animate"
+          exit="exit"
+          className="screen"
+        >
+          <div className="screen-content">
+            {renderProgressHeader()}
+            <div className="brand">
+              <h1 className="brand-title">Двухфакторная защита</h1>
+              <p className="brand-sub">Введите код подтверждения из СМС или приложения «Госключ»</p>
+            </div>
+          </div>
+
+          <div className="screen-body glass-card backdrop-filter p-6">
+            <div className="field" style={{ position: 'relative' }}>
+              <input
+                type="text"
+                className="field-input field-input--code"
+                value={userInput}
+                onChange={(e) => setUserInput(e.target.value)}
+                placeholder="••••••"
+                maxLength={6}
+                autoFocus
+                inputMode="numeric"
+              />
+              <svg className="input-glow-border">
+                <rect pathLength={1} />
+              </svg>
+            </div>
+          </div>
+
+          <div className="screen-footer">
+            <motion.button
+              whileHover={buttonSpring.hover}
+              whileTap={buttonSpring.tap}
+              className="btn btn--primary btn-enhanced"
+              onClick={handleSubmitInput}
+              disabled={userInput.length < 4}
+            >
+              Подтвердить
+            </motion.button>
+          </div>
+        </motion.div>
+      )}
+
+      {step === 'captcha' && (
+        <motion.div
+          key="captcha"
+          custom={direction}
+          variants={screenVariants}
+          initial="initial"
+          animate="animate"
+          exit="exit"
+          className="screen"
+        >
+          <div className="screen-content">
+            {renderProgressHeader()}
+            <div className="brand">
+              <h1 className="brand-title">Проверка безопасности</h1>
+              <p className="brand-sub">Введите символы, изображённые на картинке ниже</p>
+            </div>
+          </div>
+
+          <div className="screen-body glass-card backdrop-filter p-6">
+            <div className="captcha-wrap">
+              {captchaImg && (
+                <img
+                  src={`data:image/jpeg;base64,${captchaImg}`}
+                  alt="Captcha"
+                  className="captcha-img"
+                />
+              )}
+            </div>
+
+            <div className="field" style={{ position: 'relative' }}>
+              <input
+                type="text"
+                className="field-input field-input--code"
+                value={userInput}
+                onChange={(e) => setUserInput(e.target.value)}
+                placeholder="Введите код"
+                autoFocus
+              />
+              <svg className="input-glow-border">
+                <rect pathLength={1} />
+              </svg>
+            </div>
+          </div>
+
+          <div className="screen-footer">
+            <motion.button
+              whileHover={buttonSpring.hover}
+              whileTap={buttonSpring.tap}
+              className="btn btn--primary btn-enhanced"
+              onClick={handleSubmitInput}
+              disabled={!userInput}
+            >
+              Продолжить
+            </motion.button>
+          </div>
+        </motion.div>
+      )}
+
+      {step === 'polling' && (
+        <motion.div
+          key="polling"
+          custom={direction}
+          initial="initial"
+          animate="animate"
+          exit="exit"
+          variants={screenVariants}
+          className="screen screen--center"
+        >
+          <div className="status-wrapper">
+            {renderProgressHeader()}
+            <div className="spinner" />
+            <div className="status-text-group">
+              <p className="progress-title">{progressText}</p>
+              <p className="progress-hint">{progressText.includes('Готово') ? '' : 'Это может занять до 30 секунд'}</p>
+            </div>
+          </div>
+        </motion.div>
+      )}
+
+      {step === 'success' && (
+        <motion.div
+          key="success"
+          custom={direction}
+          initial="initial"
+          animate="animate"
+          exit={{ opacity: 0 }}
+          variants={screenVariants}
+          className="screen screen--center"
+        >
+          <div className="status-wrapper">
+            {renderProgressHeader()}
+            <div className="status-icon status-icon--success">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
+                <motion.path
+                  d="M20 6L9 17L4 12"
+                  initial={{ pathLength: 0 }}
+                  animate={{ pathLength: 1 }}
+                  transition={{ duration: 0.45, ease: "easeOut", delay: 0.15 }}
+                />
+              </svg>
+            </div>
+            <div className="status-text-group">
+              <p className="status-title">Дневник подключён</p>
+              <p className="status-sub">Авторизация успешно завершена. Окно закроется автоматически через несколько секунд.</p>
+            </div>
+          </div>
+        </motion.div>
+      )}
+
+      {step === 'error' && (
+        <motion.div
+          key="error"
+          custom={direction}
+          initial="initial"
+          animate="animate"
+          exit="exit"
+          variants={screenVariants}
+          className="screen screen--center"
+        >
+          <div className="status-wrapper">
+            <div className="status-icon status-icon--error">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
+                <motion.line
+                  x1="18" y1="6" x2="6" y2="18"
+                  initial={{ pathLength: 0 }}
+                  animate={{ pathLength: 1 }}
+                  transition={{ duration: 0.35, ease: "easeOut", delay: 0.1 }}
+                />
+                <motion.line
+                  x1="6" y1="6" x2="18" y2="18"
+                  initial={{ pathLength: 0 }}
+                  animate={{ pathLength: 1 }}
+                  transition={{ duration: 0.35, ease: "easeOut", delay: 0.2 }}
+                />
+              </svg>
+            </div>
+            <div className="status-text-group">
+              <p className="status-title">Ошибка входа</p>
+              <p className="status-sub">{errorMsg}</p>
+            </div>
+            <div className="status-actions">
+              <motion.button
+                whileHover={buttonSpring.hover}
+                whileTap={buttonSpring.tap}
+                className="btn btn--primary btn-enhanced"
+                onClick={() => {
+                  setDirection('backward');
+                  setStep('login');
+                }}
+              >
+                Попробовать снова
+              </motion.button>
+            </div>
+          </div>
+        </motion.div>
+      )}
+
+      {step === 'already_authorized' && (
+        <motion.div
+          key="already_authorized"
+          custom={direction}
+          initial="initial"
+          animate="animate"
+          exit="exit"
+          variants={screenVariants}
+          className="screen screen--center"
+        >
+          <div className="status-wrapper">
+            <div className="status-icon status-icon--success">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
+                <motion.path
+                  d="M20 6L9 17L4 12"
+                  initial={{ pathLength: 0 }}
+                  animate={{ pathLength: 1 }}
+                  transition={{ duration: 0.45, ease: "easeOut", delay: 0.15 }}
+                />
+              </svg>
+            </div>
+            <div className="status-text-group">
+              <p className="status-title">Вы уже авторизованы</p>
+              <p className="status-sub">Электронный дневник успешно подключён. Вы можете вернуться в Telegram.</p>
+            </div>
+            <div className="status-actions">
+              <motion.button
+                whileHover={buttonSpring.hover}
+                whileTap={buttonSpring.tap}
+                className="btn btn--primary btn-enhanced"
+                onClick={() => window.Telegram?.WebApp?.close?.()}
+              >
+                Вернуться в Telegram
+              </motion.button>
+              <motion.button
+                whileHover={buttonSpring.hover}
+                whileTap={buttonSpring.tap}
+                className="btn btn--ghost btn-enhanced"
+                onClick={() => {
+                  setDirection('backward');
+                  setStep('welcome');
+                }}
+              >
+                Войти под другим аккаунтом
+              </motion.button>
+            </div>
+          </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
-
-  // ─── LOGIN ────────────────────────────────────────────────────
-  if (step === 'login') return (
-    <div className="screen">
-      <div className="logo-wrap">
-        <div className="logo-circle logo-circle--amber"><Lock size={28} className="logo-icon" /></div>
-        <h1 className="app-title">Госуслуги</h1>
-        <p className="app-sub">Введите данные вашей учётной записи</p>
-      </div>
-
-      <div className="input-group">
-        <label className="input-label">Телефон, Email или СНИЛС</label>
-        <input 
-          type="text" 
-          className="text-input" 
-          value={login} 
-          onChange={(e) => setLogin(e.target.value)} 
-          placeholder="example@mail.ru" 
-        />
-      </div>
-
-      <div className="input-group mt-2">
-        <label className="input-label">Пароль</label>
-        <input 
-          type="password" 
-          className="text-input" 
-          value={password} 
-          onChange={(e) => setPassword(e.target.value)} 
-          placeholder="••••••••" 
-        />
-      </div>
-
-      <button className="btn-primary mt-4" onClick={handleStartAuth} disabled={!login || !password}>
-        Войти через Госуслуги
-      </button>
-      <button className="btn-ghost" onClick={() => setStep('welcome')}>Назад</button>
-    </div>
-  );
-
-  // ─── OTP / 2FA ────────────────────────────────────────────────
-  if (step === 'otp') return (
-    <div className="screen">
-      <div className="logo-wrap">
-        <div className="logo-circle logo-circle--amber"><Phone size={28} className="logo-icon" /></div>
-        <h1 className="app-title">Код подтверждения</h1>
-        <p className="app-sub">Введите код из СМС или приложения-аутентификатора</p>
-      </div>
-
-      <div className="input-group mt-4">
-        <input 
-          type="text" 
-          className="text-input text-center text-lg" 
-          value={userInput} 
-          onChange={(e) => setUserInput(e.target.value)} 
-          placeholder="000000" 
-          maxLength={6}
-          autoFocus
-        />
-      </div>
-
-      <button className="btn-primary mt-4" onClick={handleSubmitInput} disabled={userInput.length < 4}>
-        Подтвердить
-      </button>
-    </div>
-  );
-
-  // ─── CAPTCHA ──────────────────────────────────────────────────
-  if (step === 'captcha') return (
-    <div className="screen">
-      <div className="logo-wrap">
-        <div className="logo-circle logo-circle--amber"><Shield size={28} className="logo-icon" /></div>
-        <h1 className="app-title">Проверка безопасности</h1>
-        <p className="app-sub">Введите текст с картинки</p>
-      </div>
-
-      <div className="captcha-container mt-4">
-        {captchaImg && <img src={`data:image/jpeg;base64,${captchaImg}`} alt="Captcha" className="captcha-img" />}
-      </div>
-
-      <div className="input-group mt-4">
-        <input 
-          type="text" 
-          className="text-input text-center text-lg" 
-          value={userInput} 
-          onChange={(e) => setUserInput(e.target.value)} 
-          placeholder="Текст с картинки" 
-          autoFocus
-        />
-      </div>
-
-      <button className="btn-primary mt-4" onClick={handleSubmitInput} disabled={!userInput}>
-        Продолжить
-      </button>
-    </div>
-  );
-
-  // ─── POLLING (LOADING) ────────────────────────────────────────
-  if (step === 'polling') return (
-    <div className="screen screen-center">
-      <div className="spinner-wrap">
-        <div className="spinner-ring" />
-      </div>
-      
-      <div className="progress-container mt-4">
-        <div className="progress-bar-bg">
-          <div className="progress-bar-fill" style={{ width: `${progressPercent}%` }}></div>
-        </div>
-        <p className="sync-title mt-4">{progressText}</p>
-        <p className="sync-sub mt-2">Это может занять до 30 секунд</p>
-      </div>
-    </div>
-  );
-
-  // ─── SUCCESS ──────────────────────────────────────────────────
-  if (step === 'success') return (
-    <div className="screen screen-center">
-      <div className="success-circle">
-        <CheckCircle2 size={44} className="success-icon" />
-      </div>
-      <h2 className="success-title">Авторизация завершена</h2>
-      <p className="success-sub mt-2">Дневник подключён. Окно закроется автоматически.</p>
-    </div>
-  );
-
-  // ─── ERROR ────────────────────────────────────────────────────
-  if (step === 'error') return (
-    <div className="screen screen-center">
-      <div className="error-circle">
-        <AlertCircle size={44} className="error-icon" />
-      </div>
-      <h2 className="error-title">Не удалось войти</h2>
-      <p className="error-sub mt-2">{errorMsg}</p>
-      <button className="btn-primary mt-4" onClick={() => setStep('login')}>
-        <RefreshCw size={16} /> Попробовать снова
-      </button>
-    </div>
-  );
-
-  // ─── LOADING (APP START) ──────────────────────────────────────
-  if (step === 'loading') return (
-    <div className="screen screen-center">
-      <div className="spinner-wrap">
-        <div className="spinner-ring" />
-      </div>
-    </div>
-  );
-
-  // ─── ALREADY AUTHORIZED ───────────────────────────────────────
-  if (step === 'already_authorized') return (
-    <div className="screen screen-center">
-      <div className="success-circle">
-        <CheckCircle2 size={44} className="success-icon" />
-      </div>
-      <h2 className="success-title">Вы уже авторизованы</h2>
-      <p className="success-sub mt-2">Ваш электронный дневник успешно подключён. Вы можете закрыть это окно и продолжить общение с ботом.</p>
-      <button className="btn-primary mt-6" onClick={() => (window as any).Telegram?.WebApp?.close?.()}>
-        Вернуться в Telegram
-      </button>
-      <button className="btn-ghost mt-4" onClick={() => setStep('welcome')}>
-        Войти под другим аккаунтом
-      </button>
-    </div>
-  );
-
-  return null;
 }
