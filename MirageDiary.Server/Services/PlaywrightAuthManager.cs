@@ -117,7 +117,7 @@ public class PlaywrightAuthManager
             var page = await session.Context.NewPageAsync();
             Console.WriteLine($"[Playwright] Страница создана. Переход на login...");
 
-            await page.GotoAsync("https://dnevnik.egov66.ru/login/", new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+            await page.GotoAsync("https://dnevnik.egov66.ru/login/", new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded });
             Console.WriteLine($"[Playwright] Страница открыта.");
 
             Console.WriteLine($"[Playwright] Ищем кнопку Госуслуг...");
@@ -126,7 +126,7 @@ public class PlaywrightAuthManager
             {
                 Console.WriteLine($"[Playwright] Кнопка найдена. Кликаем...");
                 await loginBtn.ClickAsync();
-                await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+                await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
             }
 
             Console.WriteLine($"[Playwright] Текущий URL: {page.Url}");
@@ -140,7 +140,7 @@ public class PlaywrightAuthManager
                 {
                     Console.WriteLine($"[Playwright] QR-код обнаружен! Нажимаем 'Логин и пароль'...");
                     await loginPasswordBtn.ClickAsync();
-                    await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+                    await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
                     Console.WriteLine($"[Playwright] Переключились на форму логина.");
                 }
             }
