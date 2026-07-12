@@ -89,7 +89,8 @@ body {
   filter: blur(16px) saturate(1.3) brightness(0.85);
   -webkit-filter: blur(16px) saturate(1.3) brightness(0.85);
   opacity: 1;
-  transform: translate3d(0, 0, 0);
+  transform: translate3d(0, 0, 0); /* Force GPU compositing */
+  will-change: transform; /* Cache blurred background as static GPU texture */
   z-index: 0;
 }
 
@@ -125,7 +126,9 @@ body {
   -webkit-overflow-scrolling: touch;
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
-  transform-style: preserve-3d;
+  transform-style: flat; /* Simplified to flat for better rendering performance */
+  will-change: transform, opacity; /* Instruct browser to delegate transitions to GPU */
+  transform: translate3d(0, 0, 0); /* Force layer creation */
 }
 
 .screen--center {
@@ -485,6 +488,7 @@ body {
   transition: stroke-dasharray 0.65s cubic-bezier(0.16, 1, 0.3, 1),
               stroke-dashoffset 0.65s cubic-bezier(0.16, 1, 0.3, 1);
   filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.35));
+  will-change: stroke-dasharray, stroke-dashoffset; /* Pre-optimize animation path in GPU */
 }
 
 .field-floating .field-input:focus ~ .input-glow-border rect,
