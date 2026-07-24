@@ -302,9 +302,6 @@ export default function App() {
                 animate="animate"
                 className="brand"
               >
-                <motion.div variants={staggerItem} className="brand-logo">
-                  <ShieldCheck size={26} className="brand-logo-icon" />
-                </motion.div>
                 <motion.h1 variants={staggerItem} className="brand-title">Mirage Diary</motion.h1>
                 <motion.p variants={staggerItem} className="brand-sub">
                   {tgFirstName ? `Привет, ${tgFirstName}! ` : ''}

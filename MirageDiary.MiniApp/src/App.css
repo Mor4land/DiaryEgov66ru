@@ -211,7 +211,7 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--space-md);
+  gap: var(--space-xs);
   text-align: center;
   width: 100%;
 }
@@ -228,28 +228,10 @@ body {
   font-weight: 600;
   color: #38bdf8;
   letter-spacing: 0.02em;
-  margin-bottom: -6px;
+  margin-bottom: -2px;
 }
 
 .trust-badge-icon {
-  color: #38bdf8;
-  flex-shrink: 0;
-}
-
-.brand-logo {
-  width: 56px;
-  height: 56px;
-  border-radius: 14px;
-  background: linear-gradient(135deg, rgba(12, 88, 225, 0.15) 0%, rgba(12, 88, 225, 0.03) 100%);
-  border: 1px solid rgba(12, 88, 225, 0.25);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 0 20px rgba(12, 88, 225, 0.12);
-  margin-bottom: 4px;
-}
-
-.brand-logo-icon {
   color: #38bdf8;
   flex-shrink: 0;
 }
@@ -269,7 +251,7 @@ body {
   font-weight: 400;
   color: var(--fg-secondary);
   line-height: 1.55;
-  max-width: 290px;
+  max-width: 320px;
 }
 
 /* Glassmorphism card styles - stripped down for borderless layout */
@@ -284,7 +266,7 @@ body {
 /* Feature Row List - Vercel/Linear style */
 .feature-item {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--space-md);
   padding: var(--space-md) 0;
   width: 100%;
@@ -306,6 +288,7 @@ body {
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid rgba(255, 255, 255, 0.06);
+  margin-top: 2px;
 }
 
 .feature-text {
