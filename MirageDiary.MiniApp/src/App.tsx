@@ -370,102 +370,116 @@ export default function App() {
         >
           <div className="screen-content">
             <div className="brand">
-              <h1 className="brand-title">Авторизация</h1>
-              <p className="brand-sub">Введите данные от аккаунта Госуслуг для безопасной синхронизации</p>
+              <div className="trust-badge">
+                <ShieldCheck size={13} className="trust-badge-icon" />
+                <span>Безопасная авторизация Госуслуг</span>
+              </div>
+              <h1 className="brand-title">Вход через Госуслуги</h1>
+              <p className="brand-sub">Авторизуйтесь для безопасной синхронизации электронного дневника</p>
             </div>
           </div>
 
-          <div className="screen-body">
-            <div className="form-fields">
-              <div className="field-group">
-                <label className="field-label-static">
-                  Телефон, Email или СНИЛС
-                </label>
-                <div className="field-input-wrapper">
-                  <User size={16} className="field-icon-left" />
-                  <input
-                    type="text"
-                    className="field-input input-with-icon-left"
-                    value={login}
-                    onChange={(e) => setLogin(e.target.value)}
-                    placeholder="Введите логин"
-                    autoComplete="username"
-                    autoFocus
-                    disabled={isLoading}
-                  />
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleStartAuth();
+            }}
+            className="screen-form-wrapper"
+            style={{ display: 'flex', flexDirection: 'column', flex: 1, width: '100%' }}
+          >
+            <div className="screen-body">
+              <div className="form-fields">
+                <div className="field-group">
+                  <label className="field-label-static">
+                    Телефон, Email или СНИЛС
+                  </label>
+                  <div className="field-input-wrapper">
+                    <User size={16} className="field-icon-left" />
+                    <input
+                      type="text"
+                      className="field-input input-with-icon-left"
+                      value={login}
+                      onChange={(e) => setLogin(e.target.value)}
+                      placeholder="Введите логин"
+                      autoComplete="username"
+                      autoFocus
+                      disabled={isLoading}
+                    />
+                  </div>
                 </div>
-              </div>
 
-              <div className="field-group">
-                <label className="field-label-static">
-                  Пароль
-                </label>
-                <div className="field-input-wrapper">
-                  <Lock size={16} className="field-icon-left" />
-                  <input
-                    type={showPassword ? "text" : "password"}
-                    className="field-input input-with-icon-left input-with-icon-right"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Введите пароль"
-                    autoComplete="current-password"
-                    disabled={isLoading}
-                  />
-                  <button
-                    type="button"
-                    className="field-toggle-right"
-                    onClick={() => setShowPassword(!showPassword)}
-                    tabIndex={-1}
-                    disabled={isLoading}
-                  >
-                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                  </button>
+                <div className="field-group">
+                  <label className="field-label-static">
+                    Пароль
+                  </label>
+                  <div className="field-input-wrapper">
+                    <Lock size={16} className="field-icon-left" />
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      className="field-input input-with-icon-left input-with-icon-right"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Введите пароль"
+                      autoComplete="current-password"
+                      disabled={isLoading}
+                    />
+                    <button
+                      type="button"
+                      className="field-toggle-right"
+                      onClick={() => setShowPassword(!showPassword)}
+                      aria-label={showPassword ? "Скрыть пароль" : "Показать пароль"}
+                      disabled={isLoading}
+                    >
+                      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
 
-          <div className="screen-footer">
-            <motion.button
-              whileHover={buttonSpring.hover}
-              whileTap={buttonSpring.tap}
-              className="btn btn--primary"
-              onClick={handleStartAuth}
-              disabled={!login || !password || isLoading}
-            >
-              {isLoading ? (
-                <>
-                  <div className="btn-spinner" />
-                  Вход...
-                </>
-              ) : (
-                <>
-                  Войти
-                  <ArrowRight size={14} strokeWidth={2.5} className="ml-2 h-4 w-4" />
-                </>
-              )}
-            </motion.button>
-
-            {isLoading && progressText && (
-              <div className="status-text-inline">
-                {progressText}
-              </div>
-            )}
-
-            {!isLoading && (
+            <div className="screen-footer">
               <motion.button
+                type="submit"
                 whileHover={buttonSpring.hover}
                 whileTap={buttonSpring.tap}
-                className="btn btn--ghost"
-                onClick={() => {
-                  setDirection('backward');
-                  setStep('welcome');
-                }}
+                className="btn btn--primary"
+                disabled={!login || !password || isLoading}
               >
-                Назад
+                {isLoading ? (
+                  <>
+                    <div className="btn-spinner" />
+                    Вход...
+                  </>
+                ) : (
+                  <>
+                    Войти
+                    <ArrowRight size={14} strokeWidth={2.5} className="ml-2 h-4 w-4" />
+                  </>
+                )}
               </motion.button>
-            )}
-          </div>
+
+              {isLoading && progressText && (
+                <div className="status-text-inline">
+                  {progressText}
+                </div>
+              )}
+
+              {!isLoading && (
+                <motion.button
+                  type="button"
+                  whileHover={buttonSpring.hover}
+                  whileTap={buttonSpring.tap}
+                  className="btn btn--ghost"
+                  onClick={() => {
+                    setDirection('backward');
+                    setStep('welcome');
+                  }}
+                >
+                  Назад
+                </motion.button>
+              )}
+            </div>
+          </form>
         </motion.div>
       )}
 
@@ -486,53 +500,77 @@ export default function App() {
             </div>
           </div>
 
-          <div className="screen-body">
-            <div className="form-fields">
-              <div className="field-group">
-                <label className="field-label-static">
-                  СМС-код
-                </label>
-                <div className="field-input-wrapper">
-                  <input
-                    type="text"
-                    className="field-input field-input--code"
-                    value={userInput}
-                    onChange={(e) => setUserInput(e.target.value)}
-                    placeholder="••••••"
-                    maxLength={6}
-                    autoFocus
-                    inputMode="numeric"
-                    disabled={isLoading}
-                  />
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleSubmitInput();
+            }}
+            className="screen-form-wrapper"
+            style={{ display: 'flex', flexDirection: 'column', flex: 1, width: '100%' }}
+          >
+            <div className="screen-body">
+              <div className="form-fields">
+                <div className="field-group">
+                  <label className="field-label-static">
+                    СМС-код
+                  </label>
+                  <div className="field-input-wrapper">
+                    <input
+                      type="text"
+                      className="field-input field-input--code"
+                      value={userInput}
+                      onChange={(e) => setUserInput(e.target.value)}
+                      placeholder="••••••"
+                      maxLength={6}
+                      autoFocus
+                      inputMode="numeric"
+                      disabled={isLoading}
+                    />
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
 
-          <div className="screen-footer">
-            <motion.button
-              whileHover={buttonSpring.hover}
-              whileTap={buttonSpring.tap}
-              className="btn btn--primary"
-              onClick={handleSubmitInput}
-              disabled={userInput.length < 4 || isLoading}
-            >
-              {isLoading ? (
-                <>
-                  <div className="btn-spinner" />
-                  Проверка...
-                </>
-              ) : (
-                'Подтвердить'
+            <div className="screen-footer">
+              <motion.button
+                type="submit"
+                whileHover={buttonSpring.hover}
+                whileTap={buttonSpring.tap}
+                className="btn btn--primary"
+                disabled={userInput.length < 4 || isLoading}
+              >
+                {isLoading ? (
+                  <>
+                    <div className="btn-spinner" />
+                    Проверка...
+                  </>
+                ) : (
+                  'Подтвердить'
+                )}
+              </motion.button>
+
+              {isLoading && progressText && (
+                <div className="status-text-inline">
+                  {progressText}
+                </div>
               )}
-            </motion.button>
 
-            {isLoading && progressText && (
-              <div className="status-text-inline">
-                {progressText}
-              </div>
-            )}
-          </div>
+              {!isLoading && (
+                <motion.button
+                  type="button"
+                  whileHover={buttonSpring.hover}
+                  whileTap={buttonSpring.tap}
+                  className="btn btn--ghost"
+                  onClick={() => {
+                    setDirection('backward');
+                    setStep('login');
+                  }}
+                >
+                  Назад
+                </motion.button>
+              )}
+            </div>
+          </form>
         </motion.div>
       )}
 
@@ -553,61 +591,85 @@ export default function App() {
             </div>
           </div>
 
-          <div className="screen-body">
-            <div className="captcha-wrap">
-              {captchaImg && (
-                <img
-                  src={`data:image/jpeg;base64,${captchaImg}`}
-                  alt="Captcha"
-                  className="captcha-img"
-                />
-              )}
-            </div>
-
-            <div className="form-fields">
-              <div className="field-group">
-                <label className="field-label-static">
-                  Символы с картинки
-                </label>
-                <div className="field-input-wrapper">
-                  <input
-                    type="text"
-                    className="field-input field-input--code"
-                    value={userInput}
-                    onChange={(e) => setUserInput(e.target.value)}
-                    placeholder="Введите код"
-                    autoFocus
-                    disabled={isLoading}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleSubmitInput();
+            }}
+            className="screen-form-wrapper"
+            style={{ display: 'flex', flexDirection: 'column', flex: 1, width: '100%' }}
+          >
+            <div className="screen-body">
+              <div className="captcha-wrap">
+                {captchaImg && (
+                  <img
+                    src={`data:image/jpeg;base64,${captchaImg}`}
+                    alt="Captcha"
+                    className="captcha-img"
                   />
+                )}
+              </div>
+
+              <div className="form-fields">
+                <div className="field-group">
+                  <label className="field-label-static">
+                    Символы с картинки
+                  </label>
+                  <div className="field-input-wrapper">
+                    <input
+                      type="text"
+                      className="field-input field-input--code"
+                      value={userInput}
+                      onChange={(e) => setUserInput(e.target.value)}
+                      placeholder="Введите код"
+                      autoFocus
+                      disabled={isLoading}
+                    />
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
 
-          <div className="screen-footer">
-            <motion.button
-              whileHover={buttonSpring.hover}
-              whileTap={buttonSpring.tap}
-              className="btn btn--primary"
-              onClick={handleSubmitInput}
-              disabled={!userInput || isLoading}
-            >
-              {isLoading ? (
-                <>
-                  <div className="btn-spinner" />
-                  Проверка...
-                </>
-              ) : (
-                'Продолжить'
+            <div className="screen-footer">
+              <motion.button
+                type="submit"
+                whileHover={buttonSpring.hover}
+                whileTap={buttonSpring.tap}
+                className="btn btn--primary"
+                disabled={!userInput || isLoading}
+              >
+                {isLoading ? (
+                  <>
+                    <div className="btn-spinner" />
+                    Проверка...
+                  </>
+                ) : (
+                  'Продолжить'
+                )}
+              </motion.button>
+
+              {isLoading && progressText && (
+                <div className="status-text-inline">
+                  {progressText}
+                </div>
               )}
-            </motion.button>
 
-            {isLoading && progressText && (
-              <div className="status-text-inline">
-                {progressText}
-              </div>
-            )}
-          </div>
+              {!isLoading && (
+                <motion.button
+                  type="button"
+                  whileHover={buttonSpring.hover}
+                  whileTap={buttonSpring.tap}
+                  className="btn btn--ghost"
+                  onClick={() => {
+                    setDirection('backward');
+                    setStep('login');
+                  }}
+                >
+                  Назад
+                </motion.button>
+              )}
+            </div>
+          </form>
         </motion.div>
       )}
 
