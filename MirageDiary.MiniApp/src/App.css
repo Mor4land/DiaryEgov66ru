@@ -450,8 +450,8 @@ body {
 
 .field-input:focus, .input-enhanced:focus {
   background: var(--bg-input-focus);
-  border-color: var(--border-focus);
-  box-shadow: 0 0 0 3px rgba(12, 88, 225, 0.15), 0 4px 12px rgba(0, 0, 0, 0.25);
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: none;
 }
 
 .field-input:hover:not(:focus), .input-enhanced:hover:not(:focus) {
