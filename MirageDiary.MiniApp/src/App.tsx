@@ -295,13 +295,21 @@ export default function App() {
           className="screen"
         >
           <div className="screen-content">
-            <div className="brand">
-              <h1 className="brand-title">Mirage Diary</h1>
-              <p className="brand-sub">
+            <motion.div
+              variants={staggerContainer}
+              initial="initial"
+              animate="animate"
+              className="brand"
+            >
+              <motion.div variants={staggerItem} className="brand-logo">
+                <ShieldCheck size={26} className="brand-logo-icon" />
+              </motion.div>
+              <motion.h1 variants={staggerItem} className="brand-title">Mirage Diary</motion.h1>
+              <motion.p variants={staggerItem} className="brand-sub">
                 {tgFirstName ? `Привет, ${tgFirstName}! ` : ''}
                 Подключите электронный дневник, чтобы получать расписание и оценки прямо в Telegram.
-              </p>
-            </div>
+              </motion.p>
+            </motion.div>
           </div>
 
           <motion.div
@@ -369,14 +377,19 @@ export default function App() {
           className="screen"
         >
           <div className="screen-content">
-            <div className="brand">
-              <div className="trust-badge">
+            <motion.div
+              variants={staggerContainer}
+              initial="initial"
+              animate="animate"
+              className="brand"
+            >
+              <motion.div variants={staggerItem} className="trust-badge">
                 <ShieldCheck size={13} className="trust-badge-icon" />
                 <span>Безопасная авторизация Госуслуг</span>
-              </div>
-              <h1 className="brand-title">Вход через Госуслуги</h1>
-              <p className="brand-sub">Авторизуйтесь для безопасной синхронизации электронного дневника</p>
-            </div>
+              </motion.div>
+              <motion.h1 variants={staggerItem} className="brand-title">Вход через Госуслуги</motion.h1>
+              <motion.p variants={staggerItem} className="brand-sub">Авторизуйтесь для безопасной синхронизации электронного дневника</motion.p>
+            </motion.div>
           </div>
 
           <form
@@ -494,10 +507,15 @@ export default function App() {
           className="screen"
         >
           <div className="screen-content">
-            <div className="brand">
-              <h1 className="brand-title">Двухфакторная защита</h1>
-              <p className="brand-sub">Введите код подтверждения из СМС или приложения «Госключ»</p>
-            </div>
+            <motion.div
+              variants={staggerContainer}
+              initial="initial"
+              animate="animate"
+              className="brand"
+            >
+              <motion.h1 variants={staggerItem} className="brand-title">Двухфакторная защита</motion.h1>
+              <motion.p variants={staggerItem} className="brand-sub">Введите код подтверждения из СМС или приложения «Госключ»</motion.p>
+            </motion.div>
           </div>
 
           <form
@@ -585,10 +603,15 @@ export default function App() {
           className="screen"
         >
           <div className="screen-content">
-            <div className="brand">
-              <h1 className="brand-title">Проверка безопасности</h1>
-              <p className="brand-sub">Введите символы, изображённые на картинке ниже</p>
-            </div>
+            <motion.div
+              variants={staggerContainer}
+              initial="initial"
+              animate="animate"
+              className="brand"
+            >
+              <motion.h1 variants={staggerItem} className="brand-title">Проверка безопасности</motion.h1>
+              <motion.p variants={staggerItem} className="brand-sub">Введите символы, изображённые на картинке ниже</motion.p>
+            </motion.div>
           </div>
 
           <form

@@ -236,19 +236,39 @@ body {
   flex-shrink: 0;
 }
 
+.brand-logo {
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(12, 88, 225, 0.15) 0%, rgba(12, 88, 225, 0.03) 100%);
+  border: 1px solid rgba(12, 88, 225, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 20px rgba(12, 88, 225, 0.12);
+  margin-bottom: 4px;
+}
+
+.brand-logo-icon {
+  color: #38bdf8;
+  flex-shrink: 0;
+}
+
 .brand-title {
-  font-size: 22px;
+  font-size: 26px;
   font-weight: 800;
-  letter-spacing: -0.03em;
-  color: var(--fg-primary);
-  line-height: 1.2;
+  letter-spacing: -0.04em;
+  background: linear-gradient(to bottom, #ffffff 40%, #a1a1aa 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  line-height: 1.1;
 }
 
 .brand-sub {
   font-size: 13px;
   font-weight: 400;
   color: var(--fg-secondary);
-  line-height: 1.5;
+  line-height: 1.55;
   max-width: 290px;
 }
 
@@ -435,8 +455,8 @@ body {
 }
 
 .field-input:hover:not(:focus), .input-enhanced:hover:not(:focus) {
-  border-color: rgba(255, 255, 255, 0.15);
-  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(12, 88, 225, 0.3);
+  background: rgba(12, 88, 225, 0.01);
 }
 
 /* Input Left Icons */
@@ -476,6 +496,10 @@ body {
 .field-toggle-right:hover {
   color: var(--fg-primary);
   background: rgba(255, 255, 255, 0.05);
+}
+
+.field-toggle-right:active {
+  transform: translateY(-50%) scale(0.9);
 }
 
 .input-with-icon-right {
