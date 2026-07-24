@@ -294,74 +294,81 @@ export default function App() {
           exit="exit"
           className="screen"
         >
-          <div className="screen-content">
+          <div className="auth-card">
+            <div className="screen-content">
+              <motion.div
+                variants={staggerContainer}
+                initial="initial"
+                animate="animate"
+                className="brand"
+              >
+                <motion.div variants={staggerItem} className="brand-logo">
+                  <ShieldCheck size={26} className="brand-logo-icon" />
+                </motion.div>
+                <motion.h1 variants={staggerItem} className="brand-title">Mirage Diary</motion.h1>
+                <motion.p variants={staggerItem} className="brand-sub">
+                  {tgFirstName ? `Привет, ${tgFirstName}! ` : ''}
+                  Подключите электронный дневник, чтобы получать расписание и оценки прямо в Telegram.
+                </motion.p>
+              </motion.div>
+            </div>
+
             <motion.div
               variants={staggerContainer}
               initial="initial"
               animate="animate"
-              className="brand"
+              className="screen-body"
             >
-              <motion.div variants={staggerItem} className="brand-logo">
-                <ShieldCheck size={26} className="brand-logo-icon" />
+              <motion.div variants={staggerItem} className="feature-item">
+                <div className="feature-icon">
+                  <Fingerprint size={16} strokeWidth={2.2} />
+                </div>
+                <div className="feature-text">
+                  <h3 className="feature-title">Безопасный вход</h3>
+                  <p className="feature-desc">Авторизация происходит через официальный портал Госуслуг</p>
+                </div>
               </motion.div>
-              <motion.h1 variants={staggerItem} className="brand-title">Mirage Diary</motion.h1>
-              <motion.p variants={staggerItem} className="brand-sub">
-                {tgFirstName ? `Привет, ${tgFirstName}! ` : ''}
-                Подключите электронный дневник, чтобы получать расписание и оценки прямо в Telegram.
-              </motion.p>
-            </motion.div>
-          </div>
 
-          <motion.div
-            variants={staggerContainer}
-            initial="initial"
-            animate="animate"
-            className="screen-body"
-          >
-            <motion.div variants={staggerItem} className="feature-item">
-              <div className="feature-icon">
-                <Fingerprint size={16} strokeWidth={2.2} />
-              </div>
-              <div className="feature-text">
-                <h3 className="feature-title">Безопасный вход</h3>
-                <p className="feature-desc">Авторизация происходит через официальный портал Госуслуг</p>
-              </div>
+              <motion.div variants={staggerItem} className="feature-item">
+                <div className="feature-icon">
+                  <ShieldCheck size={16} strokeWidth={2.2} />
+                </div>
+                <div className="feature-text">
+                  <h3 className="feature-title">Защита данных</h3>
+                  <p className="feature-desc">Ваши пароли не сохраняются на сервере и передаются в зашифрованном виде</p>
+                </div>
+              </motion.div>
+
+              <motion.div variants={staggerItem} className="feature-item">
+                <div className="feature-icon">
+                  <Send size={16} strokeWidth={2.2} />
+                </div>
+                <div className="feature-text">
+                  <h3 className="feature-title">Удобство в Telegram</h3>
+                  <p className="feature-desc">Оценки, домашнее задание и расписание всегда под рукой в один клик</p>
+                </div>
+              </motion.div>
             </motion.div>
 
-            <motion.div variants={staggerItem} className="feature-item">
-              <div className="feature-icon">
-                <ShieldCheck size={16} strokeWidth={2.2} />
-              </div>
-              <div className="feature-text">
-                <h3 className="feature-title">Защита данных</h3>
-                <p className="feature-desc">Ваши пароли не сохраняются на сервере и передаются в зашифрованном виде</p>
-              </div>
-            </motion.div>
+            <div className="screen-footer">
+              <motion.button
+                whileHover={buttonSpring.hover}
+                whileTap={buttonSpring.tap}
+                className="btn btn--primary"
+                onClick={() => {
+                  setDirection('forward');
+                  setStep('login');
+                }}
+              >
+               Продолжить
+                <ArrowRight size={14} strokeWidth={2.5} className="ml-2 h-4 w-4" />
+              </motion.button>
 
-            <motion.div variants={staggerItem} className="feature-item">
-              <div className="feature-icon">
-                <Send size={16} strokeWidth={2.2} />
+              <div className="security-notice">
+                <Lock size={12} className="security-notice-icon" />
+                <span>Шифрование SSL/TLS · Данные защищены</span>
               </div>
-              <div className="feature-text">
-                <h3 className="feature-title">Удобство в Telegram</h3>
-                <p className="feature-desc">Оценки, домашнее задание и расписание всегда под рукой в один клик</p>
-              </div>
-            </motion.div>
-          </motion.div>
-
-          <div className="screen-footer">
-            <motion.button
-              whileHover={buttonSpring.hover}
-              whileTap={buttonSpring.tap}
-              className="btn btn--primary"
-              onClick={() => {
-                setDirection('forward');
-                setStep('login');
-              }}
-            >
-             Продолжить
-              <ArrowRight size={14} strokeWidth={2.5} className="ml-2 h-4 w-4" />
-            </motion.button>
+            </div>
           </div>
         </motion.div>
       )}
@@ -376,30 +383,29 @@ export default function App() {
           exit="exit"
           className="screen"
         >
-          <div className="screen-content">
-            <motion.div
-              variants={staggerContainer}
-              initial="initial"
-              animate="animate"
-              className="brand"
-            >
-              <motion.div variants={staggerItem} className="trust-badge">
-                <ShieldCheck size={13} className="trust-badge-icon" />
-                <span>Безопасная авторизация Госуслуг</span>
-              </motion.div>
-              <motion.h1 variants={staggerItem} className="brand-title">Вход через Госуслуги</motion.h1>
-              <motion.p variants={staggerItem} className="brand-sub">Авторизуйтесь для безопасной синхронизации электронного дневника</motion.p>
-            </motion.div>
-          </div>
-
           <form
             onSubmit={(e) => {
               e.preventDefault();
               handleStartAuth();
             }}
-            className="screen-form-wrapper"
-            style={{ display: 'flex', flexDirection: 'column', flex: 1, width: '100%' }}
+            className="auth-card"
           >
+            <div className="screen-content">
+              <motion.div
+                variants={staggerContainer}
+                initial="initial"
+                animate="animate"
+                className="brand"
+              >
+                <motion.div variants={staggerItem} className="trust-badge">
+                  <ShieldCheck size={13} className="trust-badge-icon" />
+                  <span>Безопасная авторизация Госуслуг</span>
+                </motion.div>
+                <motion.h1 variants={staggerItem} className="brand-title">Вход через Госуслуги</motion.h1>
+                <motion.p variants={staggerItem} className="brand-sub">Авторизуйтесь для безопасной синхронизации электронного дневника</motion.p>
+              </motion.div>
+            </div>
+
             <div className="screen-body">
               <div className="form-fields">
                 <div className="field-group">
@@ -418,6 +424,9 @@ export default function App() {
                       autoFocus
                       disabled={isLoading}
                     />
+                    <svg className="input-glow-border" aria-hidden="true">
+                      <rect x="0.5" y="0.5" width="calc(100% - 1px)" height="calc(100% - 1px)" rx="8" ry="8" pathLength="100" />
+                    </svg>
                   </div>
                 </div>
 
@@ -445,6 +454,9 @@ export default function App() {
                     >
                       {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>
+                    <svg className="input-glow-border" aria-hidden="true">
+                      <rect x="0.5" y="0.5" width="calc(100% - 1px)" height="calc(100% - 1px)" rx="8" ry="8" pathLength="100" />
+                    </svg>
                   </div>
                 </div>
               </div>
@@ -491,6 +503,11 @@ export default function App() {
                   Назад
                 </motion.button>
               )}
+
+              <div className="security-notice">
+                <Lock size={12} className="security-notice-icon" />
+                <span>Шифрование SSL/TLS · Данные защищены</span>
+              </div>
             </div>
           </form>
         </motion.div>
@@ -506,26 +523,25 @@ export default function App() {
           exit="exit"
           className="screen"
         >
-          <div className="screen-content">
-            <motion.div
-              variants={staggerContainer}
-              initial="initial"
-              animate="animate"
-              className="brand"
-            >
-              <motion.h1 variants={staggerItem} className="brand-title">Двухфакторная защита</motion.h1>
-              <motion.p variants={staggerItem} className="brand-sub">Введите код подтверждения из СМС или приложения «Госключ»</motion.p>
-            </motion.div>
-          </div>
-
           <form
             onSubmit={(e) => {
               e.preventDefault();
               handleSubmitInput();
             }}
-            className="screen-form-wrapper"
-            style={{ display: 'flex', flexDirection: 'column', flex: 1, width: '100%' }}
+            className="auth-card"
           >
+            <div className="screen-content">
+              <motion.div
+                variants={staggerContainer}
+                initial="initial"
+                animate="animate"
+                className="brand"
+              >
+                <motion.h1 variants={staggerItem} className="brand-title">Двухфакторная защита</motion.h1>
+                <motion.p variants={staggerItem} className="brand-sub">Введите код подтверждения из СМС или приложения «Госключ»</motion.p>
+              </motion.div>
+            </div>
+
             <div className="screen-body">
               <div className="form-fields">
                 <div className="field-group">
@@ -544,6 +560,9 @@ export default function App() {
                       inputMode="numeric"
                       disabled={isLoading}
                     />
+                    <svg className="input-glow-border" aria-hidden="true">
+                      <rect x="0.5" y="0.5" width="calc(100% - 1px)" height="calc(100% - 1px)" rx="8" ry="8" pathLength="100" />
+                    </svg>
                   </div>
                 </div>
               </div>
@@ -587,6 +606,11 @@ export default function App() {
                   Назад
                 </motion.button>
               )}
+
+              <div className="security-notice">
+                <Lock size={12} className="security-notice-icon" />
+                <span>Шифрование SSL/TLS · Данные защищены</span>
+              </div>
             </div>
           </form>
         </motion.div>
@@ -602,26 +626,25 @@ export default function App() {
           exit="exit"
           className="screen"
         >
-          <div className="screen-content">
-            <motion.div
-              variants={staggerContainer}
-              initial="initial"
-              animate="animate"
-              className="brand"
-            >
-              <motion.h1 variants={staggerItem} className="brand-title">Проверка безопасности</motion.h1>
-              <motion.p variants={staggerItem} className="brand-sub">Введите символы, изображённые на картинке ниже</motion.p>
-            </motion.div>
-          </div>
-
           <form
             onSubmit={(e) => {
               e.preventDefault();
               handleSubmitInput();
             }}
-            className="screen-form-wrapper"
-            style={{ display: 'flex', flexDirection: 'column', flex: 1, width: '100%' }}
+            className="auth-card"
           >
+            <div className="screen-content">
+              <motion.div
+                variants={staggerContainer}
+                initial="initial"
+                animate="animate"
+                className="brand"
+              >
+                <motion.h1 variants={staggerItem} className="brand-title">Проверка безопасности</motion.h1>
+                <motion.p variants={staggerItem} className="brand-sub">Введите символы, изображённые на картинке ниже</motion.p>
+              </motion.div>
+            </div>
+
             <div className="screen-body">
               <div className="captcha-wrap">
                 {captchaImg && (
@@ -648,6 +671,9 @@ export default function App() {
                       autoFocus
                       disabled={isLoading}
                     />
+                    <svg className="input-glow-border" aria-hidden="true">
+                      <rect x="0.5" y="0.5" width="calc(100% - 1px)" height="calc(100% - 1px)" rx="8" ry="8" pathLength="100" />
+                    </svg>
                   </div>
                 </div>
               </div>
@@ -691,6 +717,11 @@ export default function App() {
                   Назад
                 </motion.button>
               )}
+
+              <div className="security-notice">
+                <Lock size={12} className="security-notice-icon" />
+                <span>Шифрование SSL/TLS · Данные защищены</span>
+              </div>
             </div>
           </form>
         </motion.div>
