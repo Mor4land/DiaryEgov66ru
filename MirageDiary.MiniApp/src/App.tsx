@@ -26,8 +26,10 @@ declare global {
   }
 }
 
-const SERVER_URL = (typeof window !== 'undefined' && window.location.origin && window.location.origin.includes('miragediary.space')) 
-  ? window.location.origin 
+const SERVER_URL = (typeof window !== 'undefined' && window.location.origin)
+  ? (window.location.origin.includes('localhost') || window.location.origin.includes('127.0.0.1') || window.location.origin.includes('miragediary.space')
+      ? window.location.origin
+      : 'https://miragediary.space')
   : 'https://miragediary.space';
 
 type Step =
