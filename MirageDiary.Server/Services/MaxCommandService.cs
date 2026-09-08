@@ -177,20 +177,7 @@ public class MaxCommandService
             return;
         }
 
-        // Check maintenance mode (except for admins)
-        if (_maintenanceService.IsMaintenanceModeActive())
-        {
-            var role = await _roleService.GetUserRoleAsync(maxUserId, username, firstName, lastName);
-            if (role != "Admin")
-            {
-                await SendUserMessageAsync(chatId, new SendMessageRequest
-                {
-                    Text = "🔧 *Бот находится на техническом обслуживании.*\nПожалуйста, попробуйте позже.",
-                    Format = MessageFormat.Markdown
-                });
-                return;
-            }
-        }
+
 
         // File uploads (schedule from HeadTeacher / Admin)
         if (msg.Body?.Attachments != null && msg.Body.Attachments.Any(a => a is ImageAttachment || a is FileAttachment))
@@ -983,6 +970,26 @@ public class MaxCommandService
         var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == maxUserId);
         var maxBotApp = _config["MaxBot:Username"] ?? _config["MaxBotUsername"] ?? "se13960436_bot";
 
+        // 1. Prioritize HeadTeacher uploaded schedule file if available for user's school
+        if (user != null && !string.IsNullOrEmpty(user.OrgName))
+        {
+            var schedule = await _db.Schedules.FirstOrDefaultAsync(s => s.OrgName == user.OrgName);
+            if (schedule != null && !string.IsNullOrEmpty(schedule.FileId))
+            {
+                var uploadedKeyboard = new List<List<Button>>
+                {
+                    new List<Button>
+                    {
+                        new CallbackButton { Text = "🔄 Обновить", Payload = "cmd_schedule_refresh" },
+                        new CallbackButton { Text = "🔙 Главное меню", Payload = "cmd_back_main" }
+                    }
+                };
+                var uploadedText = $"📅 *Расписание — {user.OrgName}*\n\nЗагружено администрацией школы (ID: `{schedule.FileId}`)";
+                await SendOrEditBannerScreenAsync(chatId, messageId, "banner_schedule.png", uploadedText, uploadedKeyboard);
+                return;
+            }
+        }
+
         if (user == null || string.IsNullOrEmpty(user.AccessToken))
         {
             await ShowLoginPromptAsync(chatId, maxUserId, messageId);
@@ -1017,8 +1024,8 @@ public class MaxCommandService
             return;
         }
 
-        // Fallback to uploaded schedule file from HeadTeacher
-        if (!string.IsNullOrEmpty(user.OrgName))
+        // Final fallback to uploaded schedule file from HeadTeacher
+        if (user != null && !string.IsNullOrEmpty(user.OrgName))
         {
             var schedule = await _db.Schedules.FirstOrDefaultAsync(s => s.OrgName == user.OrgName);
             if (schedule != null && !string.IsNullOrEmpty(schedule.FileId))

@@ -134,18 +134,7 @@ public class BotCommandService
             return;
         }
 
-        // Check maintenance mode (except for admins)
-        if (_maintenanceService.IsMaintenanceModeActive())
-        {
-            var role = await _roleService.GetUserRoleAsync(chatIdStr, username, firstName, lastName);
-            if (role != "Admin")
-            {
-                await _botClient.SendMessage(chatId,
-                    "🔧 *Бот находится на техническом обслуживании.*\nПожалуйста, попробуйте позже.",
-                    parseMode: ParseMode.Markdown);
-                return;
-            }
-        }
+
 
         // File uploads (schedule from HeadTeacher / Admin)
         if (message.Type == MessageType.Photo || message.Type == MessageType.Document)
@@ -1429,6 +1418,29 @@ public class BotCommandService
         var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == chatIdStr);
         var webAppUrl = _config["MiniAppUrl"] ?? "https://t.me";
 
+        // 1. Prioritize HeadTeacher uploaded schedule file if available for user's school
+        if (user != null && !string.IsNullOrEmpty(user.OrgName))
+        {
+            var schedule = await _db.Schedules.FirstOrDefaultAsync(s => s.OrgName == user.OrgName);
+            if (schedule != null && !string.IsNullOrEmpty(schedule.FileId))
+            {
+                var uploadedNavButtons = new InlineKeyboardMarkup(new[]
+                {
+                    new[]
+                    {
+                        InlineKeyboardButton.WithCallbackData("🔄 Обновить", "cmd_schedule_refresh"),
+                        InlineKeyboardButton.WithCallbackData("🔙 Главное меню", "cmd_back_main_new")
+                    }
+                });
+
+                if (schedule.FileType == "photo")
+                    await _botClient.SendPhoto(chatId, InputFile.FromFileId(schedule.FileId), caption: $"📅 Расписание — {user.OrgName}\n_(Загружено администрацией школы)_", replyMarkup: uploadedNavButtons);
+                else
+                    await _botClient.SendDocument(chatId, InputFile.FromFileId(schedule.FileId), caption: $"📅 Расписание — {user.OrgName}\n_(Загружено администрацией школы)_", replyMarkup: uploadedNavButtons);
+                return;
+            }
+        }
+
         if (user == null || string.IsNullOrEmpty(user.AccessToken))
         {
             var errMsg = "❌ Вы не авторизованы. Войдите через Mini App.";
@@ -1469,16 +1481,16 @@ public class BotCommandService
             return;
         }
 
-        // Fallback to uploaded schedule file if any
-        if (!string.IsNullOrEmpty(user.OrgName))
+        // Final fallback to uploaded schedule if OrgName became known
+        if (user != null && !string.IsNullOrEmpty(user.OrgName))
         {
             var schedule = await _db.Schedules.FirstOrDefaultAsync(s => s.OrgName == user.OrgName);
             if (schedule != null && !string.IsNullOrEmpty(schedule.FileId))
             {
                 if (schedule.FileType == "photo")
-                    await _botClient.SendPhoto(chatId, InputFile.FromFileId(schedule.FileId), caption: $"📅 Расписание — {user.OrgName}", replyMarkup: navButtons);
+                    await _botClient.SendPhoto(chatId, InputFile.FromFileId(schedule.FileId), caption: $"📅 Расписание — {user.OrgName}\n_(Загружено администрацией школы)_", replyMarkup: navButtons);
                 else
-                    await _botClient.SendDocument(chatId, InputFile.FromFileId(schedule.FileId), caption: $"📅 Расписание — {user.OrgName}", replyMarkup: navButtons);
+                    await _botClient.SendDocument(chatId, InputFile.FromFileId(schedule.FileId), caption: $"📅 Расписание — {user.OrgName}\n_(Загружено администрацией школы)_", replyMarkup: navButtons);
                 return;
             }
         }
