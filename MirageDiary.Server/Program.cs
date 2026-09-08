@@ -1,117 +1,87 @@
 using Microsoft.EntityFrameworkCore;
-using MirageDiary.Core;
 using MirageDiary.Server.Data;
-using MirageDiary.Server.Services;
-using Telegram.Bot;
+using MirageDiary.Server.Extensions;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
+// 1. Configuration files
+builder.Configuration.AddJsonFile("admins.json", optional: true, reloadOnChange: true);
+
+// 2. Add API Controllers & OpenAPI
 builder.Services.AddControllers();
 builder.Services.AddOpenApi();
 
+// 3. CORS policy (Hardened for Telegram MiniApp & trusted clients)
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("AllowAll", builder =>
+    options.AddPolicy("MirageCorsPolicy", policy =>
     {
-        builder.AllowAnyOrigin()
-               .AllowAnyMethod()
-               .AllowAnyHeader();
+        var configuredOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? Array.Empty<string>();
+        if (configuredOrigins.Length > 0)
+        {
+            policy.WithOrigins(configuredOrigins)
+                  .AllowAnyMethod()
+                  .AllowAnyHeader()
+                  .AllowCredentials();
+        }
+        else if (builder.Environment.IsDevelopment())
+        {
+            policy.SetIsOriginAllowed(_ => true)
+                  .AllowAnyMethod()
+                  .AllowAnyHeader()
+                  .AllowCredentials();
+        }
+        else
+        {
+            policy.WithOrigins(
+                "https://web.telegram.org",
+                "https://dnevnik.egov66.ru"
+            )
+            .AllowAnyMethod()
+            .AllowAnyHeader();
+        }
     });
 });
 
+// 4. Database Context (Protected connection string via SecureSecretVault)
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection") ?? "Data Source=miragediary.db"));
+    options.UseSqlite(MirageDiary.Server.Security.SecureSecretVault.ResolveSqliteConnectionString(builder.Configuration)));
 
-builder.Services.AddHttpClient<DiaryClient>();
+// 5. Mirage Services, RateLimiting, Telegram Bot, and Scoped TLS Validation
+builder.Services.AddMirageServices(builder.Configuration);
 
-// HttpClient for diary reverse-proxy (must NOT auto-follow redirects so we can rewrite Location header)
-builder.Services.AddHttpClient("diary-proxy")
-    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
-    {
-        AllowAutoRedirect = false,
-        UseCookies = false // cookies forwarded manually via headers
-    });
-
-builder.Services.AddScoped<ITokenStore, DbTokenStore>();
-builder.Services.AddScoped<P2PCacheService>();
-
-builder.Configuration.AddJsonFile("admins.json", optional: true, reloadOnChange: true);
-
-// Configure Telegram Bot
-var botToken = builder.Configuration["BotToken"] ?? "YOUR_BOT_TOKEN_HERE";
-builder.Services.AddHttpClient("tgwebhook")
-    .AddTypedClient<ITelegramBotClient>(httpClient => new TelegramBotClient(botToken, httpClient));
-builder.Services.AddSingleton<MaintenanceModeService>();
-builder.Services.AddSingleton<BotStateService>();
-builder.Services.AddHostedService<SmartAlarmWorker>();
-builder.Services.AddScoped<RoleService>();
-builder.Services.AddScoped<DiaryInteractionService>();
-builder.Services.AddScoped<BotCommandService>();
-builder.Services.AddScoped<MaxCommandService>();
-builder.Services.AddSingleton<BookmarkletAuthService>();
-builder.Services.AddSingleton<PlaywrightAuthManager>();
+// 6. Forwarded Headers for reverse-proxy (trusted local reverse-proxy)
+builder.Services.Configure<Microsoft.AspNetCore.Builder.ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor | 
+                               Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto;
+    options.KnownProxies.Add(System.Net.IPAddress.Loopback);
+    options.KnownProxies.Add(System.Net.IPAddress.IPv6Loopback);
+});
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
+// Pipeline configuration
+app.UseForwardedHeaders();
+
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
 }
 
-app.UseCors("AllowAll");
+app.UseCors("MirageCorsPolicy");
+app.UseRateLimiter();
+app.UseDefaultFiles();
+app.UseStaticFiles();
 app.UseAuthorization();
 app.MapControllers();
 
-// Ensure DB is fully up to date
-using (var scope = app.Services.CreateScope())
-{
-    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    var conn = db.Database.GetDbConnection();
-    conn.Open();
-    using var cmd = conn.CreateCommand();
+app.MapGet("/admin", () => Results.Redirect("/admin.html", permanent: false));
+app.MapGet("/privacy", () => Results.Redirect("/privacy.html", permanent: false));
 
-    // Create Users table if not exists
-    cmd.CommandText = @"CREATE TABLE IF NOT EXISTS ""Users"" (
-        ""Id"" TEXT NOT NULL CONSTRAINT ""PK_Users"" PRIMARY KEY,
-        ""AccessToken"" TEXT NOT NULL,
-        ""RefreshToken"" TEXT NOT NULL,
-        ""StudentId"" TEXT NOT NULL,
-        ""ClassName"" TEXT NOT NULL DEFAULT '',
-        ""OrgName"" TEXT NOT NULL DEFAULT '',
-        ""Role"" TEXT NOT NULL DEFAULT 'Student',
-        ""IsAlarmEnabled"" INTEGER NOT NULL DEFAULT 1
-    );";
-    cmd.ExecuteNonQuery();
+app.MapFallbackToFile("index.html");
 
-    // Create Cache table if not exists
-    cmd.CommandText = @"CREATE TABLE IF NOT EXISTS ""Cache"" (
-        ""CacheKey"" TEXT NOT NULL CONSTRAINT ""PK_Cache"" PRIMARY KEY,
-        ""JsonData"" TEXT NOT NULL DEFAULT '',
-        ""UpdatedAt"" TEXT NOT NULL DEFAULT ''
-    );";
-    cmd.ExecuteNonQuery();
-
-    // Create Schedules table if not exists
-    cmd.CommandText = @"CREATE TABLE IF NOT EXISTS ""Schedules"" (
-        ""OrgName"" TEXT NOT NULL CONSTRAINT ""PK_Schedules"" PRIMARY KEY,
-        ""FileId"" TEXT NOT NULL DEFAULT '',
-        ""FileType"" TEXT NOT NULL DEFAULT '',
-        ""UploadedAt"" TEXT NOT NULL DEFAULT ''
-    );";
-    cmd.ExecuteNonQuery();
-
-    // Add IsAlarmEnabled column to Users if missing (for existing DBs)
-    cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Users') WHERE name='IsAlarmEnabled';";
-    var colCount = (long)(cmd.ExecuteScalar() ?? 0L);
-    if (colCount == 0)
-    {
-        cmd.CommandText = "ALTER TABLE Users ADD COLUMN IsAlarmEnabled INTEGER NOT NULL DEFAULT 1;";
-        cmd.ExecuteNonQuery();
-    }
-
-    conn.Close();
-}
+// Safe database schema migrations and legacy token encryption
+await DatabaseInitializer.InitializeDatabaseAsync(app.Services);
 
 app.Run();

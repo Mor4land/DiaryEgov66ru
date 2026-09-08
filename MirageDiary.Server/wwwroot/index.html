@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mirage Diary</title>
+    <!-- Google Fonts: Manrope -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Telegram SDK script just in case we need vanilla integration, but we use the npm package -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <!-- MAX Bridge compatibility polyfill -->
+    <script>
+      (function() {
+        try {
+          var app = window.WebApp || window.max?.webApp;
+          if (app) {
+            window.Telegram = window.Telegram || {};
+            var unsafe = app.initDataUnsafe || {};
+            var user = unsafe.user || {};
+            var rawId = user.id || unsafe.chat?.id || '';
+            var maxId = rawId ? (String(rawId).startsWith('max_') ? String(rawId) : 'max_' + rawId) : '';
+            window.Telegram.WebApp = {
+              ready: function() { if (app.ready) app.ready(); },
+              expand: function() { if (app.expand) app.expand(); },
+              close: function() { if (app.close) app.close(); },
+              initData: app.initData || '',
+              initDataUnsafe: {
+                ...unsafe,
+                user: maxId ? {
+                  ...user,
+                  id: maxId,
+                  first_name: user.first_name || user.firstName || 'MAX User'
+                } : undefined
+              }
+            };
+          }
+        } catch (e) {
+          console.error('[MAX Bridge Polyfill Error]', e);
+        }
+      })();
+    </script>
+    <script type="module" crossorigin src="/assets/index-CbOSj9zs.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-Bs1wJBlv.css">
+  </head>
+  <body>
+    <div class="app-bg">
+      <img src="/bg.png" alt="" class="app-bg-image" />
+      <div class="app-bg-glow app-bg-glow--1"></div>
+      <div class="app-bg-glow app-bg-glow--2"></div>
+    </div>
+    <div id="root"></div>
+  </body>
+</html>

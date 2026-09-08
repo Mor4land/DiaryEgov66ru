@@ -1,0 +1,1756 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mirage Console — Google Style Control Center</title>
+    <!-- Google Fonts: Plus Jakarta Sans / Roboto & Fira Code -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- GSAP for Smooth Animations -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+    <style>
+        :root {
+            /* /better-colors verified Google Material You Dark System */
+            --g-bg: #101114;
+            --g-surface-1: #18191d;
+            --g-surface-2: #212226;
+            --g-surface-3: #2a2b30;
+            --g-surface-hover: #33353b;
+            --g-input-bg: #1c1d21;
+
+            --g-border: rgba(255, 255, 255, 0.08);
+            --g-border-medium: rgba(255, 255, 255, 0.14);
+
+            /* Google Brand Ramps */
+            --g-blue: #8ab4f8;
+            --g-blue-container: rgba(138, 180, 248, 0.12);
+            --g-blue-hover: #aecbfa;
+
+            --g-green: #81c995;
+            --g-green-container: rgba(129, 201, 149, 0.12);
+
+            --g-yellow: #fdd663;
+            --g-yellow-container: rgba(253, 214, 99, 0.12);
+
+            --g-red: #f28b82;
+            --g-red-container: rgba(242, 139, 130, 0.12);
+
+            --g-purple: #c58af9;
+            --g-purple-container: rgba(197, 138, 249, 0.12);
+
+            /* High Contrast Text (WCAG AAA / AA) */
+            --g-text-primary: #e8eaed;
+            --g-text-secondary: #9aa0a6;
+            --g-text-muted: #80868b;
+
+            --radius-pill: 9999px;
+            --radius-card: 14px;
+            --radius-inner: 10px;
+
+            --font-ui: 'Plus Jakarta Sans', 'Roboto', -apple-system, sans-serif;
+            --font-mono: 'Fira Code', monospace;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: var(--font-ui);
+            -webkit-font-smoothing: antialiased;
+        }
+
+        body {
+            background-color: var(--g-bg);
+            color: var(--g-text-primary);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow-x: hidden;
+        }
+
+        /* SCROLLBAR COMPACT */
+        ::-webkit-scrollbar { width: 4px; height: 4px; }
+        ::-webkit-scrollbar-track { background: var(--g-bg); }
+        ::-webkit-scrollbar-thumb { background: var(--g-surface-3); border-radius: var(--radius-pill); }
+
+        :focus-visible {
+            outline: 2px solid var(--g-blue);
+            outline-offset: 1px;
+            border-radius: var(--radius-pill);
+        }
+
+        /* ── GOOGLE STYLE BUTTONS (MAXIMUM ROUNDING - PILL) ── */
+        .btn {
+            border-radius: var(--radius-pill);
+            padding: 7px 16px;
+            font-size: 12px;
+            font-weight: 600;
+            border: none;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 7px;
+            transition: all 0.15s ease;
+            white-space: nowrap;
+        }
+
+        .btn:active { transform: scale(0.96); }
+
+        .btn-primary {
+            background: var(--g-blue);
+            color: #101114;
+            font-weight: 700;
+        }
+        .btn-primary:hover {
+            background: var(--g-blue-hover);
+            box-shadow: 0 0 12px rgba(138, 180, 248, 0.35);
+        }
+
+        .btn-tonal {
+            background: var(--g-surface-2);
+            color: var(--g-text-primary);
+            border: 1px solid var(--g-border);
+        }
+        .btn-tonal:hover {
+            background: var(--g-surface-hover);
+            border-color: var(--g-border-medium);
+        }
+
+        .btn-danger-pill {
+            background: var(--g-red-container);
+            color: var(--g-red);
+            border: 1px solid rgba(242, 139, 130, 0.3);
+        }
+        .btn-danger-pill:hover { background: rgba(242, 139, 130, 0.22); }
+
+        .btn-success-pill {
+            background: var(--g-green-container);
+            color: var(--g-green);
+            border: 1px solid rgba(129, 201, 149, 0.3);
+        }
+        .btn-success-pill:hover { background: rgba(129, 201, 149, 0.22); }
+
+        /* ── AUTH MODAL ── */
+        #loginOverlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(16, 17, 20, 0.94);
+            backdrop-filter: blur(14px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+            padding: 20px;
+        }
+
+        .login-card {
+            background: var(--g-surface-1);
+            border: 1px solid var(--g-border);
+            border-radius: 24px;
+            padding: 34px 30px;
+            width: 100%;
+            max-width: 390px;
+            box-shadow: 0 8px 36px rgba(0, 0, 0, 0.7);
+            text-align: center;
+        }
+
+        .google-brand-logo {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 44px;
+            height: 44px;
+            background: var(--g-blue-container);
+            color: var(--g-blue);
+            border-radius: var(--radius-pill);
+            margin-bottom: 14px;
+        }
+
+        .login-card h2 { font-size: 19px; font-weight: 700; color: var(--g-text-primary); margin-bottom: 4px; }
+        .login-card p { font-size: 12px; color: var(--g-text-secondary); margin-bottom: 20px; line-height: 1.4; }
+
+        .pill-input-wrap {
+            position: relative;
+            display: flex;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .pill-input {
+            width: 100%;
+            background: var(--g-input-bg);
+            border: 1px solid var(--g-border);
+            border-radius: var(--radius-pill);
+            padding: 10px 42px 10px 16px;
+            color: #fff;
+            font-family: var(--font-mono);
+            font-size: 12px;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        .pill-input:focus {
+            border-color: var(--g-blue);
+            box-shadow: 0 0 0 2px var(--g-blue-container);
+            outline: none;
+        }
+
+        .pill-input-eye {
+            position: absolute;
+            right: 12px;
+            background: none;
+            border: none;
+            color: var(--g-text-muted);
+            cursor: pointer;
+            padding: 4px;
+            display: flex;
+        }
+
+        /* ── GOOGLE APP BAR HEADER ── */
+        header {
+            background: var(--g-surface-1);
+            border-bottom: 1px solid var(--g-border);
+            padding: 8px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .header-left { display: flex; align-items: center; gap: 10px; }
+        .logo-pill {
+            width: 32px;
+            height: 32px;
+            background: var(--g-blue-container);
+            color: var(--g-blue);
+            border-radius: var(--radius-pill);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .header-title-wrap { display: flex; flex-direction: column; }
+        .header-title { font-size: 13px; font-weight: 700; color: var(--g-text-primary); letter-spacing: -0.2px; }
+        .header-subtitle { font-size: 10px; color: var(--g-text-muted); font-family: var(--font-mono); }
+
+        /* GOOGLE MATERIAL 3 CHIP TABS */
+        .chip-tabs {
+            display: flex;
+            gap: 4px;
+            background: var(--g-surface-2);
+            padding: 3px;
+            border-radius: var(--radius-pill);
+            border: 1px solid var(--g-border);
+        }
+
+        .chip-tab {
+            background: none;
+            border: none;
+            color: var(--g-text-secondary);
+            padding: 5px 12px;
+            border-radius: var(--radius-pill);
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            transition: all 0.15s ease;
+        }
+        .chip-tab:hover { color: var(--g-text-primary); background: rgba(255,255,255,0.05); }
+        .chip-tab.active { background: var(--g-blue-container); color: var(--g-blue); }
+
+        .header-right { display: flex; align-items: center; gap: 8px; }
+
+        .status-chip {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            background: var(--g-green-container);
+            color: var(--g-green);
+            padding: 3px 10px;
+            border-radius: var(--radius-pill);
+            font-size: 10px;
+            font-family: var(--font-mono);
+            font-weight: 600;
+        }
+
+        .pulse-dot {
+            width: 5px;
+            height: 5px;
+            background: var(--g-green);
+            border-radius: var(--radius-pill);
+            box-shadow: 0 0 6px var(--g-green);
+            animation: pulse-glow 2s infinite ease-in-out;
+        }
+
+        @keyframes pulse-glow {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.4; transform: scale(0.85); }
+        }
+
+        /* ── DENSE, ZERO-WASTE WORKSPACE ── */
+        main {
+            width: 100%;
+            max-width: 1560px;
+            margin: 0 auto;
+            padding: 12px 16px 36px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            flex: 1;
+        }
+
+        .tab-pane { display: none; flex-direction: column; gap: 10px; }
+        .tab-pane.active { display: flex; }
+
+        /* ── 6-COLUMN KPI STRIP (SPACE FILLED) ── */
+        .dense-kpi-grid-6 {
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
+            gap: 8px;
+        }
+
+        @media (max-width: 1280px) { .dense-kpi-grid-6 { grid-template-columns: repeat(3, 1fr); } }
+        @media (max-width: 768px) { .dense-kpi-grid-6 { grid-template-columns: repeat(2, 1fr); } }
+
+        .kpi-card-compact {
+            background: var(--g-surface-1);
+            border: 1px solid var(--g-border);
+            border-radius: var(--radius-card);
+            padding: 10px 12px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            transition: background 0.15s, border-color 0.15s;
+        }
+        .kpi-card-compact:hover { background: var(--g-surface-2); border-color: var(--g-border-medium); }
+
+        .kpi-text-wrap { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+        .kpi-mini-title { font-size: 10px; color: var(--g-text-secondary); font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .kpi-mini-val { font-size: 18px; font-weight: 800; color: var(--g-text-primary); font-family: var(--font-mono); letter-spacing: -0.4px; }
+        .kpi-mini-sub { font-size: 9.5px; color: var(--g-text-muted); display: flex; align-items: center; gap: 3px; white-space: nowrap; }
+
+        .kpi-pill-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: var(--radius-pill);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
+        .icon-blue { background: var(--g-blue-container); color: var(--g-blue); }
+        .icon-green { background: var(--g-green-container); color: var(--g-green); }
+        .icon-yellow { background: var(--g-yellow-container); color: var(--g-yellow); }
+        .icon-red { background: var(--g-red-container); color: var(--g-red); }
+        .icon-purple { background: var(--g-purple-container); color: var(--g-purple); }
+
+        /* ── 3-COLUMN VISUAL CORE LAYOUT ── */
+        .dense-core-grid {
+            display: grid;
+            grid-template-columns: 2fr 1.1fr 1fr;
+            gap: 10px;
+        }
+
+        @media (max-width: 1150px) { .dense-core-grid { grid-template-columns: 1fr; } }
+
+        .dense-card {
+            background: var(--g-surface-1);
+            border: 1px solid var(--g-border);
+            border-radius: var(--radius-card);
+            padding: 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .card-header-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .card-title-badge {
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--g-text-primary);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .chart-box-compact {
+            position: relative;
+            height: 180px;
+            width: 100%;
+        }
+
+        /* ── ROW STRIPS & GAUGES ── */
+        .dense-strip {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 5px 8px;
+            border-radius: var(--radius-pill);
+            background: var(--g-surface-2);
+            font-size: 11px;
+        }
+
+        .dense-strip-label { color: var(--g-text-secondary); display: flex; align-items: center; gap: 5px; }
+        .dense-strip-val { font-family: var(--font-mono); font-weight: 600; color: var(--g-text-primary); }
+
+        /* Progress Bar Gauge */
+        .gauge-bar-wrap {
+            width: 100%;
+            height: 5px;
+            background: var(--g-surface-3);
+            border-radius: var(--radius-pill);
+            overflow: hidden;
+            margin-top: 3px;
+        }
+        .gauge-bar-fill {
+            height: 100%;
+            border-radius: var(--radius-pill);
+            transition: width 0.4s ease;
+        }
+
+        /* ── 2-COLUMN LOWER CORE (EVENTS + QUICK ACTIONS) ── */
+        .dense-bottom-grid {
+            display: grid;
+            grid-template-columns: 1.6fr 1fr;
+            gap: 10px;
+        }
+
+        @media (max-width: 1000px) { .dense-bottom-grid { grid-template-columns: 1fr; } }
+
+        /* Real-time Activity Feed / Terminal */
+        .event-feed {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            max-height: 160px;
+            overflow-y: auto;
+            padding-right: 4px;
+        }
+
+        .event-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            padding: 6px 10px;
+            background: var(--g-surface-2);
+            border-radius: var(--radius-pill);
+            font-size: 11px;
+        }
+
+        .event-left {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .event-time {
+            font-family: var(--font-mono);
+            color: var(--g-text-muted);
+            font-size: 10px;
+        }
+
+        /* ── PILL BADGES ── */
+        .pill-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 2px 7px;
+            border-radius: var(--radius-pill);
+            font-size: 10px;
+            font-weight: 600;
+            font-family: var(--font-mono);
+            white-space: nowrap;
+        }
+
+        .pill-badge-blue { background: var(--g-blue-container); color: var(--g-blue); }
+        .pill-badge-green { background: var(--g-green-container); color: var(--g-green); }
+        .pill-badge-yellow { background: var(--g-yellow-container); color: var(--g-yellow); }
+        .pill-badge-red { background: var(--g-red-container); color: var(--g-red); }
+        .pill-badge-purple { background: var(--g-purple-container); color: var(--g-purple); }
+        .pill-badge-muted { background: rgba(255,255,255,0.06); color: var(--g-text-secondary); }
+
+        /* ── DENSE TABLES ── */
+        .table-container-compact {
+            border: 1px solid var(--g-border);
+            border-radius: var(--radius-card);
+            background: var(--g-surface-1);
+            overflow: hidden;
+        }
+
+        table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+        th {
+            background: var(--g-surface-2);
+            padding: 7px 10px;
+            color: var(--g-text-secondary);
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            border-bottom: 1px solid var(--g-border);
+            text-align: left;
+        }
+        td { padding: 7px 10px; border-bottom: 1px solid var(--g-border); color: var(--g-text-primary); }
+        tr:last-child td { border-bottom: none; }
+        tr:hover td { background: var(--g-surface-hover); }
+
+        /* ── TOASTS (FLOATING PILL) ── */
+        #toastContainer {
+            position: fixed;
+            bottom: 16px;
+            right: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            z-index: 100000;
+        }
+
+        .toast-pill {
+            background: var(--g-surface-2);
+            border: 1px solid var(--g-border-medium);
+            border-radius: var(--radius-pill);
+            padding: 6px 14px;
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+            font-size: 11.5px;
+            color: #fff;
+            min-width: 220px;
+            max-width: 360px;
+        }
+        .toast-success { border-left: 3px solid var(--g-green); }
+        .toast-error { border-left: 3px solid var(--g-red); }
+        .toast-info { border-left: 3px solid var(--g-blue); }
+    </style>
+</head>
+<body>
+
+    <!-- ── AUTHENTICATION MODAL ── -->
+    <div id="loginOverlay">
+        <div class="login-card">
+            <div class="google-brand-logo">
+                <i data-lucide="shield-check" style="width: 22px; height: 22px;"></i>
+            </div>
+            <h2>Mirage Console</h2>
+            <p>Панель управления и телеметрии в режиме реального времени. Введите секретный ключ доступа.</p>
+
+            <form id="loginForm" onsubmit="handleLogin(event)">
+                <div class="pill-input-wrap">
+                    <input type="password" id="adminKeyInput" class="pill-input" placeholder="Admin Key..." required autocomplete="off" />
+                    <button type="button" class="pill-input-eye" onclick="togglePasswordVisibility()" title="Показать ключ">
+                        <i id="eyeIcon" data-lucide="eye" style="width: 15px; height: 15px;"></i>
+                    </button>
+                </div>
+
+                <button type="submit" id="loginBtn" class="btn btn-primary" style="width: 100%;">
+                    <i data-lucide="lock" style="width: 14px; height: 14px;"></i>
+                    <span>Войти в консоль</span>
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- ── GOOGLE APP BAR HEADER ── -->
+    <header>
+        <div class="header-left">
+            <div class="logo-pill">
+                <i data-lucide="cpu" style="width: 16px; height: 16px;"></i>
+            </div>
+            <div class="header-title-wrap">
+                <div class="header-title">Mirage Console</div>
+                <div class="header-subtitle">v4.2.0 • Linux-x64 • .NET 10.0</div>
+            </div>
+        </div>
+
+        <!-- CHIP NAVIGATION TABS -->
+        <nav class="chip-tabs">
+            <button class="chip-tab active" onclick="switchTab('overview')">
+                <i data-lucide="layout-grid" style="width: 13px; height: 13px;"></i>
+                <span>Дашборд</span>
+            </button>
+            <button class="chip-tab" onclick="switchTab('telemetry')">
+                <i data-lucide="activity" style="width: 13px; height: 13px;"></i>
+                <span>Телеметрия</span>
+            </button>
+            <button class="chip-tab" onclick="switchTab('users')">
+                <i data-lucide="users" style="width: 13px; height: 13px;"></i>
+                <span>Пользователи</span>
+            </button>
+            <button class="chip-tab" onclick="switchTab('backups')">
+                <i data-lucide="database" style="width: 13px; height: 13px;"></i>
+                <span>Снимки DB</span>
+            </button>
+            <button class="chip-tab" onclick="switchTab('settings')">
+                <i data-lucide="sliders-horizontal" style="width: 13px; height: 13px;"></i>
+                <span>Управление</span>
+            </button>
+        </nav>
+
+        <div class="header-right">
+            <div class="status-chip">
+                <span class="pulse-dot"></span>
+                <span id="headerUptime">0d 0h 0m</span>
+            </div>
+            <button class="btn btn-tonal" onclick="triggerGcCollect()" title="Принудительно освободить оперативную память">
+                <i data-lucide="sparkles" style="width: 13px; height: 13px; color: var(--g-yellow);"></i>
+                <span>Сжать RAM</span>
+            </button>
+            <button class="btn btn-tonal" onclick="refreshCurrentTab()" title="Обновить телеметрию">
+                <i data-lucide="refresh-cw" style="width: 13px; height: 13px;"></i>
+            </button>
+            <button class="btn btn-tonal" onclick="handleLogout()" title="Выйти из сессии">
+                <i data-lucide="log-out" style="width: 13px; height: 13px;"></i>
+            </button>
+        </div>
+    </header>
+
+    <!-- ── MAIN ZERO-WASTE WORKSPACE ── -->
+    <main>
+
+        <!-- ── TAB 1: OVERVIEW (HIGH DENSITY) ── -->
+        <div id="pane-overview" class="tab-pane active">
+            
+            <!-- Row 1: 6-Column High-Density KPI Strip -->
+            <div class="dense-kpi-grid-6">
+                <div class="kpi-card-compact">
+                    <div class="kpi-text-wrap">
+                        <span class="kpi-mini-title">Пользователи</span>
+                        <span class="kpi-mini-val" id="kpiTotalUsers">0</span>
+                        <span class="kpi-mini-sub"><i data-lucide="database" style="width:9px;height:9px;color:var(--g-blue);"></i> В SQLite</span>
+                    </div>
+                    <div class="kpi-pill-icon icon-blue"><i data-lucide="users" style="width: 16px; height: 16px;"></i></div>
+                </div>
+
+                <div class="kpi-card-compact">
+                    <div class="kpi-text-wrap">
+                        <span class="kpi-mini-title">Активные сессии</span>
+                        <span class="kpi-mini-val" id="kpiActiveSessions">0</span>
+                        <span class="kpi-mini-sub" id="kpiMobileSessionsSub"><i data-lucide="smartphone" style="width:9px;height:9px;color:var(--g-green);"></i> 0 мобильных</span>
+                    </div>
+                    <div class="kpi-pill-icon icon-green"><i data-lucide="key" style="width: 16px; height: 16px;"></i></div>
+                </div>
+
+                <div class="kpi-card-compact">
+                    <div class="kpi-text-wrap">
+                        <span class="kpi-mini-title">P2P Кэш классов</span>
+                        <span class="kpi-mini-val" id="kpiCacheEntries">0</span>
+                        <span class="kpi-mini-sub"><i data-lucide="zap" style="width:9px;height:9px;color:var(--g-yellow);"></i> <span id="kpiHitRateBadge">97.4%</span> Hit</span>
+                    </div>
+                    <div class="kpi-pill-icon icon-yellow"><i data-lucide="zap" style="width: 16px; height: 16px;"></i></div>
+                </div>
+
+                <div class="kpi-card-compact">
+                    <div class="kpi-text-wrap">
+                        <span class="kpi-mini-title">RAM сервера</span>
+                        <span class="kpi-mini-val" id="kpiMemoryUsed">0 MB</span>
+                        <span class="kpi-mini-sub" id="kpiThreadsCount"><i data-lucide="cpu" style="width:9px;height:9px;color:var(--g-red);"></i> ThreadPool</span>
+                    </div>
+                    <div class="kpi-pill-icon icon-red"><i data-lucide="hard-drive" style="width: 16px; height: 16px;"></i></div>
+                </div>
+
+                <div class="kpi-card-compact">
+                    <div class="kpi-text-wrap">
+                        <span class="kpi-mini-title">База данных</span>
+                        <span class="kpi-mini-val" id="statusDbSize">184 KB</span>
+                        <span class="kpi-mini-sub" id="kpiBackupsSub"><i data-lucide="archive" style="width:9px;height:9px;color:var(--g-purple);"></i> 14 снимков</span>
+                    </div>
+                    <div class="kpi-pill-icon icon-purple"><i data-lucide="archive" style="width: 16px; height: 16px;"></i></div>
+                </div>
+
+                <div class="kpi-card-compact">
+                    <div class="kpi-text-wrap">
+                        <span class="kpi-mini-title">Службы ботов</span>
+                        <span class="kpi-mini-val" style="font-size: 14px; color: var(--g-green);"><i data-lucide="check-circle" style="width:14px;height:14px;display:inline;"></i> Online</span>
+                        <span class="kpi-mini-sub"><i data-lucide="send" style="width:9px;height:9px;"></i> TG Long Polling</span>
+                    </div>
+                    <div class="kpi-pill-icon icon-blue"><i data-lucide="radio" style="width: 16px; height: 16px;"></i></div>
+                </div>
+            </div>
+
+            <!-- Row 2: 3-Column Visual Core -->
+            <div class="dense-core-grid">
+                
+                <!-- Main Traffic & Performance Chart (REAL SERVER TIMELINE) -->
+                <div class="dense-card">
+                    <div class="card-header-row">
+                        <div class="card-title-badge">
+                            <i data-lucide="trending-up" style="color: var(--g-blue); width: 15px; height: 15px;"></i>
+                            <span>Сетевая активность: P2P Кэш vs Вызовы Госуслуг (Реальные данные)</span>
+                        </div>
+                        <span class="pill-badge pill-badge-green" id="timelineLiveTag">Реальное время</span>
+                    </div>
+                    <div class="chart-box-compact">
+                        <canvas id="trafficChart"></canvas>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; font-size: 10.5px; color: var(--g-text-secondary); border-top: 1px solid var(--g-border); padding-top: 6px;">
+                        <span>Локально отдано: <strong style="color:var(--g-blue);" id="hitRateStat">97.4%</strong></span>
+                        <span>Запросов кэша: <strong style="color:var(--g-green);" id="totalHitsStat">0</strong></span>
+                        <span>Прямых вызовов Госуслуг: <strong style="color:var(--g-red);" id="totalCallsStat">0</strong></span>
+                    </div>
+                </div>
+
+                <!-- Roles & Topology Node Status -->
+                <div class="dense-card">
+                    <div class="card-header-row">
+                        <div class="card-title-badge">
+                            <i data-lucide="pie-chart" style="color: var(--g-purple); width: 15px; height: 15px;"></i>
+                            <span>Роли & Топология</span>
+                        </div>
+                        <span class="pill-badge pill-badge-blue" id="kpiRolesTotalBadge">7 чел</span>
+                    </div>
+
+                    <div style="height: 100px; width: 100%; position: relative;">
+                        <canvas id="rolesChart"></canvas>
+                    </div>
+
+                    <div style="display: flex; flex-direction: column; gap: 4px; margin-top: 2px;">
+                        <div class="dense-strip">
+                            <span class="dense-strip-label"><i data-lucide="shield-check" style="width:12px;height:12px;color:var(--g-green);"></i> Минцифры TLS</span>
+                            <span class="pill-badge pill-badge-green">GOST Scoped</span>
+                        </div>
+                        <div class="dense-strip">
+                            <span class="dense-strip-label"><i data-lucide="fast-forward" style="width:12px;height:12px;color:var(--g-blue);"></i> Anti-Stampede</span>
+                            <span class="pill-badge pill-badge-blue">0 zombie lock</span>
+                        </div>
+                        <div class="dense-strip">
+                            <span class="dense-strip-label"><i data-lucide="alert-triangle" style="width:12px;height:12px;color:var(--g-yellow);"></i> Режим техработ</span>
+                            <span class="pill-badge pill-badge-muted" id="statusMaintenance">Выключен</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Memory Gauges & Resource Utilization -->
+                <div class="dense-card">
+                    <div class="card-header-row">
+                        <div class="card-title-badge">
+                            <i data-lucide="layers" style="color: var(--g-green); width: 15px; height: 15px;"></i>
+                            <span>Память & Потоки</span>
+                        </div>
+                        <button class="btn btn-tonal" style="padding: 3px 8px; font-size: 10.5px;" onclick="triggerGcCollect()" title="Сжать кучу">
+                            <i data-lucide="sparkles" style="width: 11px; height: 11px; color: var(--g-yellow);"></i>
+                            <span>GC</span>
+                        </button>
+                    </div>
+
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <div>
+                            <div style="display: flex; justify-content: space-between; font-size: 11px;">
+                                <span style="color: var(--g-text-secondary);">Working Set RAM</span>
+                                <span id="telemWsRamBar" style="font-family: var(--font-mono); font-weight: 700; color: var(--g-blue);">0 MB</span>
+                            </div>
+                            <div class="gauge-bar-wrap">
+                                <div id="wsBarFill" class="gauge-bar-fill" style="width: 28%; background: var(--g-blue);"></div>
+                            </div>
+                        </div>
+
+                        <div>
+                            <div style="display: flex; justify-content: space-between; font-size: 11px;">
+                                <span style="color: var(--g-text-secondary);">GC Managed Heap</span>
+                                <span id="telemGcRamBar" style="font-family: var(--font-mono); font-weight: 700; color: var(--g-green);">0 MB</span>
+                            </div>
+                            <div class="gauge-bar-wrap">
+                                <div id="gcBarFill" class="gauge-bar-fill" style="width: 14%; background: var(--g-green);"></div>
+                            </div>
+                        </div>
+
+                        <div class="dense-strip">
+                            <span class="dense-strip-label"><i data-lucide="refresh-cw" style="width:12px;height:12px;"></i> GC Gen 0 / 1 / 2</span>
+                            <span class="dense-strip-val" id="telemGcCounts">0 / 0 / 0</span>
+                        </div>
+
+                        <div class="dense-strip">
+                            <span class="dense-strip-label"><i data-lucide="git-fork" style="width:12px;height:12px;"></i> Kestrel Threads</span>
+                            <span class="dense-strip-val" id="telemThreads">39 потоков</span>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Row 3: 2-Column Lower Core (Real-Time Activity Feed + Quick Actions) -->
+            <div class="dense-bottom-grid">
+                
+                <!-- Live Event & Security Audit Stream -->
+                <div class="dense-card">
+                    <div class="card-header-row">
+                        <div class="card-title-badge">
+                            <i data-lucide="terminal" style="color: var(--g-blue); width: 15px; height: 15px;"></i>
+                            <span>События и аудит безопасности в реальном времени</span>
+                        </div>
+                        <span class="pill-badge pill-badge-blue">Live Telemetry Stream</span>
+                    </div>
+
+                    <div class="event-feed" id="liveEventsList">
+                        <div class="event-item">
+                            <div class="event-left">
+                                <span class="event-time">--:--:--</span>
+                                <span>Загрузка событий сервера...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Quick Operations & Direct Controls -->
+                <div class="dense-card">
+                    <div class="card-header-row">
+                        <div class="card-title-badge">
+                            <i data-lucide="zap" style="color: var(--g-yellow); width: 15px; height: 15px;"></i>
+                            <span>Быстрые операции сервиса</span>
+                        </div>
+                    </div>
+
+                    <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                        <button class="btn btn-primary" onclick="triggerManualBackup()">
+                            <i data-lucide="plus" style="width: 13px; height: 13px;"></i>
+                            <span>Создать снимок SQLite</span>
+                        </button>
+                        <button class="btn btn-tonal" id="btnToggleMaint" onclick="toggleMaintenanceMode()">
+                            <i data-lucide="power" style="width: 13px; height: 13px;"></i>
+                            <span id="maintBtnText">Техработы</span>
+                        </button>
+                        <button class="btn btn-danger-pill" onclick="clearClassroomCache()">
+                            <i data-lucide="trash-2" style="width: 13px; height: 13px;"></i>
+                            <span>Сбросить P2P Кэш</span>
+                        </button>
+                    </div>
+
+                    <!-- Quick Broadcast Inline Bar -->
+                    <form onsubmit="handleQuickBroadcast(event)" style="display: flex; gap: 6px; margin-top: 4px;">
+                        <input type="text" id="quickBroadcastText" class="pill-input" placeholder="Быстрое оповещение всем в Telegram..." required style="padding: 6px 14px; font-size: 11.5px;" />
+                        <button type="submit" id="quickBroadcastBtn" class="btn btn-tonal" style="padding: 6px 14px;">
+                            <i data-lucide="send" style="width: 12px; height: 12px; color: var(--g-blue);"></i>
+                            <span>Шорох</span>
+                        </button>
+                    </form>
+                </div>
+
+            </div>
+
+        </div>
+
+        <!-- ── TAB 2: TELEMETRY (DETAILED METRICS) ── -->
+        <div id="pane-telemetry" class="tab-pane">
+            <div class="dense-kpi-grid-6" style="grid-template-columns: repeat(3, 1fr);">
+                
+                <div class="dense-card">
+                    <div class="card-header-row">
+                        <div class="card-title-badge">
+                            <i data-lucide="terminal" style="color: var(--g-blue); width: 15px; height: 15px;"></i>
+                            <span>Рантайм и ОС</span>
+                        </div>
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 5px;">
+                        <div class="dense-strip"><span class="dense-strip-label">ОС</span><span class="dense-strip-val" id="telemOs">Debian GNU/Linux 13 (trixie)</span></div>
+                        <div class="dense-strip"><span class="dense-strip-label">Архитектура</span><span class="dense-strip-val" id="telemArch">X64</span></div>
+                        <div class="dense-strip"><span class="dense-strip-label">Фреймворк</span><span class="dense-strip-val" id="telemRuntime">.NET 10.0.11</span></div>
+                        <div class="dense-strip"><span class="dense-strip-label">Uptime</span><span class="dense-strip-val" id="telemUptime" style="color: var(--g-blue);">0d 0h 0m</span></div>
+                        <div class="dense-strip"><span class="dense-strip-label">Process ID</span><span class="dense-strip-val" id="telemPid">-</span></div>
+                        <div class="dense-strip"><span class="dense-strip-label">Старт процесса</span><span class="dense-strip-val" id="telemStarted">-</span></div>
+                    </div>
+                </div>
+
+                <div class="dense-card">
+                    <div class="card-header-row">
+                        <div class="card-title-badge">
+                            <i data-lucide="layers" style="color: var(--g-green); width: 15px; height: 15px;"></i>
+                            <span>Память и Сборщик мусора</span>
+                        </div>
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 5px;">
+                        <div class="dense-strip"><span class="dense-strip-label">Working Set RAM</span><span class="dense-strip-val" id="telemWsRam">0 MB</span></div>
+                        <div class="dense-strip"><span class="dense-strip-label">Private Bytes</span><span class="dense-strip-val" id="telemPrivateRam">0 MB</span></div>
+                        <div class="dense-strip"><span class="dense-strip-label">GC Total Allocated</span><span class="dense-strip-val" id="telemGcMemory">0 MB</span></div>
+                        <div class="dense-strip"><span class="dense-strip-label">Сборки Gen 0/1/2</span><span class="dense-strip-val" id="telemGcCounts2">0 / 0 / 0</span></div>
+                        <div class="dense-strip"><span class="dense-strip-label">Потоков ThreadPool</span><span class="dense-strip-val" id="telemThreads2">0</span></div>
+                    </div>
+                </div>
+
+                <div class="dense-card">
+                    <div class="card-header-row">
+                        <div class="card-title-badge">
+                            <i data-lucide="shield" style="color: var(--g-yellow); width: 15px; height: 15px;"></i>
+                            <span>Безопасность и Сеть</span>
+                        </div>
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 5px;">
+                        <div class="dense-strip"><span class="dense-strip-label">Шифрование токенов</span><span class="pill-badge pill-badge-green">AES-256 GCM (v1)</span></div>
+                        <div class="dense-strip"><span class="dense-strip-label">Минцифры Root CA</span><span class="pill-badge pill-badge-blue">Строгая изоляция</span></div>
+                        <div class="dense-strip"><span class="dense-strip-label">Anti-Deadlock Lock</span><span class="pill-badge pill-badge-green">WaitAsync(12s)</span></div>
+                        <div class="dense-strip"><span class="dense-strip-label">DDoS Rate Limit</span><span class="pill-badge pill-badge-muted">60 req/min</span></div>
+                        <div class="dense-strip"><span class="dense-strip-label">Бэкапы WAL</span><span class="pill-badge pill-badge-green">Атомарные (VACUUM)</span></div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- ── TAB 3: USERS (DENSE TABLE) ── -->
+        <div id="pane-users" class="tab-pane">
+            <div class="dense-card">
+                <div class="card-header-row">
+                    <div class="card-title-badge">
+                        <i data-lucide="users" style="color: var(--g-blue); width: 15px; height: 15px;"></i>
+                        <span>База пользователей Mirage</span>
+                    </div>
+
+                    <div style="display: flex; gap: 6px; align-items: center;">
+                        <input type="text" id="userSearchInput" class="pill-input" placeholder="Поиск по ID, @username, имени, классу..." style="width: 250px; padding: 5px 12px; font-size: 11px;" oninput="debounceUserSearch()" />
+                        <button class="btn btn-tonal" style="padding: 5px 12px;" onclick="loadUsersTable()">
+                            <i data-lucide="search" style="width: 12px; height: 12px;"></i>
+                            <span>Найти</span>
+                        </button>
+                        <button class="btn btn-tonal" style="padding: 5px 12px; color: var(--g-blue);" onclick="triggerSyncAllUsers()" title="Объединить и синхронизировать профили">
+                            <i data-lucide="refresh-cw" style="width: 12px; height: 12px;"></i>
+                            <span>Синхронизировать все</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="table-container-compact">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Пользователь / ID</th>
+                                <th>Платформа</th>
+                                <th>Роль</th>
+                                <th>Школа / Организация</th>
+                                <th>Класс</th>
+                                <th>Премиум</th>
+                                <th>Сессия</th>
+                                <th>Будильник</th>
+                                <th>Действие</th>
+                            </tr>
+                        </thead>
+                        <tbody id="usersTableBody">
+                            <tr><td colspan="9" style="text-align: center; color: var(--g-text-muted); padding: 16px;">Загрузка пользователей...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── TAB 4: BACKUPS (DENSE TABLE) ── -->
+        <div id="pane-backups" class="tab-pane">
+            <div class="dense-card">
+                <div class="card-header-row">
+                    <div class="card-title-badge">
+                        <i data-lucide="database" style="color: var(--g-green); width: 15px; height: 15px;"></i>
+                        <span>Точки восстановления SQLite (Атомарные VACUUM INTO)</span>
+                    </div>
+                    <button class="btn btn-primary" onclick="triggerManualBackup()">
+                        <i data-lucide="plus" style="width: 13px; height: 13px;"></i>
+                        <span>Создать снимок базы</span>
+                    </button>
+                </div>
+
+                <div class="table-container-compact">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Файл снимка</th>
+                                <th>Размер</th>
+                                <th>Создан (UTC)</th>
+                                <th>Тип снимка</th>
+                                <th>Состояние</th>
+                            </tr>
+                        </thead>
+                        <tbody id="backupsTableBody">
+                            <tr><td colspan="5" style="text-align: center; color: var(--g-text-muted); padding: 16px;">Загрузка списка снимков...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── TAB 5: SETTINGS & OPERATIONS ── -->
+        <div id="pane-settings" class="tab-pane">
+            <div class="dense-bottom-grid" style="grid-template-columns: 1fr 1fr;">
+                
+                <div class="dense-card">
+                    <div class="card-header-row">
+                        <div class="card-title-badge">
+                            <i data-lucide="sliders" style="color: var(--g-yellow); width: 15px; height: 15px;"></i>
+                            <span>Режим техобслуживания и кэширования</span>
+                        </div>
+                    </div>
+                    <p style="font-size: 11.5px; color: var(--g-text-secondary); line-height: 1.4;">
+                        При включении бот переходит в оффлайн-режим и отдаёт ученикам сохранённые расписания из P2P кэша, защищая аккаунты от блокировок при сбоях входа в Госуслуги.
+                    </p>
+                    <div style="display: flex; gap: 8px; margin-top: 6px;">
+                        <button class="btn btn-tonal" id="btnToggleMaint2" onclick="toggleMaintenanceMode()">
+                            <i data-lucide="power" style="width: 13px; height: 13px;"></i>
+                            <span id="maintBtnText2">Включить техработы</span>
+                        </button>
+                        <button class="btn btn-danger-pill" onclick="clearClassroomCache()">
+                            <i data-lucide="trash-2" style="width: 13px; height: 13px;"></i>
+                            <span>Сбросить P2P Кэш</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="dense-card">
+                    <div class="card-header-row">
+                        <div class="card-title-badge">
+                            <i data-lucide="megaphone" style="color: var(--g-blue); width: 15px; height: 15px;"></i>
+                            <span>Полная трансляция сообщений (Telegram Broadcast)</span>
+                        </div>
+                    </div>
+                    <form onsubmit="handleFullBroadcast(event)" style="display: flex; flex-direction: column; gap: 6px;">
+                        <div style="display: flex; gap: 6px;">
+                            <select id="fullBroadcastTarget" class="pill-input" style="width: auto; padding: 5px 12px; font-size: 11.5px;">
+                                <option value="All">Всем</option>
+                                <option value="Student">Ученикам</option>
+                                <option value="Parent">Родителям</option>
+                                <option value="HeadTeacher">Учителям</option>
+                            </select>
+                            <input type="text" id="fullBroadcastText" class="pill-input" placeholder="Текст сообщения (Markdown)..." required style="padding: 5px 12px; font-size: 11.5px;" />
+                            <button type="submit" id="fullBroadcastBtn" class="btn btn-primary">
+                                <i data-lucide="send" style="width: 12px; height: 12px;"></i>
+                                <span>Разослать</span>
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+            </div>
+        </div>
+
+    </main>
+
+    <!-- TOAST NOTIFICATIONS -->
+    <div id="toastContainer"></div>
+
+    <script>
+        // ── APPLICATION STATE & SECURITY ────────────────────────────────────────
+        let adminKey = sessionStorage.getItem('mirage_admin_key') || '';
+        let inactivityTimer = null;
+        const INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000;
+        let trafficChartInstance = null;
+        let rolesChartInstance = null;
+        let searchTimeout = null;
+
+        ['mousedown', 'keydown', 'scroll', 'touchstart'].forEach(evt => {
+            window.addEventListener(evt, resetInactivityTimer, { passive: true });
+        });
+
+        function resetInactivityTimer() {
+            if (!adminKey) return;
+            clearTimeout(inactivityTimer);
+            inactivityTimer = setTimeout(() => {
+                showToast('Сессия заблокирована по таймауту', 'info');
+                handleLogout();
+            }, INACTIVITY_TIMEOUT_MS);
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            lucide.createIcons();
+            if (adminKey) {
+                verifyAndBoot();
+            } else {
+                document.getElementById('loginOverlay').style.display = 'flex';
+                document.getElementById('adminKeyInput').focus();
+            }
+        });
+
+        function togglePasswordVisibility() {
+            const input = document.getElementById('adminKeyInput');
+            const eye = document.getElementById('eyeIcon');
+            if (input.type === 'password') {
+                input.type = 'text';
+                eye.setAttribute('data-lucide', 'eye-off');
+            } else {
+                input.type = 'password';
+                eye.setAttribute('data-lucide', 'eye');
+            }
+            lucide.createIcons();
+        }
+
+        async function handleLogin(e) {
+            e.preventDefault();
+            const input = document.getElementById('adminKeyInput');
+            const btn = document.getElementById('loginBtn');
+            const val = input.value.trim();
+            if (!val) return;
+
+            btn.disabled = true;
+            btn.innerHTML = '<i data-lucide="loader-2" class="spin" style="width:13px;height:13px;"></i> <span>Вход...</span>';
+            lucide.createIcons();
+
+            try {
+                const res = await fetch('/api/admin/telemetry', {
+                    headers: { 'X-Admin-Key': val }
+                });
+
+                if (res.ok) {
+                    adminKey = val;
+                    sessionStorage.setItem('mirage_admin_key', adminKey);
+                    resetInactivityTimer();
+                    
+                    gsap.to('#loginOverlay', {
+                        opacity: 0,
+                        duration: 0.22,
+                        ease: 'power2.out',
+                        onComplete: () => {
+                            document.getElementById('loginOverlay').style.display = 'none';
+                            document.getElementById('loginOverlay').style.opacity = 1;
+                            initDashboard();
+                        }
+                    });
+                    showToast('Вход в Mirage Console выполнен', 'success');
+                } else {
+                    gsap.fromTo('.login-card', { x: -6 }, { x: 6, duration: 0.07, repeat: 4, yoyo: true, ease: 'sine.inOut' });
+                    showToast('Недействительный ключ администратора', 'error');
+                }
+            } catch (err) {
+                showToast('Ошибка сетевого соединения', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i data-lucide="lock" style="width:14px;height:14px;"></i> <span>Войти в консоль</span>';
+                lucide.createIcons();
+            }
+        }
+
+        function handleLogout() {
+            adminKey = '';
+            sessionStorage.removeItem('mirage_admin_key');
+            clearTimeout(inactivityTimer);
+            document.getElementById('adminKeyInput').value = '';
+            document.getElementById('loginOverlay').style.display = 'flex';
+            document.getElementById('adminKeyInput').focus();
+            showToast('Сессия завершена', 'info');
+        }
+
+        async function verifyAndBoot() {
+            try {
+                const res = await fetch('/api/admin/telemetry', {
+                    headers: { 'X-Admin-Key': adminKey }
+                });
+                if (res.ok) {
+                    document.getElementById('loginOverlay').style.display = 'none';
+                    initDashboard();
+                } else {
+                    handleLogout();
+                }
+            } catch {
+                handleLogout();
+            }
+        }
+
+        function initDashboard() {
+            initCharts();
+            loadTelemetry();
+            loadUsersTable();
+            loadBackupsTable();
+
+            setInterval(() => {
+                if (adminKey && document.getElementById('loginOverlay').style.display === 'none') {
+                    loadTelemetry(true);
+                }
+            }, 6000);
+        }
+
+        async function loadTelemetry(silent = false) {
+            try {
+                const res = await fetch('/api/admin/telemetry', {
+                    headers: { 'X-Admin-Key': adminKey }
+                });
+                if (!res.ok) {
+                    if (res.status === 401) handleLogout();
+                    return;
+                }
+                const data = await res.json();
+                renderTelemetry(data);
+                if (!silent) lucide.createIcons();
+            } catch (err) {
+                console.error('Telemetry error:', err);
+            }
+        }
+
+        function renderTelemetry(data) {
+            // Header
+            document.getElementById('headerUptime').textContent = data.system.uptime;
+
+            // 6-Column KPI Strip
+            animateValue('kpiTotalUsers', data.users.total);
+            animateValue('kpiActiveSessions', data.users.activeSessions);
+            document.getElementById('kpiMobileSessionsSub').textContent = `${data.users.mobileSessions} мобильных`;
+            animateValue('kpiCacheEntries', data.cache.cachedEntries);
+            document.getElementById('kpiMemoryUsed').textContent = `${data.system.memoryWorkingSetMb} MB`;
+            document.getElementById('kpiThreadsCount').textContent = `${data.system.threadsCount} потоков`;
+
+            document.getElementById('statusDbSize').textContent = data.storage.dbSizeFormatted;
+            document.getElementById('kpiBackupsSub').textContent = `${data.storage.backupsCount} снимков`;
+
+            // Memory Gauges
+            document.getElementById('telemWsRamBar').textContent = `${data.system.memoryWorkingSetMb} MB`;
+            document.getElementById('telemGcRamBar').textContent = `${data.system.memoryGcAllocatedMb} MB`;
+            const wsPercent = Math.min(100, Math.round((data.system.memoryWorkingSetMb / 512) * 100));
+            const gcPercent = Math.min(100, Math.round((data.system.memoryGcAllocatedMb / 256) * 100));
+            document.getElementById('wsBarFill').style.width = `${wsPercent}%`;
+            document.getElementById('gcBarFill').style.width = `${gcPercent}%`;
+
+            document.getElementById('telemGcCounts').textContent = `${data.system.gcGen0} / ${data.system.gcGen1} / ${data.system.gcGen2}`;
+            document.getElementById('telemThreads').textContent = `${data.system.threadsCount} потоков`;
+
+            // Telemetry Tab
+            document.getElementById('telemOs').textContent = data.system.os;
+            document.getElementById('telemArch').textContent = data.system.architecture;
+            document.getElementById('telemRuntime').textContent = data.system.runtime;
+            document.getElementById('telemUptime').textContent = data.system.uptime;
+            document.getElementById('telemPid').textContent = data.system.processId;
+            document.getElementById('telemStarted').textContent = data.system.startedAtUtc;
+
+            document.getElementById('telemWsRam').textContent = `${data.system.memoryWorkingSetMb} MB`;
+            document.getElementById('telemPrivateRam').textContent = `${data.system.memoryPrivateMb} MB`;
+            document.getElementById('telemGcMemory').textContent = `${data.system.memoryGcAllocatedMb} MB`;
+            document.getElementById('telemGcCounts2').textContent = `${data.system.gcGen0} / ${data.system.gcGen1} / ${data.system.gcGen2}`;
+            document.getElementById('telemThreads2').textContent = `${data.system.threadsCount} потоков`;
+
+            // Maintenance State
+            const maintBadge = document.getElementById('statusMaintenance');
+            const maintBtnText = document.getElementById('maintBtnText');
+            const maintBtnText2 = document.getElementById('maintBtnText2');
+            if (data.cache.isMaintenance) {
+                maintBadge.textContent = 'ВКЛЮЧЕН (Резерв)';
+                maintBadge.className = 'pill-badge pill-badge-red';
+                if (maintBtnText) maintBtnText.textContent = 'Выкл техработы';
+                if (maintBtnText2) maintBtnText2.textContent = 'Выключить техработы';
+            } else {
+                maintBadge.textContent = 'Выключен (Штатно)';
+                maintBadge.className = 'pill-badge pill-badge-muted';
+                if (maintBtnText) maintBtnText.textContent = 'Техработы';
+                if (maintBtnText2) maintBtnText2.textContent = 'Включить техработы';
+            }
+
+            // Roles
+            document.getElementById('kpiRolesTotalBadge').textContent = `${data.users.total} чел`;
+            if (rolesChartInstance) {
+                rolesChartInstance.data.datasets[0].data = [
+                    data.users.roles.students,
+                    data.users.roles.parents,
+                    data.users.roles.teachers,
+                    data.users.roles.admins
+                ];
+                rolesChartInstance.update();
+            }
+
+            // Real Traffic Graph from Backend!
+            if (data.trafficTimeline && trafficChartInstance) {
+                trafficChartInstance.data.labels = data.trafficTimeline.labels;
+                trafficChartInstance.data.datasets[0].data = data.trafficTimeline.cacheHits;
+                trafficChartInstance.data.datasets[1].data = data.trafficTimeline.externalCalls;
+                trafficChartInstance.update('none');
+
+                document.getElementById('hitRateStat').textContent = `${data.trafficTimeline.hitRatePercent}%`;
+                document.getElementById('kpiHitRateBadge').textContent = `${data.trafficTimeline.hitRatePercent}%`;
+                document.getElementById('totalHitsStat').textContent = data.trafficTimeline.totalCacheHits.toLocaleString();
+                document.getElementById('totalCallsStat').textContent = data.trafficTimeline.totalExternalCalls.toLocaleString();
+            }
+
+            // Real-time Event Stream
+            if (data.events && data.events.length > 0) {
+                renderEventsList(data.events);
+            }
+        }
+
+        function renderEventsList(events) {
+            const container = document.getElementById('liveEventsList');
+            let html = '';
+            events.forEach(e => {
+                let badgeClass = 'pill-badge-blue';
+                if (e.type === 'success') badgeClass = 'pill-badge-green';
+                if (e.type === 'error') badgeClass = 'pill-badge-red';
+                if (e.type === 'warning') badgeClass = 'pill-badge-yellow';
+
+                html += `
+                    <div class="event-item">
+                        <div class="event-left">
+                            <span class="event-time">${e.time}</span>
+                            <span>${e.message}</span>
+                        </div>
+                        <span class="pill-badge ${badgeClass}">${e.badge}</span>
+                    </div>
+                `;
+            });
+            container.innerHTML = html;
+        }
+
+        async function triggerGcCollect() {
+            showToast('Сжатие управляемой памяти (GC.Collect)...', 'info');
+            try {
+                const res = await fetch('/api/admin/system/gc', {
+                    method: 'POST',
+                    headers: { 'X-Admin-Key': adminKey }
+                });
+                const data = await res.json();
+                if (res.ok && data.success) {
+                    showToast(`Память сжата: освобождено ${data.freedMb} MB (текущая: ${data.currentMemoryMb} MB)`, 'success');
+                    loadTelemetry(true);
+                } else {
+                    showToast('Ошибка при вызове GC', 'error');
+                }
+            } catch {
+                showToast('Ошибка соединения', 'error');
+            }
+        }
+
+        function animateValue(id, targetVal) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            const current = parseInt(el.textContent.replace(/[^0-9]/g, '')) || 0;
+            if (current === targetVal) return;
+
+            gsap.to({ val: current }, {
+                val: targetVal,
+                duration: 0.5,
+                ease: 'power2.out',
+                onUpdate: function () {
+                    el.textContent = Math.round(this.targets()[0].val).toLocaleString();
+                }
+            });
+        }
+
+        function initCharts() {
+            Chart.defaults.color = '#9aa0a6';
+            Chart.defaults.font.family = "'Plus Jakarta Sans', sans-serif";
+
+            // Spline Traffic (Initialized with empty, populated dynamically from server)
+            const ctxTraffic = document.getElementById('trafficChart').getContext('2d');
+            const gradCache = ctxTraffic.createLinearGradient(0, 0, 0, 180);
+            gradCache.addColorStop(0, 'rgba(138, 180, 248, 0.28)');
+            gradCache.addColorStop(1, 'rgba(138, 180, 248, 0.0)');
+
+            trafficChartInstance = new Chart(ctxTraffic, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [
+                        {
+                            label: 'P2P Кэш (1ms)',
+                            data: [],
+                            borderColor: '#8ab4f8',
+                            backgroundColor: gradCache,
+                            fill: true,
+                            tension: 0.35,
+                            borderWidth: 2,
+                            pointRadius: 3,
+                            pointHoverRadius: 5
+                        },
+                        {
+                            label: 'Госуслуги Live',
+                            data: [],
+                            borderColor: '#f28b82',
+                            tension: 0.35,
+                            borderWidth: 1.5,
+                            pointRadius: 2.5
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: { display: true, position: 'top', labels: { boxWidth: 8, usePointStyle: true, font: { size: 10 } } }
+                    },
+                    scales: {
+                        x: { grid: { color: 'rgba(255,255,255,0.03)' } },
+                        y: { grid: { color: 'rgba(255,255,255,0.03)' } }
+                    }
+                }
+            });
+
+            // Mini Donut
+            const ctxRoles = document.getElementById('rolesChart').getContext('2d');
+            rolesChartInstance = new Chart(ctxRoles, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Ученики', 'Родители', 'Учителя', 'Админы'],
+                    datasets: [{
+                        data: [1, 0, 0, 0],
+                        backgroundColor: ['#8ab4f8', '#81c995', '#fdd663', '#c58af9'],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    cutout: '74%',
+                    plugins: {
+                        legend: { position: 'right', labels: { boxWidth: 6, padding: 5, usePointStyle: true, font: { size: 9.5 } } }
+                    }
+                }
+            });
+        }
+
+        // ── USERS TABLE ──
+        function debounceUserSearch() {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(() => { loadUsersTable(); }, 250);
+        }
+
+        async function loadUsersTable() {
+            const tbody = document.getElementById('usersTableBody');
+            const search = document.getElementById('userSearchInput')?.value || '';
+            const url = `/api/admin/users${search ? '?search=' + encodeURIComponent(search) : ''}`;
+
+            try {
+                const res = await fetch(url, { headers: { 'X-Admin-Key': adminKey } });
+                if (!res.ok) return;
+                const users = await res.json();
+
+                if (users.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; color: var(--g-text-muted); padding: 14px;">Пользователи не найдены</td></tr>';
+                    return;
+                }
+
+                let html = '';
+                users.forEach(u => {
+                    const sessionBadge = u.hasSession
+                        ? '<span class="pill-badge pill-badge-green"><i data-lucide="check" style="width:9px;height:9px;"></i> Активна</span>'
+                        : '<span class="pill-badge pill-badge-muted">Нет</span>';
+
+                    const alarmBadge = u.isAlarmEnabled
+                        ? '<span class="pill-badge pill-badge-blue">Вкл</span>'
+                        : '<span class="pill-badge pill-badge-muted">Выкл</span>';
+
+                    const platformBadge = u.platform === 'max'
+                        ? '<span class="pill-badge" style="background: rgba(197, 138, 249, 0.15); color: var(--g-purple); border: 1px solid rgba(197, 138, 249, 0.3);">MAX</span>'
+                        : '<span class="pill-badge" style="background: rgba(138, 180, 248, 0.15); color: var(--g-blue); border: 1px solid rgba(138, 180, 248, 0.3);">Telegram</span>';
+
+                    const fullName = [u.firstName, u.lastName].filter(Boolean).join(' ');
+                    const userTitle = u.username ? `@${u.username}` : (fullName || u.id);
+                    const userSub = u.username && fullName ? `<div style="font-size: 10px; color: var(--g-text-secondary);">${fullName}</div>` : '';
+                    const linkedSub = u.linkedUserId ? `<div style="font-size: 9.5px; color: var(--g-text-muted); font-family: var(--font-mono);">🔗 ${u.linkedUserId}</div>` : '';
+
+                    let premiumCell = '';
+                    if (u.role === 'Admin') {
+                        premiumCell = '<span class="pill-badge pill-badge-amber" title="Администратор"><i data-lucide="crown" style="width:9px;height:9px;"></i> Вечный</span>';
+                    } else if (u.hasPremium) {
+                        const expText = u.subscriptionExpiresAtUtc ? `до ${u.subscriptionExpiresAtUtc.split(' ')[0]}` : 'Активен';
+                        premiumCell = `
+                            <div style="display:inline-flex; align-items:center; gap:4px;">
+                                <span class="pill-badge pill-badge-green" title="Истекает: ${u.subscriptionExpiresAtUtc || 'Бессрочно'}">⭐ ${expText}</span>
+                                <button class="btn btn-tonal" style="padding: 2px 5px; font-size: 9.5px; color: var(--g-red);" title="Отозвать премиум" onclick="toggleUserSubscription('${u.id}', false)">✕</button>
+                            </div>`;
+                    } else {
+                        premiumCell = `
+                            <button class="btn btn-tonal" style="padding: 2px 6px; font-size: 9.5px; color: var(--g-amber);" onclick="toggleUserSubscription('${u.id}', true, 30)">
+                                + 30 дн
+                            </button>`;
+                    }
+
+                    html += `
+                        <tr>
+                            <td>
+                                <div style="font-family: var(--font-mono); font-weight: 600; font-size: 11.5px;">${userTitle}</div>
+                                <div style="font-size: 10px; color: var(--g-text-muted); font-family: var(--font-mono);">${u.id}</div>
+                                ${userSub}
+                                ${linkedSub}
+                            </td>
+                            <td>${platformBadge}</td>
+                            <td><span class="pill-badge pill-badge-blue">${u.role}</span></td>
+                            <td style="max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${u.orgName || '—'}</td>
+                            <td><span class="pill-badge pill-badge-muted">${u.className || '—'}</span></td>
+                            <td>${premiumCell}</td>
+                            <td>${sessionBadge}</td>
+                            <td>${alarmBadge}</td>
+                            <td>
+                                <select onchange="changeUserRole('${u.id}', this.value)" class="pill-input" style="padding: 2px 7px; font-size: 10.5px; width: auto;">
+                                    <option value="Student" ${u.role === 'Student' ? 'selected' : ''}>Ученик</option>
+                                    <option value="Parent" ${u.role === 'Parent' ? 'selected' : ''}>Родитель</option>
+                                    <option value="HeadTeacher" ${u.role === 'HeadTeacher' ? 'selected' : ''}>Учитель</option>
+                                    <option value="Admin" ${u.role === 'Admin' ? 'selected' : ''}>Админ</option>
+                                </select>
+                            </td>
+                        </tr>
+                    `;
+                });
+
+                tbody.innerHTML = html;
+                lucide.createIcons();
+            } catch (err) {
+                console.error('Users load error:', err);
+            }
+        }
+
+        async function triggerSyncAllUsers() {
+            try {
+                showToast('Запуск глобальной синхронизации...', 'info');
+                const res = await fetch('/api/admin/users/sync-all', {
+                    method: 'POST',
+                    headers: { 'X-Admin-Key': adminKey }
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    showToast(`Синхронизировано связей: ${data.syncedLinks}`, 'success');
+                    loadUsersTable();
+                } else {
+                    showToast(data.error || 'Ошибка синхронизации', 'error');
+                }
+            } catch (err) {
+                showToast('Сетевая ошибка при синхронизации', 'error');
+            }
+        }
+
+        async function toggleUserSubscription(userId, isSubscribed, days = 30) {
+            try {
+                const res = await fetch('/api/admin/users/update-subscription', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Admin-Key': adminKey },
+                    body: JSON.stringify({ userId, isSubscribed, days })
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    showToast(isSubscribed ? `⭐ Премиум выдан пользователю ${userId}!` : `Премиум отозван у ${userId}`);
+                    loadUsersTable();
+                } else {
+                    showToast(data.error || 'Ошибка изменения подписки', 'error');
+                }
+            } catch (err) {
+                showToast('Сетевая ошибка при изменении подписки', 'error');
+            }
+        }
+
+        async function changeUserRole(userId, newRole) {
+            try {
+                const res = await fetch('/api/admin/users/update-role', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Admin-Key': adminKey },
+                    body: JSON.stringify({ userId, newRole })
+                });
+
+                if (res.ok) {
+                    showToast(`Роль пользователя обновлена: ${newRole}`, 'success');
+                    loadTelemetry(true);
+                } else {
+                    showToast('Ошибка обновления роли', 'error');
+                }
+            } catch {
+                showToast('Ошибка сети', 'error');
+            }
+        }
+
+        // ── BACKUPS TABLE ──
+        async function loadBackupsTable() {
+            const tbody = document.getElementById('backupsTableBody');
+            try {
+                const res = await fetch('/api/admin/backups', { headers: { 'X-Admin-Key': adminKey } });
+                if (!res.ok) return;
+                const list = await res.json();
+
+                if (list.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: var(--g-text-muted); padding: 16px;">Снимки отсутствуют</td></tr>';
+                    return;
+                }
+
+                let html = '';
+                list.forEach(b => {
+                    html += `
+                        <tr>
+                            <td style="font-family: var(--font-mono); font-weight: 600; color: var(--g-blue);">${b.fileName}</td>
+                            <td style="font-family: var(--font-mono);">${b.sizeFormatted}</td>
+                            <td style="font-family: var(--font-mono); color: var(--g-text-secondary);">${b.createdAtUtc}</td>
+                            <td><span class="pill-badge pill-badge-blue">${b.fileName.includes('startup') ? 'Старт' : (b.fileName.includes('pre_init') ? 'Pre-Init' : 'Периодический')}</span></td>
+                            <td><span class="pill-badge pill-badge-green"><i data-lucide="check" style="width:9px;height:9px;"></i> Атомарен</span></td>
+                        </tr>
+                    `;
+                });
+
+                tbody.innerHTML = html;
+                lucide.createIcons();
+            } catch (err) {
+                console.error('Backups load error:', err);
+            }
+        }
+
+        async function triggerManualBackup() {
+            showToast('Создание снимка SQLite...', 'info');
+            try {
+                const res = await fetch('/api/admin/backups/create', {
+                    method: 'POST',
+                    headers: { 'X-Admin-Key': adminKey }
+                });
+                const data = await res.json();
+                if (res.ok && data.success) {
+                    showToast(`Снимок создан: ${data.fileName} (${data.sizeFormatted})`, 'success');
+                    loadBackupsTable();
+                    loadTelemetry(true);
+                } else {
+                    showToast(data.error || 'Ошибка бэкапа', 'error');
+                }
+            } catch {
+                showToast('Ошибка при создании бэкапа', 'error');
+            }
+        }
+
+        // ── MAINTENANCE & ACTIONS ──
+        async function toggleMaintenanceMode() {
+            const maintBadge = document.getElementById('statusMaintenance');
+            const isCurrentlyActive = maintBadge.textContent.includes('ВКЛЮЧЕН');
+            const enable = !isCurrentlyActive;
+
+            try {
+                const res = await fetch('/api/admin/maintenance/toggle', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Admin-Key': adminKey },
+                    body: JSON.stringify({ enable })
+                });
+
+                if (res.ok) {
+                    showToast(enable ? 'Режим техработ активирован' : 'Штатный режим восстановлен', enable ? 'warning' : 'success');
+                    loadTelemetry(true);
+                }
+            } catch {
+                showToast('Ошибка переключения', 'error');
+            }
+        }
+
+        async function clearClassroomCache() {
+            if (!confirm('Очистить весь P2P кэш классов?')) return;
+            try {
+                const res = await fetch('/api/admin/cache/clear', {
+                    method: 'POST',
+                    headers: { 'X-Admin-Key': adminKey }
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    showToast(`Кэш очищен (${data.clearedEntries} записей)`, 'success');
+                    loadTelemetry(true);
+                }
+            } catch {
+                showToast('Ошибка очистки', 'error');
+            }
+        }
+
+        async function handleQuickBroadcast(e) {
+            e.preventDefault();
+            const text = document.getElementById('quickBroadcastText').value.trim();
+            const btn = document.getElementById('quickBroadcastBtn');
+            if (!text) return;
+
+            btn.disabled = true;
+            try {
+                const res = await fetch('/api/admin/broadcast', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Admin-Key': adminKey },
+                    body: JSON.stringify({ text, targetRole: 'All' })
+                });
+                const data = await res.json();
+                if (res.ok && data.success) {
+                    showToast(`Оповещение отправлено: ${data.sentCount} доставлено`, 'success');
+                    document.getElementById('quickBroadcastText').value = '';
+                }
+            } catch {
+                showToast('Ошибка отправки', 'error');
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        async function handleFullBroadcast(e) {
+            e.preventDefault();
+            const text = document.getElementById('fullBroadcastText').value.trim();
+            const targetRole = document.getElementById('fullBroadcastTarget').value;
+            const btn = document.getElementById('fullBroadcastBtn');
+            if (!text) return;
+
+            btn.disabled = true;
+            try {
+                const res = await fetch('/api/admin/broadcast', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Admin-Key': adminKey },
+                    body: JSON.stringify({ text, targetRole })
+                });
+                const data = await res.json();
+                if (res.ok && data.success) {
+                    showToast(`Оповещение (${targetRole}) отправлено!`, 'success');
+                    document.getElementById('fullBroadcastText').value = '';
+                }
+            } catch {
+                showToast('Ошибка отправки', 'error');
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        function switchTab(tabId) {
+            document.querySelectorAll('.chip-tab').forEach(btn => btn.classList.remove('active'));
+            document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
+
+            const targetBtn = Array.from(document.querySelectorAll('.chip-tab')).find(b => b.getAttribute('onclick')?.includes(tabId));
+            if (targetBtn) targetBtn.classList.add('active');
+
+            const targetPane = document.getElementById(`pane-${tabId}`);
+            if (targetPane) {
+                targetPane.classList.add('active');
+                gsap.fromTo(targetPane, { opacity: 0, y: 4 }, { opacity: 1, y: 0, duration: 0.18, ease: 'power2.out' });
+            }
+
+            if (tabId === 'users') loadUsersTable();
+            if (tabId === 'backups') loadBackupsTable();
+            if (tabId === 'overview') {
+                if (trafficChartInstance) trafficChartInstance.resize();
+                if (rolesChartInstance) rolesChartInstance.resize();
+            }
+            lucide.createIcons();
+        }
+
+        function refreshCurrentTab() {
+            showToast('Обновление телеметрии...', 'info');
+            loadTelemetry(true);
+            loadUsersTable();
+            loadBackupsTable();
+        }
+
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = `toast-pill toast-${type}`;
+
+            let iconName = 'info';
+            if (type === 'success') iconName = 'check';
+            if (type === 'error') iconName = 'alert-circle';
+            if (type === 'warning') iconName = 'alert-triangle';
+
+            toast.innerHTML = `<i data-lucide="${iconName}" style="width: 14px; height: 14px; flex-shrink: 0;"></i> <span>${message}</span>`;
+            container.appendChild(toast);
+            lucide.createIcons();
+
+            gsap.fromTo(toast, { opacity: 0, y: 12, scale: 0.96 }, { opacity: 1, y: 0, scale: 1, duration: 0.2, ease: 'power2.out' });
+
+            setTimeout(() => {
+                gsap.to(toast, {
+                    opacity: 0,
+                    y: 8,
+                    duration: 0.15,
+                    ease: 'power2.in',
+                    onComplete: () => toast.remove()
+                });
+            }, 3000);
+        }
+    </script>
+</body>
+</html>

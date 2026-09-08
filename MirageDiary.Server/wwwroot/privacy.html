@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Политика конфиденциальности — Mirage Diary</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #f8f9fa;
+            --surface-color: #ffffff;
+            --text-primary: #202124;
+            --text-secondary: #5f6368;
+            --accent-blue: #1a73e8;
+            --border-color: #dadce0;
+            --pill-radius: 9999px;
+            --card-radius: 16px;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg-color: #121316;
+                --surface-color: #1e1f23;
+                --text-primary: #e8eaed;
+                --text-secondary: #9aa0a6;
+                --accent-blue: #8ab4f8;
+                --border-color: rgba(255, 255, 255, 0.12);
+            }
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Plus Jakarta Sans', -apple-system, sans-serif;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            line-height: 1.6;
+            padding: 40px 20px 80px;
+            display: flex;
+            justify-content: center;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 760px;
+        }
+
+        .header {
+            margin-bottom: 32px;
+            text-align: center;
+        }
+
+        .badge {
+            display: inline-block;
+            background: rgba(26, 115, 232, 0.12);
+            color: var(--accent-blue);
+            padding: 4px 14px;
+            border-radius: var(--pill-radius);
+            font-size: 12px;
+            font-weight: 700;
+            margin-bottom: 12px;
+            letter-spacing: 0.3px;
+        }
+
+        h1 {
+            font-size: 28px;
+            font-weight: 800;
+            letter-spacing: -0.5px;
+            margin-bottom: 8px;
+        }
+
+        .updated-at {
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .card {
+            background: var(--surface-color);
+            border: 1px solid var(--border-color);
+            border-radius: var(--card-radius);
+            padding: 28px;
+            margin-bottom: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+
+        h2 {
+            font-size: 18px;
+            font-weight: 700;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        p {
+            font-size: 14.5px;
+            color: var(--text-secondary);
+            margin-bottom: 14px;
+        }
+
+        p:last-child {
+            margin-bottom: 0;
+        }
+
+        ul {
+            margin-left: 20px;
+            margin-bottom: 14px;
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+
+        li {
+            margin-bottom: 6px;
+        }
+
+        .highlight-box {
+            background: rgba(26, 115, 232, 0.08);
+            border-left: 4px solid var(--accent-blue);
+            padding: 14px 18px;
+            border-radius: 8px;
+            margin: 16px 0;
+            font-size: 14px;
+            color: var(--text-primary);
+        }
+
+        .footer-nav {
+            text-align: center;
+            margin-top: 36px;
+        }
+
+        .btn-pill {
+            display: inline-block;
+            background: var(--surface-color);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            text-decoration: none;
+            padding: 10px 24px;
+            border-radius: var(--pill-radius);
+            font-size: 13px;
+            font-weight: 600;
+            transition: all 0.15s ease;
+        }
+
+        .btn-pill:hover {
+            border-color: var(--accent-blue);
+            color: var(--accent-blue);
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <div class="header">
+            <div class="badge">152-ФЗ COMPLIANT</div>
+            <h1>Политика конфиденциальности</h1>
+            <div class="updated-at">Действует с 1 сентября 2026 г. • Сервис Mirage Diary (miragediary.space)</div>
+        </div>
+
+        <div class="card">
+            <h2>1. Общие положения</h2>
+            <p>
+                Настоящая Политика конфиденциальности определяет порядок обработки и защиты персональных данных пользователей сервиса <strong>Mirage Diary</strong> (включая Telegram-бота, MAX-бота и Mini App), предназначенного для оперативного получения расписания уроков и домашних заданий учащимися и родителями.
+            </p>
+            <p>
+                Мы уважительно относимся к конфиденциальности учащихся и соблюдаем требования Федерального закона РФ № 152-ФЗ «О персональных данных».
+            </p>
+        </div>
+
+        <div class="card">
+            <h2>2. Какие данные мы обрабатываем</h2>
+            <ul>
+                <li><strong>Идентификатор аккаунта (Telegram ID / MAX ID):</strong> используется исключительно для маршрутизации ответов бота и отправки напоминаний расписания.</li>
+                <li><strong>Школа и класс обучения:</strong> необходимы для фильтрации расписания и адресации кэша домашнего задания.</li>
+                <li><strong>Авторизационные токены сессии Дневника (Access Token / Refresh Token):</strong> выдаются сервисом ЕСИА (Госуслуги) для чтения данных дневника.</li>
+            </ul>
+
+            <div class="highlight-box">
+                🔒 <strong>Важно:</strong> Сервис <strong>никогда не сохраняет</strong> логины и пароли пользователей от портала «Госуслуги». Авторизация происходит по официальному защищенному протоколу OAuth2 / OpenID Connect (PKCE S256).
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>3. Криптографическая защита информации</h2>
+            <p>
+                Все сессионные токены шифруются на сервере в момент сохранения с использованием военного криптографического стандарта <strong>AES-256 в режиме GCM (Galois/Counter Mode)</strong>.
+            </p>
+            <ul>
+                <li>Ключи шифрования отделены от исходного кода и базы данных и защищены строгими правами доступа операционной системы (POSIX 0600).</li>
+                <li>Все обращения к региональному порталу Дневника происходят по защищенному протоколу TLS с валидацией доверенных корневых сертификатов Минцифры РФ.</li>
+                <li>База данных хранится в изолированном файле SQLite и защищена от несанкционированного чтения.</li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <h2>4. Передача данных третьим лицам</h2>
+            <p>
+                Сервис <strong>не продает, не передает и не предоставляет</strong> персональные данные или историю запросов учащихся третьим лицам, рекламным сетям или аналитическим трекерам.
+            </p>
+            <p>
+                Запросы направляются исключительно в информационную систему электронного дневника (dnevnik.egov66.ru) для получения текущей информации об успеваемости и расписании.
+            </p>
+        </div>
+
+        <div class="card">
+            <h2>5. Удаление данных и отзыв согласия</h2>
+            <p>
+                Пользователь в любой момент может прекратить использование сервиса и полностью удалить свои данные:
+            </p>
+            <ul>
+                <li>Команда бота <code>/logout</code> немедленно уничтожает сессию и сохраненные токены в базе данных.</li>
+                <li>Удаление аккаунта или обращение к администратору приводит к полному стиранию истории и настроек пользователя.</li>
+            </ul>
+        </div>
+
+        <div class="footer-nav">
+            <a href="/" class="btn-pill">Вернуться в Mirage Mini App</a>
+        </div>
+    </div>
+
+</body>
+</html>

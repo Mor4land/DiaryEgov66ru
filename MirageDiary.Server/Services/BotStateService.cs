@@ -8,7 +8,10 @@ public enum UserState
     WaitingForHeadTeacherId,
     WaitingForHeadTeacherOrg,
     WaitingForScheduleUpload,
-    WaitingForBroadcastText
+    WaitingForBroadcastText,
+    WaitingForScheduleReminderTime,
+    WaitingForHomeworkReminderTime,
+    WaitingForEquipmentReminderTime
 }
 
 public class UserSession

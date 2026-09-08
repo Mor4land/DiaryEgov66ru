@@ -1,0 +1,26 @@
+<?xml version='1.0'?>
+<Obfuscator>
+  <Var name="InPath" value="." />
+  <Var name="OutPath" value=".\obfuscated" />
+  <Var name="HideStrings" value="true" />
+  <Var name="KeepPublicApi" value="true" />
+  <Var name="HidePrivateApi" value="true" />
+  <Var name="RenameFields" value="true" />
+  <Var name="RenameProperties" value="false" />
+  <Var name="RenameEvents" value="false" />
+  <Var name="UseUnicodeNames" value="false" />
+  <Var name="AnalyzeLogFile" value="false" />
+
+  <Module file="$(InPath)\MirageDiary.Server.dll">
+    <!-- Skip renaming ASP.NET Core controllers and their action methods for proper HTTP routing -->
+    <SkipType name="MirageDiary.Server.Controllers.*" />
+    <!-- Skip EF Core database context and entities to preserve SQLite schema mapping -->
+    <SkipType name="MirageDiary.Server.Data.*" />
+    <SkipType name="MirageDiary.Server.Models.*" />
+  </Module>
+  
+  <Module file="$(InPath)\MirageDiary.Core.dll">
+    <!-- Skip external API contract models to preserve JSON deserialization -->
+    <SkipType name="MirageDiary.Core.Models.*" />
+  </Module>
+</Obfuscator>

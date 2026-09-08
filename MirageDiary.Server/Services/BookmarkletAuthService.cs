@@ -43,14 +43,12 @@ public class BookmarkletAuthService
         return null;
     }
 
-    /// <summary>Checks whether the given code has been successfully used. Removes it after first check.</summary>
+    /// <summary>Checks whether the given code has been successfully claimed. Removes it after first check.</summary>
     public bool IsCompleted(string code)
     {
-        if (_completed.TryRemove(code, out _))
-            return true;
-        // Also return true if code was already used (no longer in pending)
-        return !_pending.ContainsKey(code);
+        if (string.IsNullOrWhiteSpace(code)) return false;
+        return _completed.TryRemove(code, out _);
     }
 
-    public bool IsPending(string code) => _pending.ContainsKey(code);
+    public bool IsPending(string code) => !string.IsNullOrWhiteSpace(code) && _pending.ContainsKey(code);
 }

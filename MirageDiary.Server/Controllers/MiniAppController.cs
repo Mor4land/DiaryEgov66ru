@@ -4,10 +4,15 @@ using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Threading.Tasks;
 using MirageDiary.Core;
+using MirageDiary.Core.Models;
 using MirageDiary.Server.Services;
 using MirageDiary.Server.Data;
 using Microsoft.EntityFrameworkCore;
 using Telegram.Bot;
+using MAX.Bot.Interfaces;
+using MAX.Bot.Interfaces.Models;
+using MAX.Bot.Interfaces.Models.Request;
+using MAX.Bot.Interfaces.Models.Request.Message;
 
 namespace MirageDiary.Server.Controllers;
 
@@ -20,19 +25,22 @@ public class MiniAppController : ControllerBase
     private readonly IHttpClientFactory _httpFactory;
     private readonly BookmarkletAuthService _bookmarkletAuth;
     private readonly PlaywrightAuthManager _playwrightAuth;
+    private readonly UserSyncService _userSyncService;
 
     public MiniAppController(
         ITokenStore tokenStore,
         AppDbContext context,
         IHttpClientFactory httpFactory,
         BookmarkletAuthService bookmarkletAuth,
-        PlaywrightAuthManager playwrightAuth)
+        PlaywrightAuthManager playwrightAuth,
+        UserSyncService userSyncService)
     {
         _tokenStore      = tokenStore;
         _context         = context;
         _httpFactory     = httpFactory;
         _bookmarkletAuth = bookmarkletAuth;
         _playwrightAuth  = playwrightAuth;
+        _userSyncService = userSyncService;
     }
 
     /// <summary>
@@ -46,43 +54,74 @@ public class MiniAppController : ControllerBase
         if (string.IsNullOrEmpty(request.TelegramUserId) || string.IsNullOrEmpty(request.AccessToken))
             return BadRequest(new { error = "TelegramUserId and AccessToken are required." });
 
-        // ── Fetch student data from diary API ─────────────────────────────────
         string studentId = "", className = "", orgName = "", refreshToken = request.RefreshToken ?? "";
+
+        string rawToken = request.AccessToken;
+        string oid = "";
+        string deviceId = "";
+        string sessionId = "";
+
+        if (rawToken.Contains("u="))
+        {
+            var m = System.Text.RegularExpressions.Regex.Match(rawToken, @"\bu=([^;]+)");
+            if (m.Success) oid = m.Groups[1].Value.Trim();
+        }
+
+        if (!string.IsNullOrEmpty(oid))
+        {
+            deviceId = BitConverter.ToString(System.Security.Cryptography.MD5.HashData(System.Text.Encoding.UTF8.GetBytes(request.TelegramUserId))).Replace("-", "").Substring(0, 16).ToLower();
+            string accT = rawToken;
+            var accMatch = System.Text.RegularExpressions.Regex.Match(rawToken, @"\bacc_t=([^;]+)");
+            if (accMatch.Success) accT = accMatch.Groups[1].Value.Trim();
+
+            try
+            {
+                var mobileClient = new MobileEsiaClient(_httpFactory.CreateClient());
+                string entToken = MobileEsiaClient.BuildEntToken(deviceId);
+                var renewResult = await mobileClient.CreateSessionAsync(deviceId, oid, accT, entToken);
+                if (renewResult != null && !string.IsNullOrEmpty(renewResult.AccessToken))
+                {
+                    rawToken = renewResult.AccessToken;
+                    sessionId = renewResult.SessionId;
+                    Console.WriteLine($"[MiniApp] 🚀 Пользователь {request.TelegramUserId} успешно повышен до мобильной сессии!");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[MiniApp] ℹ️ Повышение до мобильной сессии пропущено: {ex.Message}");
+            }
+        }
+
+        await _tokenStore.SaveTokensAsync(request.TelegramUserId, new TokenData
+        {
+            AccessToken = rawToken,
+            RefreshToken = refreshToken,
+            Oid = oid,
+            DeviceId = deviceId,
+            SessionId = sessionId
+        });
 
         try
         {
-            var client = _httpFactory.CreateClient();
-            client.DefaultRequestHeaders.Authorization =
-                new AuthenticationHeaderValue("Bearer", request.AccessToken);
-
-            var resp = await client.GetAsync("https://dnevnik.egov66.ru/api/students");
-            if (resp.IsSuccessStatusCode)
-            {
-                var json = await resp.Content.ReadAsStringAsync();
-                using var doc = JsonDocument.Parse(json);
-                var root = doc.RootElement;
-
-                if (root.TryGetProperty("students", out var students) &&
-                    students.GetArrayLength() > 0)
-                {
-                    var s = students[0];
-                    studentId = s.TryGetProperty("id",        out var id)  ? id.GetString()  ?? "" : "";
-                    className = s.TryGetProperty("className", out var cn)  ? cn.GetString()  ?? "" : "";
-                    orgName   = s.TryGetProperty("orgName",   out var org) ? org.GetString() ?? "" : "";
-                }
-            }
+            var diaryClient = new DiaryClient(_httpFactory.CreateClient(), _tokenStore, request.TelegramUserId);
+            var res = await ResolveGosuslugiStudentDetailsAsync(diaryClient);
+            studentId = res.StudentId;
+            className = res.ClassName;
+            orgName   = res.OrgName;
         }
-        catch
+        catch (Exception ex)
         {
-            // If we can't reach the diary API, proceed with what we have
+            Console.WriteLine($"[MiniApp] Ошибка получения данных Госуслуг: {ex.Message}");
         }
 
-        // ── Save to DB ────────────────────────────────────────────────────────
         var tokenData = new TokenData
         {
-            AccessToken  = request.AccessToken,
+            AccessToken  = rawToken,
             RefreshToken = refreshToken,
-            StudentId    = studentId
+            StudentId    = studentId,
+            Oid          = oid,
+            DeviceId     = deviceId,
+            SessionId    = sessionId
         };
 
         await _tokenStore.SaveTokensAsync(request.TelegramUserId, tokenData);
@@ -92,7 +131,15 @@ public class MiniAppController : ControllerBase
         {
             user.ClassName = className;
             user.OrgName   = orgName;
+            user.StudentId = studentId;
+            user.Oid       = oid;
+            user.DeviceId  = deviceId;
+            user.SessionId = sessionId;
+            user.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
+
+            // Mirror across all linked platforms (e.g. MAX bot)
+            await _userSyncService.SyncUserAcrossPlatformsAsync(user);
         }
 
         return Ok(new
@@ -232,7 +279,7 @@ public class MiniAppController : ControllerBase
     [HttpGet("poll-auth/{code}")]
     public IActionResult PollAuth(string code)
     {
-        bool done = !_bookmarkletAuth.IsPending(code);
+        bool done = _bookmarkletAuth.IsCompleted(code);
         return Ok(new { done });
     }
 
@@ -244,55 +291,143 @@ public class MiniAppController : ControllerBase
     public async Task<IActionResult> CheckAuth(string telegramUserId)
     {
         var tokens = await _tokenStore.GetTokensAsync(telegramUserId);
-        return Ok(new { isAuthorized = tokens != null && !string.IsNullOrEmpty(tokens.AccessToken) });
+        if (tokens == null || string.IsNullOrEmpty(tokens.AccessToken))
+        {
+            return Ok(new Models.CheckAuthResponse { IsAuthorized = false });
+        }
+
+        // Если токен Госуслуг истёк, сначала пробуем бесшумно обновить через createSession
+        if (IsJwtExpired(tokens.AccessToken))
+        {
+            if (!string.IsNullOrEmpty(tokens.DeviceId) && !string.IsNullOrEmpty(tokens.Oid))
+            {
+                try
+                {
+                    var mobileClient = new MobileEsiaClient(_httpFactory.CreateClient());
+                    string entToken = MobileEsiaClient.BuildEntToken(tokens.DeviceId);
+                    var renewResult = await mobileClient.CreateSessionAsync(tokens.DeviceId, tokens.Oid, tokens.AccessToken, entToken);
+                    if (renewResult != null && !string.IsNullOrEmpty(renewResult.AccessToken))
+                    {
+                        tokens.AccessToken = renewResult.AccessToken;
+                        tokens.SessionId = renewResult.SessionId;
+                        await _tokenStore.SaveTokensAsync(telegramUserId, tokens);
+                        Console.WriteLine($"[MiniApp] 🚀 Сессия {telegramUserId} мгновенно восстановлена при вызове CheckAuth!");
+                        return Ok(new Models.CheckAuthResponse { IsAuthorized = true });
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[MiniApp] ⚠️ Ошибка авто-восстановления в CheckAuth: {ex.Message}");
+                }
+            }
+
+            return Ok(new Models.CheckAuthResponse { IsAuthorized = false });
+        }
+
+        try
+        {
+            var diaryClient = new DiaryClient(_httpFactory.CreateClient("diary-proxy"), _tokenStore, telegramUserId);
+            var students = await diaryClient.GetStudentInfoAsync();
+            if (students != null && students.Count > 0)
+            {
+                return Ok(new Models.CheckAuthResponse { IsAuthorized = true });
+            }
+        }
+        catch { }
+
+        return Ok(new Models.CheckAuthResponse { IsAuthorized = true });
+    }
+
+    private static bool IsJwtExpired(string rawToken)
+    {
+        if (string.IsNullOrEmpty(rawToken)) return true;
+
+        string jwt = rawToken;
+        if (rawToken.Contains("acc_t="))
+        {
+            var match = System.Text.RegularExpressions.Regex.Match(rawToken, @"acc_t=([^;]+)");
+            if (match.Success)
+            {
+                jwt = match.Groups[1].Value.Trim();
+            }
+        }
+
+        var parts = jwt.Split('.');
+        if (parts.Length >= 2)
+        {
+            try
+            {
+                string payloadB64 = parts[1].Replace('-', '+').Replace('_', '/');
+                payloadB64 += new string('=', (4 - payloadB64.Length % 4) % 4);
+                var jsonBytes = Convert.FromBase64String(payloadB64);
+                using var doc = System.Text.Json.JsonDocument.Parse(jsonBytes);
+                if (doc.RootElement.TryGetProperty("exp", out var expProp))
+                {
+                    long expSeconds = expProp.GetInt64();
+                    var expDate = DateTimeOffset.FromUnixTimeSeconds(expSeconds).UtcDateTime;
+                    if (DateTime.UtcNow >= expDate)
+                    {
+                        return true;
+                    }
+                }
+            }
+            catch { }
+        }
+
+        return false;
     }
 
     [HttpPost("auth/start")]
     public async Task<IActionResult> StartAuth([FromBody] StartAuthRequest request)
     {
+        if (string.IsNullOrEmpty(request.TelegramUserId) || string.IsNullOrEmpty(request.Login) || string.IsNullOrEmpty(request.Password))
+        {
+            Console.WriteLine($"[MiniApp 400 Bad Request] StartAuth missing fields. TelegramUserId: '{request.TelegramUserId}', Login: '{request.Login}'");
+            return BadRequest(new { error = "TelegramUserId, Login, and Password are required." });
+        }
         var session = await _playwrightAuth.StartAuthAsync(request.TelegramUserId, request.Login, request.Password);
-        return Ok(new { sessionId = session.SessionId, status = session.Status.ToString() });
+        return Ok(new Models.StartAuthResponse { SessionId = session.SessionId, Status = session.Status.ToString() });
     }
 
     [HttpGet("auth/status/{sessionId}")]
-    public async Task<IActionResult> GetAuthStatus(string sessionId, [FromServices] Telegram.Bot.ITelegramBotClient botClient)
+    public async Task<IActionResult> GetAuthStatus(
+        string sessionId,
+        [FromServices] Telegram.Bot.ITelegramBotClient botClient,
+        [FromServices] IMaxBotClient? maxBotClient = null)
     {
         try
         {
             var session = _playwrightAuth.GetSession(sessionId);
-            Console.WriteLine($"[MiniApp] Polling status for {sessionId}. Session found: {session != null}, Status: {session?.Status}");
             if (session == null) return NotFound(new { error = "Session not found or expired" });
 
             if (session.Status == AuthStatus.Success && !string.IsNullOrEmpty(session.AccessToken))
             {
                 // Prevent multiple triggers
                 if (session.ErrorMessage == "Processed")
-                    return Ok(new { status = "Success" });
+                    return Ok(new Models.AuthStatusResponse { Status = "Success" });
                 
                 Console.WriteLine($"[MiniApp] Статус Success! Токен длина: {session.AccessToken.Length}, Refresh: {session.RefreshToken?.Length ?? 0}");
                 session.ErrorMessage = "Processed"; // simple flag
 
-                // Try to resolve studentId
+                // Save tokens first so DiaryClient can use them
+                await _tokenStore.SaveTokensAsync(session.TelegramUserId, new TokenData
+                {
+                    AccessToken = session.AccessToken,
+                    RefreshToken = session.RefreshToken ?? "",
+                    Oid = session.Oid,
+                    SessionId = session.MobileSessionId,
+                    DeviceId = session.DeviceId
+                });
+
+                // Try to resolve studentId, className, orgName via Gosuslugi API
                 string studentId = "", className = "", orgName = "";
                 try
                 {
-                    var client = _httpFactory.CreateClient();
-                    client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", session.AccessToken);
-                    var resp = await client.GetAsync("https://dnevnik.egov66.ru/api/students");
-                    Console.WriteLine($"[MiniApp] Diary API ответ: {resp.StatusCode}");
-                    if (resp.IsSuccessStatusCode)
-                    {
-                        var json = await resp.Content.ReadAsStringAsync();
-                        Console.WriteLine($"[MiniApp] Diary API body: {json.Substring(0, Math.Min(200, json.Length))}...");
-                        using var doc = JsonDocument.Parse(json);
-                        if (doc.RootElement.TryGetProperty("students", out var students) && students.GetArrayLength() > 0)
-                        {
-                            var s = students[0];
-                            studentId = s.TryGetProperty("id", out var id) ? id.GetString() ?? "" : "";
-                            className = s.TryGetProperty("className", out var cn) ? cn.GetString() ?? "" : "";
-                            orgName = s.TryGetProperty("orgName", out var org) ? org.GetString() ?? "" : "";
-                        }
-                    }
+                    var diaryClient = new DiaryClient(_httpFactory.CreateClient("diary-proxy"), _tokenStore, session.TelegramUserId);
+                    var res = await ResolveGosuslugiStudentDetailsAsync(diaryClient);
+                    studentId = res.StudentId;
+                    className = res.ClassName;
+                    orgName   = res.OrgName;
                 }
                 catch (Exception ex) { Console.WriteLine($"[MiniApp] Ошибка получения профиля: {ex.Message}"); }
 
@@ -300,8 +435,11 @@ public class MiniAppController : ControllerBase
                 await _tokenStore.SaveTokensAsync(session.TelegramUserId, new TokenData
                 {
                     AccessToken = session.AccessToken,
-                    RefreshToken = session.RefreshToken,
-                    StudentId = studentId
+                    RefreshToken = session.RefreshToken ?? "",
+                    StudentId = studentId,
+                    Oid = session.Oid,
+                    SessionId = session.MobileSessionId,
+                    DeviceId = session.DeviceId
                 });
                 Console.WriteLine($"[MiniApp] Токен сохранён!");
 
@@ -310,46 +448,147 @@ public class MiniAppController : ControllerBase
                 {
                     user.ClassName = className;
                     user.OrgName = orgName;
+                    user.StudentId = studentId;
+                    user.Oid = session.Oid;
+                    user.DeviceId = session.DeviceId;
+                    user.SessionId = session.MobileSessionId;
+                    user.AccessToken = session.AccessToken;
+                    user.RefreshToken = session.RefreshToken ?? "";
+                    user.UpdatedAt = DateTime.UtcNow;
                     await _context.SaveChangesAsync();
                     Console.WriteLine($"[MiniApp] Профиль пользователя обновлён!");
+
+                    // Automatically mirror tokens, metadata and settings across linked platforms (e.g. MAX <-> Telegram)
+                    await _userSyncService.SyncUserAcrossPlatformsAsync(user);
                 }
 
-                // Send a telegram message
+                // Send a bot notification message (Telegram or MAX)
                 try
                 {
-                    await botClient.SendMessage(
-                        chatId: session.TelegramUserId,
-                        text: "✅ *Авторизация успешно завершена!*\n\nТеперь бот может получать ваше расписание и оценки.",
-                        parseMode: Telegram.Bot.Types.Enums.ParseMode.Markdown);
-                    Console.WriteLine($"[MiniApp] Telegram сообщение отправлено!");
+                    string successMessage = "✅ *Авторизация успешно завершена!*\n\nТеперь бот может получать ваше расписание и оценки.";
+                    if (session.TelegramUserId.StartsWith("max_"))
+                    {
+                        if (long.TryParse(session.TelegramUserId.Replace("max_", ""), out long maxChatId) && maxBotClient != null)
+                        {
+                            await maxBotClient.SendMessageAsync(new SendMessageRequest
+                            {
+                                UserId = maxChatId,
+                                Text = successMessage,
+                                Format = MessageFormat.Markdown
+                            });
+                            Console.WriteLine($"[MiniApp] MAX Bot сообщение отправлено!");
+                        }
+                    }
+                    else
+                    {
+                        await botClient.SendMessage(
+                            chatId: session.TelegramUserId,
+                            text: successMessage,
+                            parseMode: Telegram.Bot.Types.Enums.ParseMode.Markdown);
+                        Console.WriteLine($"[MiniApp] Telegram сообщение отправлено!");
+                    }
                 }
-                catch (Exception ex) { Console.WriteLine($"[MiniApp] Ошибка отправки ТГ сообщения: {ex.Message}"); }
+                catch (Exception ex) { Console.WriteLine($"[MiniApp] Ошибка отправки бота сообщения: {ex.Message}"); }
 
                 Console.WriteLine($"[MiniApp] Отправляем Success ответ клиенту.");
-                return Ok(new
+                return Ok(new Models.AuthStatusResponse
                 {
-                    status = "Success",
-                    studentId,
-                    className,
-                    orgName
+                    Status = "Success",
+                    StudentId = studentId,
+                    ClassName = className,
+                    OrgName = orgName
                 });
             }
             
-            return Ok(new { status = session.Status.ToString(), captchaImage = session.CaptchaImageBase64, errorMessage = session.ErrorMessage });
+            return Ok(new Models.AuthStatusResponse
+            {
+                Status = session.Status.ToString(),
+                CaptchaImage = session.CaptchaImageBase64,
+                ErrorMessage = session.ErrorMessage
+            });
         }
         catch (Exception ex)
         {
             Console.WriteLine($"[MiniApp] ОШИБКА в GetAuthStatus: {ex}");
-            return StatusCode(500, new { status = "Failed", errorMessage = "Внутренняя ошибка сервера: " + ex.Message });
+            return StatusCode(500, new Models.AuthStatusResponse { Status = "Failed", ErrorMessage = "Внутренняя ошибка сервера: " + ex.Message });
         }
     }
 
     [HttpPost("auth/submit-input")]
     public IActionResult SubmitInput([FromBody] SubmitInputRequest request)
     {
+        if (string.IsNullOrEmpty(request.SessionId) || string.IsNullOrEmpty(request.Input))
+        {
+            Console.WriteLine($"[MiniApp 400 Bad Request] SubmitInput missing required fields.");
+            return BadRequest(new { error = "SessionId and Input are required." });
+        }
         var success = _playwrightAuth.SubmitUserInput(request.SessionId, request.Input);
-        if (!success) return BadRequest(new { error = "Failed to submit input. Session may be expired or not waiting for input." });
-        return Ok(new { success = true });
+        if (!success)
+        {
+            Console.WriteLine($"[MiniApp 400 Bad Request] SubmitInput failed for SessionId: {request.SessionId}");
+            return BadRequest(new { error = "Failed to submit input. Session may be expired or not waiting for input." });
+        }
+        return Ok(new Models.SimpleSuccessResponse { Success = true });
+    }
+
+    private static async Task<(string StudentId, string ClassName, string OrgName)> ResolveGosuslugiStudentDetailsAsync(DiaryClient diaryClient)
+    {
+        string studentId = "", className = "", orgName = "";
+        try
+        {
+            var studentInfos = await diaryClient.GetStudentInfoAsync();
+            if (studentInfos != null && studentInfos.Count > 0)
+            {
+                var student = studentInfos[0];
+                studentId = !string.IsNullOrEmpty(student.StudentId) ? student.StudentId : (student.MdmId ?? "");
+
+                List<string> idsToTry = new List<string>();
+                if (!string.IsNullOrEmpty(student.StudentId)) idsToTry.Add(student.StudentId);
+                if (!string.IsNullOrEmpty(student.MdmId) && !idsToTry.Contains(student.MdmId)) idsToTry.Add(student.MdmId);
+
+                List<string> yearsToTry = new List<string> { DateTime.UtcNow.Year.ToString(), (DateTime.UtcNow.Year - 1).ToString() };
+
+                foreach (var sid in idsToTry)
+                {
+                    foreach (var year in yearsToTry)
+                    {
+                        try
+                        {
+                            var datamart = await diaryClient.GetDatamartAsync(sid, year, new List<string> { "student_classes" });
+                            if (datamart != null && datamart.Count > 0)
+                            {
+                                foreach (var dmItem in datamart)
+                                {
+                                    if (dmItem.Data != null && dmItem.Data.Count > 0)
+                                    {
+                                        foreach (var elem in dmItem.Data)
+                                        {
+                                            var classInfo = JsonSerializer.Deserialize<GosuslugiClassInfo>(elem.GetRawText(), new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                                            if (classInfo != null && (!string.IsNullOrEmpty(classInfo.ShortName) || !string.IsNullOrEmpty(classInfo.ClassNum)))
+                                            {
+                                                className = $"{classInfo.ClassNum} {classInfo.ClassLetter}".Trim();
+                                                orgName = classInfo.ShortName;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    if (!string.IsNullOrEmpty(orgName)) break;
+                                }
+                            }
+                        }
+                        catch { }
+                        if (!string.IsNullOrEmpty(orgName)) break;
+                    }
+                    if (!string.IsNullOrEmpty(orgName)) break;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[MiniApp] Ошибка получения профиля: {ex.Message}");
+        }
+
+        return (studentId, className, orgName);
     }
 }
 
