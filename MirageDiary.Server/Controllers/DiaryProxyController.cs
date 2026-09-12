@@ -9,7 +9,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace MirageDiary.Server.Controllers;
 
 /// <summary>
-/// Reverse-proxy for dnevnik.egov66.ru.
+/// Reverse-proxy for myschool.gosuslugi.ru.
 /// Strips X-Frame-Options and CSP so the site can be embedded in an iframe.
 /// Injects a polling script into every HTML page that extracts
 /// Auth__token, Auth__refresh and studentId from localStorage/API
@@ -18,7 +18,7 @@ namespace MirageDiary.Server.Controllers;
 [Route("diary-proxy")]
 public class DiaryProxyController : ControllerBase
 {
-    private const string DiaryBase = "https://dnevnik.egov66.ru";
+    private const string DiaryBase = "https://myschool.gosuslugi.ru";
 
     private readonly IHttpClientFactory _httpFactory;
 
@@ -131,7 +131,7 @@ public class DiaryProxyController : ControllerBase
       }
 
       // Fetch student info from diary API (same origin — no CORS issues here)
-      fetch('https://dnevnik.egov66.ru/api/students', {
+      fetch('/api/students', {
         headers: {
           'Authorization': 'Bearer ' + token,
           'Accept': 'application/json'

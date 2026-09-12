@@ -7,7 +7,7 @@
 ## 1. Репозитории и расположение кода
 * **Бэкенд (.NET 10 Web API + Telegram/MAX Bots):**
   - Путь: `c:\Users\mlowers\source\repos\MirageDiary`
-  - GitHub: `https://github.com/Mor4land/DiaryEgov66ru.git`
+  - GitHub: `https://github.com/Miragestudio-repo/MirageDiary_Backend.git`
 * **Фронтенд (Telegram MiniApp - React + Vite + TypeScript):**
   - Путь: `C:\Users\mlowers\source\repos\MirageDiary-Miniapp`
   - GitHub: `https://github.com/Miragestudio-repo/MirageDiary-Miniapp.git`

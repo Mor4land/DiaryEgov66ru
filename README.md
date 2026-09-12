@@ -1,6 +1,6 @@
-# MirageDiary (DiaryEgov66ru)
+# MirageDiary
 
-Высокопроизводительный бэкенд-сервис и Telegram MiniApp для интеграции с региональным электронным дневником (`dnevnik.egov66.ru`) и ЕСИА/Госуслугами.
+Высокопроизводительный бэкенд-сервис и Telegram MiniApp для интеграции с электронным дневником ФГИС «Моя Школа» и ЕСИА / Госуслугами.
 
 ---
 
@@ -16,13 +16,13 @@ graph TD
     subgraph Core Engine ["MirageDiary.Core"]
         MobileClient["MobileEsiaClient (PKCE / OAuth2)"]
         CertValidator["RussianTrustedCertificateValidator"]
-        DiaryClient["DiaryClient (Regional API)"]
+        DiaryClient["DiaryClient (MySchool API)"]
     end
     
     subgraph Server Services ["MirageDiary.Server"]
         AuthManager["PlaywrightAuthManager (SSO/Captcha Runner)"]
         SharedCache["SharedClassroomCacheService (Кэш класса в SQLite)"]
-        TokenStore["DbTokenStore (AES-256-GCM)"]
+        TokenStore["DbTokenStore (AES-256-GCM enc:v2)"]
         SmartAlarm["SmartAlarmWorker (Фоновые напоминания)"]
         TelegramBot["TelegramBotPollingWorker"]
     end
@@ -30,7 +30,7 @@ graph TD
     Server --> CoreEngine
     Server --> SQLite[("SQLite (Encrypted Tokens)")]
     CoreEngine -->|TLS with Russian CA Pinning| Gosuslugi["ЕСИА / Госуслуги"]
-    CoreEngine -->|TLS| RegionalDiary["dnevnik.egov66.ru"]
+    CoreEngine -->|TLS| MySchoolApi["ФГИС «Моя Школа» (myschool.gosuslugi.ru)"]
 ```
 
 ### Проекты в решении
@@ -38,7 +38,7 @@ graph TD
 * **`MirageDiary.Core`**: Базовая библиотека протоколов и моделей:
   * `MobileEsiaClient`: Прямой протокол мобильного шлюза ЕСИА (PKCE S256 OAuth2), не требующий запуска браузера.
   * `RussianTrustedCertificateValidator`: Строгий валидатор цепочки доверия X.509 с проверкой отпечатков корневых сертификатов Минцифры (Russian Trusted Root CA).
-  * `DiaryClient`: HTTP-клиент к региональному API дневников с пулингом соединений и защитой от таймаутов.
+  * `DiaryClient`: HTTP-клиент к API электронного дневника «Моя Школа» с пулингом соединений и защитой от таймаутов.
 * **`MirageDiary.Server`**: Серверная часть:
   * REST API и обратный прокси для фронтенда (`MiniAppController`, `DiaryProxyController`).
   * Telegram & MAX боты (`BotCommandService`, `MaxCommandService`).
@@ -58,7 +58,7 @@ graph TD
 3. **Защита ресурсов сервера (Playwright Concurrency Limiter)**:
    * Запуск Headless-браузера для обхода капчи ограничен семафором (`SemaphoreSlim`), защищая сервер от истощения оперативной памяти при пиковых нагрузках.
 4. **CORS и защита заголовков**:
-   * Включен строгий CORS с ограничением доверенных источников (`web.telegram.org` и домены дневника).
+   * Включен строгий CORS с ограничением доверенных источников (`web.telegram.org` и `myschool.gosuslugi.ru`).
 
 ---
 

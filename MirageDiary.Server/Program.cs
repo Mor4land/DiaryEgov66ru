@@ -35,7 +35,7 @@ builder.Services.AddCors(options =>
         {
             policy.WithOrigins(
                 "https://web.telegram.org",
-                "https://dnevnik.egov66.ru"
+                "https://myschool.gosuslugi.ru"
             )
             .AllowAnyMethod()
             .AllowAnyHeader();
