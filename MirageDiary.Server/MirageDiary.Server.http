@@ -1,0 +1,6 @@
+@MirageDiary.Server_HostAddress = http://localhost:5145
+
+GET {{MirageDiary.Server_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
