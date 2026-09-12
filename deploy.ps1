@@ -92,8 +92,8 @@ Write-Host "Verified: All secret keys and sensitive strings are masked and encry
 
 # 5. SCP Files to Production VPS
 Write-Host "[5/6] Transferring obfuscated binaries and assets to VPS..." -ForegroundColor Yellow
-scp -i $KeyPath -P $Port publish_linux_obfuscated/MirageDiary.Server.dll publish_linux_obfuscated/MirageDiary.Core.dll MirageDiary.Server/admins.json MirageDiary.Server/wwwroot/admin.html MirageDiary.Server/wwwroot/privacy.html MirageDiary.Server/wwwroot/index.html "${User}@${HostName}:${RemoteDir}/"
-scp -i $KeyPath -P $Port -r MirageDiary.Server/wwwroot/images "${User}@${HostName}:${RemoteDir}/wwwroot/"
+scp -i $KeyPath -P $Port -o StrictHostKeyChecking=no -o BatchMode=yes publish_linux_obfuscated/MirageDiary.Server.dll publish_linux_obfuscated/MirageDiary.Core.dll MirageDiary.Server/admins.json MirageDiary.Server/wwwroot/admin.html MirageDiary.Server/wwwroot/privacy.html MirageDiary.Server/wwwroot/index.html "${User}@${HostName}:${RemoteDir}/"
+scp -i $KeyPath -P $Port -o StrictHostKeyChecking=no -o BatchMode=yes -r MirageDiary.Server/wwwroot/images MirageDiary.Server/wwwroot/assets "${User}@${HostName}:${RemoteDir}/wwwroot/"
 
 if ($LASTEXITCODE -ne 0) {
     Write-Error "SCP file transfer failed!"
@@ -102,12 +102,12 @@ if ($LASTEXITCODE -ne 0) {
 
 # Ensure wwwroot updated on remote
 $remoteScript = "cp ${RemoteDir}/admin.html ${RemoteDir}/wwwroot/admin.html ; cp ${RemoteDir}/privacy.html ${RemoteDir}/wwwroot/privacy.html ; cp ${RemoteDir}/index.html ${RemoteDir}/wwwroot/index.html ; chmod 600 ${RemoteDir}/miragediary.db ${RemoteDir}/token_master.key ${RemoteDir}/appsettings.json 2>/dev/null"
-ssh -i $KeyPath -p $Port -o StrictHostKeyChecking=no "${User}@${HostName}" $remoteScript
+ssh -i $KeyPath -p $Port -o StrictHostKeyChecking=no -o BatchMode=yes "${User}@${HostName}" $remoteScript
 
 # 6. Restart Server Supervisor and Healthcheck
 Write-Host "[6/6] Restarting server supervisor and waiting for socket binding..." -ForegroundColor Yellow
 $probeCmd = '/home/mlowers/miragediary/start.sh && for i in 1 2 3 4 5 6 7 8 9 10; do if curl -s -I http://127.0.0.1:5000/privacy | grep -q "302\|200"; then echo "Application socket is LIVE"; exit 0; fi; sleep 0.5; done; echo "Timeout waiting for service"; exit 1'
-ssh -i $KeyPath -p $Port -o StrictHostKeyChecking=no "${User}@${HostName}" "$probeCmd"
+ssh -i $KeyPath -p $Port -o StrictHostKeyChecking=no -o BatchMode=yes "${User}@${HostName}" "$probeCmd"
 
 Write-Host "==========================================================" -ForegroundColor Cyan
 Write-Host "RELEASE DEPLOYMENT COMPLETE!" -ForegroundColor Green

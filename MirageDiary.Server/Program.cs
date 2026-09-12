@@ -6,6 +6,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 // 1. Configuration files
 builder.Configuration.AddJsonFile("admins.json", optional: true, reloadOnChange: true);
+builder.Configuration.AddJsonFile(Path.Combine(AppContext.BaseDirectory, "data", "admins.json"), optional: true, reloadOnChange: true);
 
 // 2. Add API Controllers & OpenAPI
 builder.Services.AddControllers();
@@ -35,7 +36,7 @@ builder.Services.AddCors(options =>
         {
             policy.WithOrigins(
                 "https://web.telegram.org",
-                "https://dnevnik.egov66.ru"
+                "https://myschool.gosuslugi.ru"
             )
             .AllowAnyMethod()
             .AllowAnyHeader();

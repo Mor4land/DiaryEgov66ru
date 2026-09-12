@@ -207,11 +207,18 @@ public class UserSyncService
                     _db.Users.Update(sourceUser);
                 }
 
-                // 7. Synchronize Privacy Policy Consent
+                // 7. Synchronize Privacy Policy Consent (152-FZ)
                 if (sourceUser.HasAcceptedPrivacyPolicy && !peer.HasAcceptedPrivacyPolicy)
                 {
                     peer.HasAcceptedPrivacyPolicy = true;
+                    peer.PrivacyPolicyAcceptedAtUtc = sourceUser.PrivacyPolicyAcceptedAtUtc ?? DateTime.UtcNow;
                     peerModified = true;
+                }
+                else if (!sourceUser.HasAcceptedPrivacyPolicy && peer.HasAcceptedPrivacyPolicy)
+                {
+                    sourceUser.HasAcceptedPrivacyPolicy = true;
+                    sourceUser.PrivacyPolicyAcceptedAtUtc = peer.PrivacyPolicyAcceptedAtUtc ?? DateTime.UtcNow;
+                    _db.Users.Update(sourceUser);
                 }
 
                 if (peerModified)

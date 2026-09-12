@@ -354,7 +354,7 @@ public class BotCommandService
                 break;
 
             case "cmd_back_main_new":
-                await ShowMainMenuAsync(chatId.Value, null);
+                await ShowMainMenuAsync(chatId.Value, msgId);
                 break;
 
             case "cmd_now":
@@ -370,7 +370,10 @@ public class BotCommandService
                 if (pu != null)
                 {
                     pu.HasAcceptedPrivacyPolicy = true;
+                    pu.PrivacyPolicyAcceptedAtUtc = DateTime.UtcNow;
+                    pu.UpdatedAt = DateTime.UtcNow;
                     await _db.SaveChangesAsync();
+                    await _userSyncService.SyncUserAcrossPlatformsAsync(pu);
                 }
                 await ShowMainMenuAsync(chatId.Value, msgId);
                 break;
@@ -439,8 +442,13 @@ public class BotCommandService
                 await ExecuteScheduleAsync(chatId.Value, chatIdStr, null, msgId, forceRefresh: true);
                 break;
 
+            case { } s when s.StartsWith("cmd_schedule:"):
+                var schedDate = s["cmd_schedule:".Length..];
+                await ExecuteScheduleAsync(chatId.Value, chatIdStr, schedDate, msgId);
+                break;
+
             case "cmd_schedule":
-                await ExecuteScheduleAsync(chatId.Value, chatIdStr, null, null);
+                await ExecuteScheduleAsync(chatId.Value, chatIdStr, null, msgId);
                 break;
 
             // ── Marks & Calculator ──────────────────────────────────────────
@@ -519,6 +527,18 @@ public class BotCommandService
             // ── Settings & Smart Reminders ──────────────────────────────────
             case "cmd_settings":
                 await ShowSettingsMenuAsync(chatId.Value, msgId, chatIdStr);
+                break;
+
+            case "cmd_alarm_menu":
+                await ShowAlarmMenuAsync(chatId.Value, msgId, chatIdStr);
+                break;
+
+            case "cmd_alarm_toggle_master":
+                await ToggleMasterAlarmAsync(chatId.Value, msgId, chatIdStr);
+                break;
+
+            case "cmd_alarm_check_now":
+                await ExecuteAlarmCheckAsync(chatId.Value, chatIdStr);
                 break;
 
             case "cmd_delete_account":
@@ -703,8 +723,8 @@ public class BotCommandService
 
         buttons.Add(new[]
         {
-            InlineKeyboardButton.WithCallbackData("📚 Домашка", "cmd_homework"),
-            InlineKeyboardButton.WithCallbackData("📅 Расписание", "cmd_schedule")
+            InlineKeyboardButton.WithCallbackData("📅 Расписание", "cmd_schedule"),
+            InlineKeyboardButton.WithCallbackData("📚 Домашка", "cmd_homework")
         });
         buttons.Add(new[]
         {
@@ -716,38 +736,93 @@ public class BotCommandService
             InlineKeyboardButton.WithCallbackData("👤 Профиль", "cmd_profile"),
             InlineKeyboardButton.WithCallbackData("⚙️ Настройки", "cmd_settings")
         });
-        buttons.Add(new[]
-        {
-            InlineKeyboardButton.WithCallbackData("🔔 До звонка", "cmd_now")
-        });
 
         if (role == "Admin")
-            buttons.Add(new[] { InlineKeyboardButton.WithCallbackData("👑 Админ-панель", "cmd_admin_panel") });
-
-        var maintenanceBanner = isMaintenance ? "\n\n🔧 _Идут технические работы_" : "";
-
-        var roleEmoji = role switch
         {
-            "Admin"       => "👑 Администратор",
-            "HeadTeacher" => "🏫 Завуч",
-            _             => "🎓 Ученик"
-        };
+            buttons.Add(new[]
+            {
+                InlineKeyboardButton.WithCallbackData("🔔 До звонка", "cmd_now"),
+                InlineKeyboardButton.WithCallbackData("👑 Админ-панель", "cmd_admin_panel")
+            });
+        }
+        else
+        {
+            buttons.Add(new[]
+            {
+                InlineKeyboardButton.WithCallbackData("🔔 До звонка", "cmd_now")
+            });
+        }
 
-        var text = $"*Mirage Diary* — школьный дневник\n" +
-                   $"Роль: {roleEmoji}{maintenanceBanner}\n\n" +
-                   (role == "HeadTeacher"
-                       ? "💡 Отправьте мне фото или PDF с расписанием — я сохраню его для учеников вашей школы."
-                       : "Выберите действие:");
+        var maintenanceBanner = isMaintenance ? "\n🔧 _Идут технические работы_" : "";
+
+        string header;
+        if (role == "Admin")
+        {
+            header = "👑 *Администратор* • Mirage Diary";
+        }
+        else if (role == "HeadTeacher")
+        {
+            header = $"🏫 *Завуч* • {(!string.IsNullOrEmpty(user?.OrgName) ? user.OrgName : "Mirage Diary")}";
+        }
+        else if (isAuthorized)
+        {
+            if (!string.IsNullOrEmpty(user.ClassName) && !string.IsNullOrEmpty(user.OrgName))
+                header = $"🎓 *{user.ClassName}* • {user.OrgName}";
+            else if (!string.IsNullOrEmpty(user.ClassName))
+                header = $"🎓 *{user.ClassName}* • Mirage Diary";
+            else
+                header = "🎓 *Ученик* • Mirage Diary";
+        }
+        else
+        {
+            header = "👋 *Mirage Diary* — школьный дневник";
+        }
+
+        var text = header + maintenanceBanner;
+        if (role == "HeadTeacher")
+        {
+            text += "\n\n💡 _Отправьте фото или PDF с расписанием — я сохраню его для учеников вашей школы._";
+        }
 
         var markup = new InlineKeyboardMarkup(buttons);
 
         await SendOrEditBannerScreenAsync(chatId, msgId, "banner_menu.png", text, markup);
     }
 
-    // ─── Settings & Smart Reminders ───────────────────────────────────────────
+    // ─── Settings & Account ───────────────────────────────────────────
     private async Task ShowSettingsMenuAsync(long chatId, int msgId, string chatIdStr)
     {
         var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == chatIdStr);
+        var alarmOn = user?.IsAlarmEnabled ?? true;
+        var webAppUrl = _config["MiniAppUrl"] ?? "https://t.me";
+
+        var buttons = new InlineKeyboardMarkup(new[]
+        {
+            new[] { InlineKeyboardButton.WithCallbackData($"⏰ Будильник: {(alarmOn ? "🟢 Вкл" : "🔴 Выкл")}", "cmd_alarm_menu") },
+            new[]
+            {
+                InlineKeyboardButton.WithWebApp("🔄 Госуслуги", new WebAppInfo { Url = webAppUrl }),
+                InlineKeyboardButton.WithCallbackData("🔗 Связать с MAX", "cmd_link_account")
+            },
+            new[]
+            {
+                InlineKeyboardButton.WithCallbackData("🗑 Удалить аккаунт", "cmd_delete_account"),
+                InlineKeyboardButton.WithCallbackData("🏠 Главное меню", "cmd_back_main")
+            }
+        });
+
+        string text = "⚙️ *Настройки*\n\n" +
+                      $"• ⏰ Будильник: {(alarmOn ? "`🟢 Включен`" : "`🔴 Выключен`")}\n" +
+                      $"• 👤 ID: `{chatIdStr}`";
+
+        await SendOrEditBannerScreenAsync(chatId, msgId, "banner_settings.png", text, buttons);
+    }
+
+    // ─── Dedicated Smart Alarm Menu ───────────────────────────────────────────
+    private async Task ShowAlarmMenuAsync(long chatId, int msgId, string chatIdStr)
+    {
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == chatIdStr);
+        var alarmOn = user?.IsAlarmEnabled ?? true;
         var schedOn = user?.IsScheduleReminderEnabled ?? true;
         var schedTime = user?.ScheduleReminderTime ?? "07:30";
         var hwOn = user?.IsHomeworkReminderEnabled ?? true;
@@ -755,33 +830,43 @@ public class BotCommandService
         var equipOn = user?.IsEquipmentReminderEnabled ?? true;
         var equipTime = user?.EquipmentReminderTime ?? "20:30";
 
-        var webAppUrl = _config["MiniAppUrl"] ?? "https://t.me";
-
         var buttons = new InlineKeyboardMarkup(new[]
         {
             new[] { InlineKeyboardButton.WithCallbackData(
-                $"📅 Расписание: {(schedOn ? $"🟢 {schedTime}" : "🔴 ВЫКЛ")}",
-                "cmd_alarm_sched") },
-            new[] { InlineKeyboardButton.WithCallbackData(
-                $"📚 Домашка: {(hwOn ? $"🟢 {hwTime}" : "🔴 ВЫКЛ")}",
-                "cmd_alarm_hw") },
-            new[] { InlineKeyboardButton.WithCallbackData(
-                $"🎒 Вещи и рюкзак: {(equipOn ? $"🟢 {equipTime}" : "🔴 ВЫКЛ")}",
-                "cmd_alarm_equip") },
-            new[] { InlineKeyboardButton.WithWebApp("🔄 Перепривязать Госуслуги", new WebAppInfo { Url = webAppUrl }) },
-            new[] { InlineKeyboardButton.WithCallbackData("🔗 Связать с MAX", "cmd_link_account") },
-            new[] { InlineKeyboardButton.WithCallbackData("🗑 Удалить аккаунт", "cmd_delete_account") },
-            new[] { InlineKeyboardButton.WithCallbackData("🔙 Главное меню", "cmd_back_main") }
+                alarmOn ? "🔔 Будильник: 🟢 ВКЛЮЧЁН" : "🔕 Будильник: 🔴 ВЫКЛЮЧЕН",
+                "cmd_alarm_toggle_master") },
+            new[]
+            {
+                InlineKeyboardButton.WithCallbackData($"📅 Расписание: {(schedOn ? schedTime : "ВЫКЛ")}", "cmd_alarm_sched"),
+                InlineKeyboardButton.WithCallbackData($"📚 Домашка: {(hwOn ? hwTime : "ВЫКЛ")}", "cmd_alarm_hw")
+            },
+            new[]
+            {
+                InlineKeyboardButton.WithCallbackData($"🎒 Вещи: {(equipOn ? equipTime : "ВЫКЛ")}", "cmd_alarm_equip"),
+                InlineKeyboardButton.WithCallbackData("⚡ Проверить вещи", "cmd_alarm_check_now")
+            },
+            new[]
+            {
+                InlineKeyboardButton.WithCallbackData("⬅️ Настройки", "cmd_settings"),
+                InlineKeyboardButton.WithCallbackData("🏠 Главное меню", "cmd_back_main")
+            }
         });
 
-        string text = "⚙️ *Настройки уведомлений и умного будильника*\n\n" +
-                      "🔔 *Текущие напоминания:*\n" +
-                      $"• 📅 *Расписание*: {(schedOn ? $"`🟢 Вкл` (в *{schedTime}*)" : "`🔴 Выключено`")}\n" +
-                      $"• 📚 *Домашка*: {(hwOn ? $"`🟢 Вкл` (в *{hwTime}*)" : "`🔴 Выключено`")}\n" +
-                      $"• 🎒 *Вещи и рюкзак*: {(equipOn ? $"`🟢 Вкл` (в *{equipTime}*)" : "`🔴 Выключено`")}\n\n" +
-                      "_Нажмите на нужный пункт ниже, чтобы настроить время или включить/выключить:_";
+        string text = "⏰ *Умный будильник*\n\n" +
+                      $"• 🔔 Статус: {(alarmOn ? "`🟢 Активен`" : "`🔴 Выключен`")}\n" +
+                      $"• 📅 Расписание: {(schedOn ? $"`{schedTime}`" : "`Выкл`")}\n" +
+                      $"• 📚 Домашка: {(hwOn ? $"`{hwTime}`" : "`Выкл`")}\n" +
+                      $"• 🎒 Вещи и рюкзак: {(equipOn ? $"`{equipTime}`" : "`Выкл`")}";
 
-        await SendOrEditBannerScreenAsync(chatId, msgId, "banner_settings.png", text, buttons);
+        await SendOrEditBannerScreenAsync(chatId, msgId, "banner_alarm.png", text, buttons);
+    }
+
+    private async Task ToggleMasterAlarmAsync(long chatId, int msgId, string chatIdStr)
+    {
+        var user = await EnsureUserExistsAsync(chatIdStr);
+        user.IsAlarmEnabled = !user.IsAlarmEnabled;
+        await _db.SaveChangesAsync();
+        await ShowAlarmMenuAsync(chatId, msgId, chatIdStr);
     }
 
     private async Task ShowDeleteAccountConfirmationAsync(long chatId, string chatIdStr, int? msgId)
@@ -907,8 +992,8 @@ public class BotCommandService
             new[] { InlineKeyboardButton.WithCallbackData("✏️ Ввести другое время", "cmd_alarm_sched_custom") },
             new[]
             {
-                InlineKeyboardButton.WithCallbackData("⬅️ К настройкам", "cmd_settings"),
-                InlineKeyboardButton.WithCallbackData("🔙 Главное меню", "cmd_back_main")
+                InlineKeyboardButton.WithCallbackData("⬅️ К будильнику", "cmd_alarm_menu"),
+                InlineKeyboardButton.WithCallbackData("🏠 Главное меню", "cmd_back_main")
             }
         };
 
@@ -964,8 +1049,8 @@ public class BotCommandService
             new[] { InlineKeyboardButton.WithCallbackData("✏️ Ввести другое время", "cmd_alarm_hw_custom") },
             new[]
             {
-                InlineKeyboardButton.WithCallbackData("⬅️ К настройкам", "cmd_settings"),
-                InlineKeyboardButton.WithCallbackData("🔙 Главное меню", "cmd_back_main")
+                InlineKeyboardButton.WithCallbackData("⬅️ К будильнику", "cmd_alarm_menu"),
+                InlineKeyboardButton.WithCallbackData("🏠 Главное меню", "cmd_back_main")
             }
         };
 
@@ -1021,8 +1106,8 @@ public class BotCommandService
             new[] { InlineKeyboardButton.WithCallbackData("✏️ Ввести другое время", "cmd_alarm_equip_custom") },
             new[]
             {
-                InlineKeyboardButton.WithCallbackData("⬅️ К настройкам", "cmd_settings"),
-                InlineKeyboardButton.WithCallbackData("🔙 Главное меню", "cmd_back_main")
+                InlineKeyboardButton.WithCallbackData("⬅️ К будильнику", "cmd_alarm_menu"),
+                InlineKeyboardButton.WithCallbackData("🏠 Главное меню", "cmd_back_main")
             }
         };
 
@@ -1133,20 +1218,30 @@ public class BotCommandService
         var userCount = await _db.Users.CountAsync();
         var htCount   = await _db.Users.CountAsync(u => u.Role == "HeadTeacher");
 
+        var adminKey = Environment.GetEnvironmentVariable("ADMIN_KEY") ?? _config["Security:AdminKey"] ?? "";
+        var baseUrl = (_config["MiniAppUrl"] ?? "https://miragediary.space").TrimEnd('/');
+        var adminWebUrl = $"{baseUrl}/admin?key={Uri.EscapeDataString(adminKey)}";
+
         var text = $"👑 *Админ-панель*\n\n" +
                    $"👥 Пользователей в базе: *{userCount}*\n" +
                    $"🏫 Завучей: *{htCount}*\n" +
-                   $"🔧 Тех. работы: *{(isMaintenance ? "Включены" : "Выключены")}*";
+                   $"🔧 Тех. работы: *{(isMaintenance ? "Включены" : "Выключены")}*\n\n" +
+                   $"🔑 *Ключ администратора:*\n`{adminKey}`\n\n" +
+                   $"_Нажмите кнопку ниже для мгновенного входа в веб-консоль:_";
 
         var buttons = new InlineKeyboardMarkup(new[]
         {
+            new[] { InlineKeyboardButton.WithUrl("🌐 Войти в админку на сайте", adminWebUrl) },
             new[] { InlineKeyboardButton.WithCallbackData("🏫 Управление завучами", "cmd_admin_headteachers") },
             new[] { InlineKeyboardButton.WithCallbackData(
                 isMaintenance ? "🟢 Выключить тех. работы" : "🔧 Включить тех. работы",
                 "cmd_admin_maintenance") },
-            new[] { InlineKeyboardButton.WithCallbackData("📢 Рассылка", "cmd_admin_broadcast") },
-            new[] { InlineKeyboardButton.WithCallbackData("📊 Статистика", "cmd_admin_stats") },
-            new[] { InlineKeyboardButton.WithCallbackData("⬅️ Назад", "cmd_back_main") }
+            new[]
+            {
+                InlineKeyboardButton.WithCallbackData("📢 Рассылка", "cmd_admin_broadcast"),
+                InlineKeyboardButton.WithCallbackData("📊 Статистика", "cmd_admin_stats")
+            },
+            new[] { InlineKeyboardButton.WithCallbackData("🏠 Главное меню", "cmd_back_main") }
         });
 
         await SendOrEditBannerScreenAsync(chatId, msgId, "banner_admin.png", text, buttons);
@@ -1386,7 +1481,7 @@ public class BotCommandService
                 new[]
                 {
                     InlineKeyboardButton.WithCallbackData("🔄 Обновить", "cmd_homework_refresh"),
-                    InlineKeyboardButton.WithCallbackData("🔙 Главное меню", "cmd_back_main")
+                    InlineKeyboardButton.WithCallbackData("🏠 Главное меню", "cmd_back_main")
                 }
             });
 
@@ -1397,7 +1492,7 @@ public class BotCommandService
                 var reloginMarkup = new InlineKeyboardMarkup(new[]
                 {
                     new[] { InlineKeyboardButton.WithWebApp("🔐 Войти через Госуслуги", new WebAppInfo { Url = webAppUrl }) },
-                    new[] { InlineKeyboardButton.WithCallbackData("🔙 Главное меню", "cmd_back_main") }
+                    new[] { InlineKeyboardButton.WithCallbackData("🏠 Главное меню", "cmd_back_main") }
                 });
                 await SafeEditTextOrCaptionAsync(chatId, msgId, hw, reloginMarkup);
                 return;
@@ -1429,14 +1524,33 @@ public class BotCommandService
                     new[]
                     {
                         InlineKeyboardButton.WithCallbackData("🔄 Обновить", "cmd_schedule_refresh"),
-                        InlineKeyboardButton.WithCallbackData("🔙 Главное меню", "cmd_back_main_new")
+                        InlineKeyboardButton.WithCallbackData("🏠 Главное меню", "cmd_back_main")
                     }
                 });
 
                 if (schedule.FileType == "photo")
+                {
+                    if (msgId.HasValue)
+                    {
+                        try
+                        {
+                            var inputMedia = new InputMediaPhoto(InputFile.FromFileId(schedule.FileId))
+                            {
+                                Caption = $"📅 Расписание — {user.OrgName}\n_(Загружено администрацией школы)_",
+                                ParseMode = ParseMode.Markdown
+                            };
+                            await _botClient.EditMessageMedia(chatId, msgId.Value, inputMedia, replyMarkup: uploadedNavButtons);
+                            _currentBannerByChat[chatId] = "school_schedule_photo";
+                            return;
+                        }
+                        catch { }
+                    }
                     await _botClient.SendPhoto(chatId, InputFile.FromFileId(schedule.FileId), caption: $"📅 Расписание — {user.OrgName}\n_(Загружено администрацией школы)_", replyMarkup: uploadedNavButtons);
+                }
                 else
+                {
                     await _botClient.SendDocument(chatId, InputFile.FromFileId(schedule.FileId), caption: $"📅 Расписание — {user.OrgName}\n_(Загружено администрацией школы)_", replyMarkup: uploadedNavButtons);
+                }
                 return;
             }
         }
@@ -1447,7 +1561,7 @@ public class BotCommandService
             var reloginMarkup = new InlineKeyboardMarkup(new[]
             {
                 new[] { InlineKeyboardButton.WithWebApp("🔐 Войти через Госуслуги", new WebAppInfo { Url = webAppUrl }) },
-                new[] { InlineKeyboardButton.WithCallbackData("🔙 Главное меню", "cmd_back_main") }
+                new[] { InlineKeyboardButton.WithCallbackData("🏠 Главное меню", "cmd_back_main") }
             });
             await SafeEditTextOrCaptionAsync(chatId, msgId, errMsg, reloginMarkup);
             return;
@@ -1458,7 +1572,7 @@ public class BotCommandService
             new[]
             {
                 InlineKeyboardButton.WithCallbackData("🔄 Обновить", "cmd_schedule_refresh"),
-                InlineKeyboardButton.WithCallbackData("🔙 Главное меню", "cmd_back_main_new")
+                InlineKeyboardButton.WithCallbackData("🏠 Главное меню", "cmd_back_main")
             }
         });
 
@@ -1469,33 +1583,18 @@ public class BotCommandService
             var reloginMarkup = new InlineKeyboardMarkup(new[]
             {
                 new[] { InlineKeyboardButton.WithWebApp("🔐 Войти через Госуслуги", new WebAppInfo { Url = webAppUrl }) },
-                new[] { InlineKeyboardButton.WithCallbackData("🔙 Главное меню", "cmd_back_main_new") }
+                new[] { InlineKeyboardButton.WithCallbackData("🏠 Главное меню", "cmd_back_main") }
             });
             await SafeEditTextOrCaptionAsync(chatId, msgId, scheduleText, reloginMarkup);
             return;
         }
 
-        if (!string.IsNullOrEmpty(scheduleText) && !scheduleText.Contains("отсутствует"))
+        if (string.IsNullOrWhiteSpace(scheduleText))
         {
-            await SendOrEditBannerScreenAsync(chatId, msgId, "banner_schedule.png", scheduleText, navButtons);
-            return;
+            scheduleText = "📅 *Расписание уроков*\n\nНа выбранную дату расписание отсутствует или уроки не запланированы.";
         }
 
-        // Final fallback to uploaded schedule if OrgName became known
-        if (user != null && !string.IsNullOrEmpty(user.OrgName))
-        {
-            var schedule = await _db.Schedules.FirstOrDefaultAsync(s => s.OrgName == user.OrgName);
-            if (schedule != null && !string.IsNullOrEmpty(schedule.FileId))
-            {
-                if (schedule.FileType == "photo")
-                    await _botClient.SendPhoto(chatId, InputFile.FromFileId(schedule.FileId), caption: $"📅 Расписание — {user.OrgName}\n_(Загружено администрацией школы)_", replyMarkup: navButtons);
-                else
-                    await _botClient.SendDocument(chatId, InputFile.FromFileId(schedule.FileId), caption: $"📅 Расписание — {user.OrgName}\n_(Загружено администрацией школы)_", replyMarkup: navButtons);
-                return;
-            }
-        }
-
-        await SafeEditTextOrCaptionAsync(chatId, msgId, scheduleText, navButtons);
+        await SendOrEditBannerScreenAsync(chatId, msgId, "banner_schedule.png", scheduleText, navButtons);
     }
 
     // ─── Marks ────────────────────────────────────────────────────────────────
@@ -1510,7 +1609,7 @@ public class BotCommandService
             var reloginMarkup = new InlineKeyboardMarkup(new[]
             {
                 new[] { InlineKeyboardButton.WithWebApp("🔐 Войти через Госуслуги", new WebAppInfo { Url = webAppUrl }) },
-                new[] { InlineKeyboardButton.WithCallbackData("🔙 Главное меню", "cmd_back_main") }
+                new[] { InlineKeyboardButton.WithCallbackData("🏠 Главное меню", "cmd_back_main") }
             });
             if (msgId.HasValue)
                 await SafeEditTextOrCaptionAsync(chatId, msgId.Value, errMsg, reloginMarkup);
@@ -1526,7 +1625,7 @@ public class BotCommandService
             var reloginMarkup = new InlineKeyboardMarkup(new[]
             {
                 new[] { InlineKeyboardButton.WithWebApp("🔐 Войти через Госуслуги", new WebAppInfo { Url = webAppUrl }) },
-                new[] { InlineKeyboardButton.WithCallbackData("🔙 Главное меню", "cmd_back_main") }
+                new[] { InlineKeyboardButton.WithCallbackData("🏠 Главное меню", "cmd_back_main") }
             });
             if (msgId.HasValue)
                 await SafeEditTextOrCaptionAsync(chatId, msgId.Value, marksText, reloginMarkup);
@@ -1541,7 +1640,7 @@ public class BotCommandService
                 InlineKeyboardButton.WithCallbackData("🎯 Калькулятор целей", "cmd_calc"),
                 InlineKeyboardButton.WithCallbackData("🔄 Обновить", "cmd_marks_refresh")
             },
-            new[] { InlineKeyboardButton.WithCallbackData("🔙 Главное меню", "cmd_back_main") }
+            new[] { InlineKeyboardButton.WithCallbackData("🏠 Главное меню", "cmd_back_main") }
         });
 
         await SendOrEditBannerScreenAsync(chatId, msgId, "banner_marks.png", marksText, markup);
@@ -1562,7 +1661,7 @@ public class BotCommandService
         if (subjects == null || subjects.Count == 0)
         {
             var noMarks = "📊 В дневнике пока нет выставленных оценок для расчета цели.";
-            var backMarkup = new InlineKeyboardMarkup(new[] { InlineKeyboardButton.WithCallbackData("🔙 Главное меню", "cmd_back_main") });
+            var backMarkup = new InlineKeyboardMarkup(new[] { InlineKeyboardButton.WithCallbackData("🏠 Главное меню", "cmd_back_main") });
             await SafeEditTextOrCaptionAsync(chatId, msgId, noMarks, backMarkup);
             return;
         }
@@ -1588,7 +1687,7 @@ public class BotCommandService
         buttons.Add(new List<InlineKeyboardButton>
         {
             InlineKeyboardButton.WithCallbackData("🔄 Обновить", "cmd_calc_refresh"),
-            InlineKeyboardButton.WithCallbackData("🔙 Главное меню", "cmd_back_main")
+            InlineKeyboardButton.WithCallbackData("🏠 Главное меню", "cmd_back_main")
         });
 
         string text = "🎯 *Калькулятор целей и среднего балла*\n\n" +
@@ -1637,7 +1736,7 @@ public class BotCommandService
                 InlineKeyboardButton.WithCallbackData("👌 Хочу 3 (≥ 2.60)", $"cmd_calc_target:{subjectIndex}:3"),
                 InlineKeyboardButton.WithCallbackData("⬅️ К предметам", "cmd_calc")
             },
-            new[] { InlineKeyboardButton.WithCallbackData("🔙 Главное меню", "cmd_back_main") }
+            new[] { InlineKeyboardButton.WithCallbackData("🏠 Главное меню", "cmd_back_main") }
         };
 
         await SafeEditTextOrCaptionAsync(chatId, msgId, text, new InlineKeyboardMarkup(buttons), ParseMode.Markdown);
@@ -1714,7 +1813,7 @@ public class BotCommandService
                 InlineKeyboardButton.WithCallbackData("🎯 Другая цель", $"cmd_calc_subj:{subjectIndex}"),
                 InlineKeyboardButton.WithCallbackData("⬅️ К предметам", "cmd_calc")
             },
-            new[] { InlineKeyboardButton.WithCallbackData("🔙 Главное меню", "cmd_back_main") }
+            new[] { InlineKeyboardButton.WithCallbackData("🏠 Главное меню", "cmd_back_main") }
         };
 
         await SafeEditTextOrCaptionAsync(chatId, msgId, text, new InlineKeyboardMarkup(buttons), ParseMode.Markdown);
@@ -1774,7 +1873,11 @@ public class BotCommandService
 
         var buttons = new List<IEnumerable<InlineKeyboardButton>>
         {
-            new[] { InlineKeyboardButton.WithCallbackData("🔄 Обновить данные", "cmd_profile_refresh") }
+            new[]
+            {
+                InlineKeyboardButton.WithCallbackData("🔄 Обновить", "cmd_profile_refresh"),
+                InlineKeyboardButton.WithCallbackData("⚙️ Настройки", "cmd_settings")
+            }
         };
 
         if (children != null && children.Count > 1)
@@ -1785,11 +1888,7 @@ public class BotCommandService
         buttons.Add(new[]
         {
             InlineKeyboardButton.WithCallbackData("🚪 Выйти", "cmd_logout"),
-            InlineKeyboardButton.WithCallbackData("⚙️ Настройки", "cmd_settings")
-        });
-        buttons.Add(new[]
-        {
-            InlineKeyboardButton.WithCallbackData("🔙 Главное меню", "cmd_back_main")
+            InlineKeyboardButton.WithCallbackData("🏠 Главное меню", "cmd_back_main")
         });
 
         var markup = new InlineKeyboardMarkup(buttons);
@@ -1840,7 +1939,7 @@ public class BotCommandService
 
         var markup = new InlineKeyboardMarkup(new[]
         {
-            new[] { InlineKeyboardButton.WithCallbackData("🔙 В главное меню", "cmd_back_main") }
+            new[] { InlineKeyboardButton.WithCallbackData("🏠 Главное меню", "cmd_back_main") }
         });
 
         await SafeEditTextOrCaptionAsync(chatId, msgId, text, markup);
@@ -1883,7 +1982,7 @@ public class BotCommandService
             text += $"• *{name}*{activeMark}\n";
         }
 
-        buttons.Add(new[] { InlineKeyboardButton.WithCallbackData("🔙 Главное меню", "cmd_back_main") });
+        buttons.Add(new[] { InlineKeyboardButton.WithCallbackData("🏠 Главное меню", "cmd_back_main") });
 
         var markup = new InlineKeyboardMarkup(buttons);
 
@@ -1917,7 +2016,7 @@ public class BotCommandService
                 InlineKeyboardButton.WithCallbackData("🔄 Обновить", "cmd_now"),
                 InlineKeyboardButton.WithCallbackData(shift == 1 ? "Сменить на 2 смену" : "Сменить на 1 смену", shift == 1 ? "cmd_set_shift:2" : "cmd_set_shift:1")
             },
-            new[] { InlineKeyboardButton.WithCallbackData("🔙 Главное меню", "cmd_back_main") }
+            new[] { InlineKeyboardButton.WithCallbackData("🏠 Главное меню", "cmd_back_main") }
         };
 
         var markup = new InlineKeyboardMarkup(buttons);
@@ -1970,7 +2069,7 @@ public class BotCommandService
             });
         }
 
-        buttons.Add(new[] { InlineKeyboardButton.WithCallbackData("🔙 Главное меню", "cmd_back_main") });
+        buttons.Add(new[] { InlineKeyboardButton.WithCallbackData("🏠 Главное меню", "cmd_back_main") });
 
         var markup = new InlineKeyboardMarkup(buttons);
 
@@ -1994,7 +2093,7 @@ public class BotCommandService
 
         var buttons = new List<IEnumerable<InlineKeyboardButton>>
         {
-            new[] { InlineKeyboardButton.WithCallbackData("🔙 В главное меню", "cmd_back_main") }
+            new[] { InlineKeyboardButton.WithCallbackData("🏠 Главное меню", "cmd_back_main") }
         };
 
         var markup = new InlineKeyboardMarkup(buttons);
@@ -2004,18 +2103,20 @@ public class BotCommandService
 
     private async Task ShowPrivacyPolicyOnboardingAsync(long chatId, int? msgId = null)
     {
-        string text = "📜 *Политика конфиденциальности и обработка данных (152-ФЗ)*\n\n" +
-                      "Продолжая использовать Mirage Diary, вы соглашаетесь со следующими условиями:\n\n" +
-                      "1. *Какие данные хранятся:* Идентификатор чата Telegram/MAX, токен сессии электронного дневника (в зашифрованном виде), выбранные настройки уведомлений и звонков.\n" +
-                      "2. *Безопасность:* Пароли от Госуслуг никогда не сохраняются на наших серверах — авторизация происходит напрямую через защищенный протокол OAuth ЕСИА.\n" +
-                      "3. *Хранение:* Сервера Mirage Diary расположены на территории РФ в соответствии с ФЗ-152 «О персональных данных».\n" +
-                      "4. *Удаление данных:* Вы можете в любой момент полностью удалить свой аккаунт и все сохраненные токены через команду /delete_account в настройках бота.\n\n" +
-                      "Нажмите «Принять и продолжить», чтобы начать пользоваться сервисом.";
+        string text = "🛡 *Политика конфиденциальности и защита данных (152-ФЗ)*\n\n" +
+                      "Добро пожаловать в *Mirage Diary*!\n" +
+                      "Перед началом использования, пожалуйста, ознакомьтесь с условиями обработки персональных данных:\n\n" +
+                      "1. 🔒 *Конвертное шифрование данных:* Все сессионные токены защищены Envelope Encryption (AES-256-GCM с уникальным 256-битным случайным ключом DEK на каждую запись).\n" +
+                      "2. 🚫 *Без сохранения паролей:* Пароли от Госуслуг не передаются и не сохраняются на сервере — авторизация происходит напрямую через защищенный протокол ЕСИА.\n" +
+                      "3. 👨‍👩‍👧 *Для учащихся и родителей:* Сервис предназначен для образовательных целей. Несовершеннолетние пользователи используют сервис с согласия родителей (законных представителей) согласно ч. 6 ст. 9 152-ФЗ.\n" +
+                      "4. 🇷🇺 *Хранение в РФ:* База данных расположена на серверах в Российской Федерации в строгом соответствии с 152-ФЗ.\n" +
+                      "5. 🗑 *Право на отзыв и забвение:* Вы можете в любой момент отозвать согласие и полностью удалить свой аккаунт со всеми токенами через команду /delete_account в настройках.\n\n" +
+                      "Нажмите *«✅ Согласен с политикой (152-ФЗ)»*, чтобы начать пользоваться сервисом.";
 
         var markup = new InlineKeyboardMarkup(new[]
         {
             new[] { InlineKeyboardButton.WithUrl("📖 Читать Политику (152-ФЗ)", "https://miragediary.space/privacy") },
-            new[] { InlineKeyboardButton.WithCallbackData("✅ Принять и продолжить", "cmd_accept_privacy") }
+            new[] { InlineKeyboardButton.WithCallbackData("✅ Согласен с политикой (152-ФЗ)", "cmd_accept_privacy") }
         });
 
         if (msgId.HasValue)

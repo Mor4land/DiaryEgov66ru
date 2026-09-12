@@ -108,8 +108,13 @@ public static class SecureSecretVault
             // Синхронизируем эталонный ключ в файлы token_master.key с правами 0600
             string baseDir = AppContext.BaseDirectory;
             string dataDir = Path.Combine(Directory.GetCurrentDirectory(), "Data");
+            string persistentDataDir = Path.Combine(baseDir, "data");
             TrySaveSecureKeyFile(Path.Combine(baseDir, "token_master.key"), keyHash);
             TrySaveSecureKeyFile(Path.Combine(dataDir, "token_master.key"), keyHash);
+            if (Directory.Exists(persistentDataDir))
+            {
+                TrySaveSecureKeyFile(Path.Combine(persistentDataDir, "token_master.key"), keyHash);
+            }
 
             return keyHash;
         }

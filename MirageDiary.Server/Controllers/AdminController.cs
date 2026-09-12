@@ -86,11 +86,13 @@ public class AdminController : ControllerBase
         return System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(expectedBytes, providedBytes);
     }
 
+    private IActionResult AdminUnauthorized() => Unauthorized(new SimpleSuccessResponse { Success = false, Error = "Недействительный Admin Key" });
+
     // ── STATS & DASHBOARD ─────────────────────────────────────────────────────
     [HttpGet("stats")]
     public async Task<IActionResult> GetStats()
     {
-        if (!ValidateAdminKey()) return Unauthorized(new { error = "Недействительный Admin Key" });
+        if (!ValidateAdminKey()) return AdminUnauthorized();
 
         var totalUsers = await _db.Users.CountAsync();
         var activeSessions = await _db.Users.CountAsync(u => !string.IsNullOrEmpty(u.AccessToken));
@@ -126,7 +128,7 @@ public class AdminController : ControllerBase
     [HttpGet("config")]
     public IActionResult GetConfig()
     {
-        if (!ValidateAdminKey()) return Unauthorized(new { error = "Недействительный Admin Key" });
+        if (!ValidateAdminKey()) return AdminUnauthorized();
 
         return Ok(new
         {
@@ -140,7 +142,7 @@ public class AdminController : ControllerBase
     [HttpPost("config/update-tokens")]
     public async Task<IActionResult> UpdateTokens([FromBody] UpdateTokensRequest req)
     {
-        if (!ValidateAdminKey()) return Unauthorized(new { error = "Недействительный Admin Key" });
+        if (!ValidateAdminKey()) return AdminUnauthorized();
 
         try
         {
@@ -190,7 +192,7 @@ public class AdminController : ControllerBase
     [HttpGet("users")]
     public async Task<IActionResult> GetUsers([FromQuery] string? search = null)
     {
-        if (!ValidateAdminKey()) return Unauthorized(new { error = "Недействительный Admin Key" });
+        if (!ValidateAdminKey()) return AdminUnauthorized();
 
         var query = _db.Users.AsQueryable();
         if (!string.IsNullOrWhiteSpace(search))
@@ -233,7 +235,7 @@ public class AdminController : ControllerBase
     [HttpPost("users/update-role")]
     public async Task<IActionResult> UpdateUserRole([FromBody] UpdateRoleRequest req)
     {
-        if (!ValidateAdminKey()) return Unauthorized(new SimpleSuccessResponse { Success = false, Error = "Недействительный Admin Key" });
+        if (!ValidateAdminKey()) return AdminUnauthorized();
 
         var user = await _userSyncService.FindUserByIdOrUsernameAsync(req.UserId);
         if (user == null) return NotFound(new SimpleSuccessResponse { Success = false, Error = "Пользователь не найден" });
@@ -254,7 +256,7 @@ public class AdminController : ControllerBase
     [HttpPost("users/update-subscription")]
     public async Task<IActionResult> UpdateUserSubscription([FromBody] UpdateSubscriptionRequest req)
     {
-        if (!ValidateAdminKey()) return Unauthorized(new SimpleSuccessResponse { Success = false, Error = "Недействительный Admin Key" });
+        if (!ValidateAdminKey()) return AdminUnauthorized();
 
         var user = await _userSyncService.FindUserByIdOrUsernameAsync(req.UserId);
         if (user == null) return NotFound(new SimpleSuccessResponse { Success = false, Error = "Пользователь не найден" });
@@ -289,7 +291,7 @@ public class AdminController : ControllerBase
     [HttpPost("users/sync-all")]
     public async Task<IActionResult> SyncAllUsers()
     {
-        if (!ValidateAdminKey()) return Unauthorized(new { error = "Недействительный Admin Key" });
+        if (!ValidateAdminKey()) return AdminUnauthorized();
 
         int count = await _userSyncService.SyncAllUsersAsync();
         _eventLog.Success("Синхронизация", $"Глобальная синхронизация аккаунтов выполнена: {count} связей обновлено", Actor());
@@ -301,7 +303,7 @@ public class AdminController : ControllerBase
     [HttpPost("broadcast")]
     public async Task<IActionResult> SendBroadcast([FromBody] BroadcastRequest req)
     {
-        if (!ValidateAdminKey()) return Unauthorized(new { error = "Недействительный Admin Key" });
+        if (!ValidateAdminKey()) return AdminUnauthorized();
         if (string.IsNullOrWhiteSpace(req.Text)) return BadRequest(new { error = "Текст сообщения не может быть пустым" });
 
         var tgBot = _serviceProvider.GetService<ITelegramBotClient>();
@@ -357,7 +359,7 @@ public class AdminController : ControllerBase
     [HttpGet("broadcast/audience")]
     public async Task<IActionResult> GetBroadcastAudience([FromQuery] string targetRole = "All")
     {
-        if (!ValidateAdminKey()) return Unauthorized(new { error = "Недействительный Admin Key" });
+        if (!ValidateAdminKey()) return AdminUnauthorized();
 
         var usersQuery = _db.Users.AsQueryable();
         if (!string.IsNullOrWhiteSpace(targetRole) && targetRole != "All")
@@ -376,7 +378,7 @@ public class AdminController : ControllerBase
     [HttpPost("maintenance/toggle")]
     public IActionResult ToggleMaintenance([FromBody] MaintenanceToggleRequest req)
     {
-        if (!ValidateAdminKey()) return Unauthorized(new { error = "Недействительный Admin Key" });
+        if (!ValidateAdminKey()) return AdminUnauthorized();
 
         const int maintenanceMinutes = 60;
 
@@ -402,7 +404,7 @@ public class AdminController : ControllerBase
     [HttpPost("cache/clear")]
     public async Task<IActionResult> ClearCache()
     {
-        if (!ValidateAdminKey()) return Unauthorized(new { error = "Недействительный Admin Key" });
+        if (!ValidateAdminKey()) return AdminUnauthorized();
 
         _db.Cache.RemoveRange(_db.Cache);
         var cleared = await _db.SaveChangesAsync();
@@ -416,7 +418,7 @@ public class AdminController : ControllerBase
     [HttpGet("telemetry")]
     public async Task<IActionResult> GetTelemetry()
     {
-        if (!ValidateAdminKey()) return Unauthorized(new { error = "Недействительный Admin Key" });
+        if (!ValidateAdminKey()) return AdminUnauthorized();
 
         var process = Process.GetCurrentProcess();
         var uptimeSpan = DateTime.UtcNow - process.StartTime.ToUniversalTime();
@@ -578,7 +580,7 @@ public class AdminController : ControllerBase
     [HttpGet("metrics")]
     public IActionResult GetMetrics([FromQuery] int hours = 12)
     {
-        if (!ValidateAdminKey()) return Unauthorized(new { error = "Недействительный Admin Key" });
+        if (!ValidateAdminKey()) return AdminUnauthorized();
         return Ok(_metricsService.GetTimeline(Math.Clamp(hours, 6, 24)));
     }
 
@@ -586,7 +588,7 @@ public class AdminController : ControllerBase
     [HttpPost("system/gc")]
     public IActionResult CollectGarbage()
     {
-        if (!ValidateAdminKey()) return Unauthorized(new { error = "Недействительный Admin Key" });
+        if (!ValidateAdminKey()) return AdminUnauthorized();
 
         long memBefore = GC.GetTotalMemory(false);
         GC.Collect(2, GCCollectionMode.Aggressive, true, true);
@@ -609,7 +611,7 @@ public class AdminController : ControllerBase
     [HttpGet("backups")]
     public IActionResult GetBackupsList()
     {
-        if (!ValidateAdminKey()) return Unauthorized(new { error = "Недействительный Admin Key" });
+        if (!ValidateAdminKey()) return AdminUnauthorized();
 
         string backupDir = Path.Combine(AppContext.BaseDirectory, "backups");
         if (!Directory.Exists(backupDir)) return Ok(new List<object>());
@@ -632,7 +634,7 @@ public class AdminController : ControllerBase
     [HttpPost("backups/create")]
     public async Task<IActionResult> TriggerBackup()
     {
-        if (!ValidateAdminKey()) return Unauthorized(new { error = "Недействительный Admin Key" });
+        if (!ValidateAdminKey()) return AdminUnauthorized();
 
         var path = await _backupService.CreateBackupAsync("manual_admin");
         if (string.IsNullOrEmpty(path))

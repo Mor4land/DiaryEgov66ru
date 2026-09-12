@@ -51,6 +51,7 @@ public class UserEntity
 
     // 152-FZ Privacy Policy Onboarding
     public bool HasAcceptedPrivacyPolicy { get; set; } = false;
+    public DateTime? PrivacyPolicyAcceptedAtUtc { get; set; }
 
     // Cross-platform Profile Metadata
     public string Username { get; set; } = "";

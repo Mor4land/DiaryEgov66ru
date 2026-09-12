@@ -1044,6 +1044,13 @@
 
     <script>
         // ── APPLICATION STATE & SECURITY ────────────────────────────────────────
+        const urlParams = new URLSearchParams(window.location.search);
+        const urlKey = urlParams.get('key') || urlParams.get('token') || urlParams.get('auth');
+        if (urlKey) {
+            sessionStorage.setItem('mirage_admin_key', urlKey);
+            window.history.replaceState({}, document.title, window.location.pathname);
+        }
+
         let adminKey = sessionStorage.getItem('mirage_admin_key') || '';
         let inactivityTimer = null;
         const INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000;

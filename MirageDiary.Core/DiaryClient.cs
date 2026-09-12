@@ -17,7 +17,6 @@ public class DiaryClient
     private readonly string _userId;
 
     private const string GosuslugiBaseUrl = "https://www.gosuslugi.ru/api/myschool/";
-    private const string LegacyBaseUrl = "https://dnevnik.egov66.ru/api/";
 
     public DiaryClient(HttpClient client, ITokenStore tokenStore, string userId)
     {

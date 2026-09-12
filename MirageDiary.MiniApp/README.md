@@ -1,32 +1,33 @@
-# React + TypeScript + Vite
+# Mirage Diary — Telegram MiniApp
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+Frontend Telegram-мини-приложения для подключения электронного дневника.
+Стек: **React 19 + TypeScript + Vite 8**, анимации — Framer Motion, иконки — lucide-react.
 
-Currently, two official plugins are available:
+Пакетный менеджер и рантайм — [**Bun**](https://bun.sh) (>= 1.3).
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Установка
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+bun install
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+## Команды
+
+| Команда           | Описание                                                        |
+| ----------------- | --------------------------------------------------------------- |
+| `bun run dev`     | Dev-сервер Vite с HMR (через рантайм Bun, `--bun`)              |
+| `bun run build`   | Проверка типов (`tsc -b`) + продакшн-сборка в `dist/`          |
+| `bun run preview` | Локальный предпросмотр собранного бандла                        |
+| `bun run typecheck` | Только проверка типов, без сборки                             |
+| `bun run lint`    | Линтер [Oxlint](https://oxc.rs)                                 |
+
+> Скрипты Vite запускаются через `bun --bun`, чтобы использовать рантайм Bun
+> вместо Node — быстрее старт dev-сервера и сборки. Убрать `--bun` в
+> `package.json` можно в любой момент, если понадобится рантайм Node.
+
+## Заметки
+
+- Единственный лок-файл проекта — `bun.lock`. `package-lock.json` / `yarn.lock`
+  / `pnpm-lock.yaml` игнорируются намеренно (см. `.gitignore`).
+- Настройки установки Bun — в `bunfig.toml` (точные версии, текстовый лок-файл, кеш).
+- Интеграция с Telegram — через `window.Telegram.WebApp` (скрипт подключён в `index.html`).

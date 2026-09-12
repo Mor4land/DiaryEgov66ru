@@ -87,6 +87,7 @@ public static class DatabaseInitializer
                 ("LastMarksHash", "TEXT NOT NULL DEFAULT ''"),
                 ("Shift", "INTEGER NOT NULL DEFAULT 1"),
                 ("HasAcceptedPrivacyPolicy", "INTEGER NOT NULL DEFAULT 0"),
+                ("PrivacyPolicyAcceptedAtUtc", "TEXT NULL"),
                 ("Username", "TEXT NOT NULL DEFAULT ''"),
                 ("FirstName", "TEXT NOT NULL DEFAULT ''"),
                 ("LastName", "TEXT NOT NULL DEFAULT ''"),
@@ -116,29 +117,37 @@ public static class DatabaseInitializer
             cmd.CommandText = @"CREATE INDEX IF NOT EXISTS ""IX_Users_UpdatedAt"" ON ""Users"" (""UpdatedAt"");";
             await cmd.ExecuteNonQueryAsync();
 
-            // 4. Auto-encrypt legacy plain-text tokens in DB
+            // 4. Auto-encrypt or upgrade tokens in DB to envelope encryption (enc:v2)
             var encryption = scope.ServiceProvider.GetRequiredService<ITokenEncryptionService>();
             var usersToEncrypt = await db.Users.ToListAsync();
             bool updated = false;
 
             foreach (var u in usersToEncrypt)
             {
-                if (!string.IsNullOrEmpty(u.AccessToken) && !u.AccessToken.StartsWith("enc:v1:"))
+                if (!string.IsNullOrEmpty(u.AccessToken) && !u.AccessToken.StartsWith("enc:v2:"))
                 {
-                    u.AccessToken = encryption.Encrypt(u.AccessToken);
-                    updated = true;
+                    var plain = encryption.Decrypt(u.AccessToken);
+                    if (!string.IsNullOrEmpty(plain))
+                    {
+                        u.AccessToken = encryption.Encrypt(plain);
+                        updated = true;
+                    }
                 }
-                if (!string.IsNullOrEmpty(u.RefreshToken) && !u.RefreshToken.StartsWith("enc:v1:"))
+                if (!string.IsNullOrEmpty(u.RefreshToken) && !u.RefreshToken.StartsWith("enc:v2:"))
                 {
-                    u.RefreshToken = encryption.Encrypt(u.RefreshToken);
-                    updated = true;
+                    var plain = encryption.Decrypt(u.RefreshToken);
+                    if (!string.IsNullOrEmpty(plain))
+                    {
+                        u.RefreshToken = encryption.Encrypt(plain);
+                        updated = true;
+                    }
                 }
             }
 
             if (updated)
             {
                 await db.SaveChangesAsync();
-                logger.LogInformation("[DatabaseInitializer] Legacy tokens encrypted successfully.");
+                logger.LogInformation("[DatabaseInitializer] Tokens upgraded to envelope encryption (enc:v2) successfully.");
             }
         }
         catch (Exception ex)

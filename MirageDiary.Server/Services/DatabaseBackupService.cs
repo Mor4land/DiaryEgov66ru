@@ -35,7 +35,10 @@ public class DatabaseBackupService
         try
         {
             string baseDir = AppContext.BaseDirectory;
-            string backupDir = Path.Combine(baseDir, "backups");
+            string persistentDataDir = Path.Combine(baseDir, "data");
+            string backupDir = Directory.Exists(persistentDataDir)
+                ? Path.Combine(persistentDataDir, "backups")
+                : Path.Combine(baseDir, "backups");
             Directory.CreateDirectory(backupDir);
 
             string timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");

@@ -3,13 +3,13 @@ import { AnimatePresence, motion } from 'framer-motion';
 import {
   Fingerprint,
   ShieldCheck,
-  Send,
   ArrowRight,
   User,
   Lock,
   Eye,
   EyeOff,
 } from 'lucide-react';
+import { FaTelegramPlane } from 'react-icons/fa';
 
 declare global {
   interface Window {
@@ -320,10 +320,10 @@ export default function App() {
                 animate="animate"
                 className="brand"
               >
-                <motion.h1 variants={staggerItem} className="brand-title">Mirage Diary</motion.h1>
+                <motion.h1 variants={staggerItem} className="brand-title">MirageDiary</motion.h1>
                 <motion.p variants={staggerItem} className="brand-sub">
                   {tgFirstName ? `Привет, ${tgFirstName}! ` : ''}
-                  Подключите электронный дневник, чтобы получать расписание и оценки прямо в Telegram.
+                  Подключите электронный дневник, чтобы получать расписание и оценки прямо в Telegram/Max.
                 </motion.p>
               </motion.div>
             </div>
@@ -356,10 +356,10 @@ export default function App() {
 
               <motion.div variants={staggerItem} className="feature-item">
                 <div className="feature-icon">
-                  <Send size={16} strokeWidth={2.2} />
+                  <FaTelegramPlane size={16} />
                 </div>
                 <div className="feature-text">
-                  <h3 className="feature-title">Удобство в Telegram</h3>
+                  <h3 className="feature-title">Удобство в Telegram/Max</h3>
                   <p className="feature-desc">Оценки, домашнее задание и расписание всегда под рукой в один клик</p>
                 </div>
               </motion.div>
@@ -412,21 +412,17 @@ export default function App() {
                 animate="animate"
                 className="brand"
               >
-                <motion.div variants={staggerItem} className="trust-badge">
-                  <ShieldCheck size={13} className="trust-badge-icon" />
-                  <span>Синхронизация с dnevnik.egov66.ru</span>
-                </motion.div>
                 <motion.h1 variants={staggerItem} className="brand-title">Вход в дневник</motion.h1>
                 <motion.p variants={staggerItem} className="brand-sub">Авторизация для получения расписания и домашних заданий</motion.p>
                 <motion.div variants={staggerItem} style={{
-                  background: 'rgba(255, 255, 255, 0.04)',
-                  border: '1px solid rgba(255, 255, 255, 0.08)',
-                  borderRadius: '12px',
+                  background: '#fafafa',
+                  border: '1px solid #e4e4e7',
+                  borderRadius: '8px',
                   padding: '10px 14px',
                   marginTop: '12px',
-                  fontSize: '12px',
-                  lineHeight: '1.4',
-                  color: 'rgba(255, 255, 255, 0.75)',
+                  fontSize: '13px',
+                  lineHeight: '1.45',
+                  color: '#52525b',
                   textAlign: 'left',
                   display: 'flex',
                   alignItems: 'flex-start',
@@ -859,7 +855,7 @@ export default function App() {
             </div>
             <div className="status-text-group">
               <p className="status-title">Вы уже авторизованы</p>
-              <p className="status-sub">Электронный дневник успешно подключён. Вы можете вернуться в Telegram.</p>
+              <p className="status-sub">Электронный дневник успешно подключён. Вы можете вернуться в Telegram/Max.</p>
             </div>
             <div className="status-actions">
               <motion.button
@@ -868,7 +864,7 @@ export default function App() {
                 className="btn btn--primary"
                 onClick={() => window.Telegram?.WebApp?.close?.()}
               >
-                Вернуться в Telegram
+                Вернуться в Telegram/Max
               </motion.button>
               <motion.button
                 whileHover={buttonSpring.hover}

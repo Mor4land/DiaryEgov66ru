@@ -20,9 +20,8 @@ public static class RussianTrustedCertificateValidator
         "gosuslugi.ru",
         "esia.gosuslugi.ru",
         "lk.gosuslugi.ru",
+        "myschool.gosuslugi.ru",
         "gu-st.ru",
-        "dnevnik.egov66.ru",
-        "egov66.ru",
         "max.ru"
     };
 

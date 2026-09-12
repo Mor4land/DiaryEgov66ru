@@ -80,3 +80,12 @@ ehthumbs.db
 Desktop.ini
 .DS_Store
 
+# Temporary fonts and debug dumps
+*.ttf
+*.bin
+step_*.txt
+dump_*.bin
+
+# AI agent metadata
+.claude/
+

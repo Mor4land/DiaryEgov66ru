@@ -1,0 +1,10 @@
+[install]
+# Записывать точные версии в package.json (без ^) для воспроизводимых сборок
+exact = true
+
+# Использовать текстовый bun.lock (по умолчанию в Bun >=1.2, фиксируем явно)
+saveTextLockfile = true
+
+[install.cache]
+# Кешировать пакеты между установками — ускоряет повторный bun install и CI
+disable = false

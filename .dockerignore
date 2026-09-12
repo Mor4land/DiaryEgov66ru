@@ -1,0 +1,43 @@
+# Git & IDEs
+.git/
+.gitignore
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+
+# Build artifacts & Binaries
+**/bin/
+**/obj/
+**/publish/
+publish_*/
+*.Backup.tmp
+
+# NuGet packages
+**/packages/
+*.nupkg
+
+# Databases & Runtime state
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+miragediary.db
+data/
+
+# Secrets & Private keys
+*.key
+*.pem
+*.pfx
+*.crt
+token_master.key
+admins.json
+
+# Local scripts & frontend dev
+MirageDiary.MiniApp/
+node_modules/
+.playwright/
+chrome/
+*.log

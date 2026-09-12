@@ -13,7 +13,7 @@ namespace MirageDiary.Server.Services;
 
 /// <summary>
 /// Background service that periodically refreshes tokens for all active users in the database
-/// every 2 hours to prevent RefreshTokens (which have a 5-hour TTL on egov66) from expiring.
+/// every 2 hours to prevent RefreshTokens from expiring.
 /// </summary>
 public class TokenRefreshBackgroundService : BackgroundService
 {

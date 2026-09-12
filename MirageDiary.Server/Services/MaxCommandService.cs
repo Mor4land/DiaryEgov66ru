@@ -428,7 +428,10 @@ public class MaxCommandService
             case "cmd_accept_privacy":
                 var privUser = await EnsureUserExistsAsync(maxUserId);
                 privUser.HasAcceptedPrivacyPolicy = true;
+                privUser.PrivacyPolicyAcceptedAtUtc = DateTime.UtcNow;
+                privUser.UpdatedAt = DateTime.UtcNow;
                 await _db.SaveChangesAsync();
+                await _userSyncService.SyncUserAcrossPlatformsAsync(privUser);
                 await ShowMainMenuAsync(chatId, maxUserId, messageId);
                 break;
 
@@ -534,6 +537,14 @@ public class MaxCommandService
             // ─── Settings ───
             case "cmd_settings":
                 await ShowSettingsMenuAsync(chatId, maxUserId, messageId);
+                break;
+
+            case "cmd_alarm_menu":
+                await ShowAlarmMenuAsync(chatId, maxUserId, messageId);
+                break;
+
+            case "cmd_alarm_check_now":
+                await ExecuteAlarmCheckAsync(chatId, maxUserId);
                 break;
 
             case "cmd_toggle_alarm":
@@ -728,8 +739,8 @@ public class MaxCommandService
 
         keyboard.Add(new List<Button>
         {
-            new CallbackButton { Text = "📚 Домашка", Payload = "cmd_homework" },
-            new CallbackButton { Text = "📅 Расписание", Payload = "cmd_schedule" }
+            new CallbackButton { Text = "📅 Расписание", Payload = "cmd_schedule" },
+            new CallbackButton { Text = "📚 Домашка", Payload = "cmd_homework" }
         });
         keyboard.Add(new List<Button>
         {
@@ -741,46 +752,68 @@ public class MaxCommandService
             new CallbackButton { Text = "👤 Профиль", Payload = "cmd_profile" },
             new CallbackButton { Text = "⚙️ Настройки", Payload = "cmd_settings" }
         });
-        keyboard.Add(new List<Button>
-        {
-            new CallbackButton { Text = "🔔 До звонка", Payload = "cmd_now" }
-        });
 
         if (role == "Admin")
         {
             keyboard.Add(new List<Button>
             {
+                new CallbackButton { Text = "🔔 До звонка", Payload = "cmd_now" },
                 new CallbackButton { Text = "👑 Админ-панель", Payload = "cmd_admin_panel" }
             });
         }
-
-        var maintenanceBanner = isMaintenance ? "\n\n🔧 _Идут технические работы_" : "";
-        var roleEmoji = role switch
+        else
         {
-            "Admin"       => "👑 Администратор",
-            "HeadTeacher" => "🏫 Завуч",
-            _             => "🎓 Ученик"
-        };
+            keyboard.Add(new List<Button>
+            {
+                new CallbackButton { Text = "🔔 До звонка", Payload = "cmd_now" }
+            });
+        }
 
-        var text = $"*Mirage Diary (MAX)* — школьный дневник\n" +
-                   $"Роль: {roleEmoji}{maintenanceBanner}\n\n" +
-                   (role == "HeadTeacher"
-                       ? "💡 Отправьте мне фото или PDF с расписанием — я сохраню его для учеников вашей школы."
-                       : "Выберите действие:");
+        var maintenanceBanner = isMaintenance ? "\n🔧 _Идут технические работы_" : "";
+
+        string header;
+        if (role == "Admin")
+        {
+            header = "👑 *Администратор* • Mirage Diary (MAX)";
+        }
+        else if (role == "HeadTeacher")
+        {
+            header = $"🏫 *Завуч* • {(!string.IsNullOrEmpty(user?.OrgName) ? user.OrgName : "Mirage Diary (MAX)")}";
+        }
+        else if (isAuthorized)
+        {
+            if (!string.IsNullOrEmpty(user.ClassName) && !string.IsNullOrEmpty(user.OrgName))
+                header = $"🎓 *{user.ClassName}* • {user.OrgName}";
+            else if (!string.IsNullOrEmpty(user.ClassName))
+                header = $"🎓 *{user.ClassName}* • Mirage Diary";
+            else
+                header = "🎓 *Ученик* • Mirage Diary";
+        }
+        else
+        {
+            header = "👋 *Mirage Diary (MAX)* — школьный дневник";
+        }
+
+        var text = header + maintenanceBanner;
+        if (role == "HeadTeacher")
+        {
+            text += "\n\n💡 _Отправьте фото или PDF с расписанием — я сохраню его для учеников вашей школы._";
+        }
 
         await SendOrEditBannerScreenAsync(chatId, messageId, "banner_menu.png", text, keyboard);
     }
 
     private async Task ShowPrivacyPolicyOnboardingAsync(long chatId, string? messageId = null)
     {
-        string text = "🛡 *Политика конфиденциальности и безопасность данных*\n\n" +
-                      "Добро пожаловать в *Mirage Diary*!\n\n" +
-                      "В соответствии с требованиями Федерального закона № 152-ФЗ «О персональных данных»:\n" +
-                      "• Все токены доступа хранятся в зашифрованном виде (AES-256 GCM).\n" +
-                      "• Пароли от Госуслуг не сохраняются на сервере и не передаются третьим лицам.\n" +
-                      "• Данные журнала используются строго для отображения расписания и оценок.\n\n" +
-                      "Ознакомиться с полным текстом политики можно на официальном сайте по ссылке ниже.\n\n" +
-                      "Нажимая кнопку «Принять и продолжить», вы даете согласие на обработку данных для работы дневника.";
+        string text = "🛡 *Политика конфиденциальности и защита данных (152-ФЗ)*\n\n" +
+                      "Добро пожаловать в *Mirage Diary*!\n" +
+                      "Перед началом использования, пожалуйста, ознакомьтесь с условиями обработки данных:\n\n" +
+                      "1. 🔒 *Конвертное шифрование:* Токены сессии защищены Envelope Encryption (AES-256-GCM с уникальным случайным 256-битным ключом на каждую запись).\n" +
+                      "2. 🚫 *Без паролей:* Пароли от Госуслуг никогда не передаются и не сохраняются на сервере — вход идет через ЕСИА.\n" +
+                      "3. 👨‍👩‍👧 *Для несовершеннолетних:* Сервис используется с согласия родителей (законных представителей) согласно ч. 6 ст. 9 152-ФЗ.\n" +
+                      "4. 🇷🇺 *Хранение в РФ:* База данных расположена в Российской Федерации в соответствии с законом.\n" +
+                      "5. 🗑 *Удаление данных:* Полный отзыв согласия и стирание профиля доступны в любой момент по команде /delete_account в настройках.\n\n" +
+                      "Нажмите *«✅ Согласен с политикой (152-ФЗ)»*, чтобы продолжить.";
 
         var keyboard = new List<List<Button>>
         {
@@ -790,7 +823,7 @@ public class MaxCommandService
             },
             new List<Button>
             {
-                new CallbackButton { Text = "✅ Принять и продолжить", Payload = "cmd_accept_privacy" }
+                new CallbackButton { Text = "✅ Согласен с политикой (152-ФЗ)", Payload = "cmd_accept_privacy" }
             }
         };
 
@@ -815,7 +848,7 @@ public class MaxCommandService
 
         var keyboard = new List<List<Button>>
         {
-            new List<Button> { new CallbackButton { Text = "🔙 Главное меню", Payload = "cmd_back_main" } }
+            new List<Button> { new CallbackButton { Text = "🏠 Главное меню", Payload = "cmd_back_main" } }
         };
 
         await SendOrEditBannerScreenAsync(chatId, null, "banner_menu.png", text, keyboard);
@@ -842,7 +875,7 @@ public class MaxCommandService
             },
             new List<Button>
             {
-                new CallbackButton { Text = "🔙 Главное меню", Payload = "cmd_back_main" }
+                new CallbackButton { Text = "🏠 Главное меню", Payload = "cmd_back_main" }
             }
         };
 
@@ -884,7 +917,7 @@ public class MaxCommandService
 
         var keyboard = new List<List<Button>>
         {
-            new List<Button> { new CallbackButton { Text = "🔙 Главное меню", Payload = "cmd_back_main" } }
+            new List<Button> { new CallbackButton { Text = "🏠 Главное меню", Payload = "cmd_back_main" } }
         };
 
         await EditOrSendMessageAsync(chatId, messageId, text, keyboard);
@@ -914,7 +947,7 @@ public class MaxCommandService
                 var reloginKeyboard = new List<List<Button>>
                 {
                     new List<Button> { new OpenAppButton { Text = "🔐 Войти через Госуслуги", WebApp = maxBotApp, Payload = maxUserId } },
-                    new List<Button> { new CallbackButton { Text = "🔙 Главное меню", Payload = "cmd_back_main" } }
+                    new List<Button> { new CallbackButton { Text = "🏠 Главное меню", Payload = "cmd_back_main" } }
                 };
                 await EditOrSendMessageAsync(chatId, messageId, hw, reloginKeyboard);
                 return;
@@ -949,7 +982,7 @@ public class MaxCommandService
                 new List<Button>
                 {
                     new CallbackButton { Text = "🔄 Обновить", Payload = "cmd_homework_refresh" },
-                    new CallbackButton { Text = "🔙 Главное меню", Payload = "cmd_back_main" }
+                    new CallbackButton { Text = "🏠 Главное меню", Payload = "cmd_back_main" }
                 }
             };
 
@@ -981,7 +1014,7 @@ public class MaxCommandService
                     new List<Button>
                     {
                         new CallbackButton { Text = "🔄 Обновить", Payload = "cmd_schedule_refresh" },
-                        new CallbackButton { Text = "🔙 Главное меню", Payload = "cmd_back_main" }
+                        new CallbackButton { Text = "🏠 Главное меню", Payload = "cmd_back_main" }
                     }
                 };
                 var uploadedText = $"📅 *Расписание — {user.OrgName}*\n\nЗагружено администрацией школы (ID: `{schedule.FileId}`)";
@@ -1003,7 +1036,7 @@ public class MaxCommandService
             var reloginKeyboard = new List<List<Button>>
             {
                 new List<Button> { new OpenAppButton { Text = "🔐 Войти через Госуслуги", WebApp = maxBotApp, Payload = maxUserId } },
-                new List<Button> { new CallbackButton { Text = "🔙 Главное меню", Payload = "cmd_back_main" } }
+                new List<Button> { new CallbackButton { Text = "🏠 Главное меню", Payload = "cmd_back_main" } }
             };
             await EditOrSendMessageAsync(chatId, messageId, scheduleText, reloginKeyboard);
             return;
@@ -1014,26 +1047,13 @@ public class MaxCommandService
             new List<Button>
             {
                 new CallbackButton { Text = "🔄 Обновить", Payload = "cmd_schedule_refresh" },
-                new CallbackButton { Text = "🔙 Главное меню", Payload = "cmd_back_main" }
+                new CallbackButton { Text = "🏠 Главное меню", Payload = "cmd_back_main" }
             }
         };
 
-        if (!string.IsNullOrEmpty(scheduleText) && !scheduleText.Contains("отсутствует"))
+        if (string.IsNullOrWhiteSpace(scheduleText))
         {
-            await SendOrEditBannerScreenAsync(chatId, messageId, "banner_schedule.png", scheduleText, keyboard);
-            return;
-        }
-
-        // Final fallback to uploaded schedule file from HeadTeacher
-        if (user != null && !string.IsNullOrEmpty(user.OrgName))
-        {
-            var schedule = await _db.Schedules.FirstOrDefaultAsync(s => s.OrgName == user.OrgName);
-            if (schedule != null && !string.IsNullOrEmpty(schedule.FileId))
-            {
-                var uploadedText = $"📅 *Расписание — {user.OrgName}*\n\nЗагружено администрацией школы (ID: `{schedule.FileId}`)";
-                await SendOrEditBannerScreenAsync(chatId, messageId, "banner_schedule.png", uploadedText, keyboard);
-                return;
-            }
+            scheduleText = "📅 *Расписание уроков*\n\nНа выбранную дату расписание отсутствует или уроки не запланированы.";
         }
 
         await SendOrEditBannerScreenAsync(chatId, messageId, "banner_schedule.png", scheduleText, keyboard);
@@ -1057,7 +1077,7 @@ public class MaxCommandService
             var reloginKeyboard = new List<List<Button>>
             {
                 new List<Button> { new OpenAppButton { Text = "🔐 Войти через Госуслуги", WebApp = maxBotApp, Payload = maxUserId } },
-                new List<Button> { new CallbackButton { Text = "🔙 Главное меню", Payload = "cmd_back_main" } }
+                new List<Button> { new CallbackButton { Text = "🏠 Главное меню", Payload = "cmd_back_main" } }
             };
             await EditOrSendMessageAsync(chatId, messageId, marksText, reloginKeyboard);
             return;
@@ -1072,7 +1092,7 @@ public class MaxCommandService
             },
             new List<Button>
             {
-                new CallbackButton { Text = "🔙 Главное меню", Payload = "cmd_back_main" }
+                new CallbackButton { Text = "🏠 Главное меню", Payload = "cmd_back_main" }
             }
         };
 
@@ -1096,7 +1116,7 @@ public class MaxCommandService
         if (subjects == null || subjects.Count == 0)
         {
             var noMarks = "📊 В дневнике пока нет выставленных оценок для расчета цели.";
-            var backKeyboard = CreateSingleButtonKeyboard("🔙 Главное меню", "cmd_back_main");
+            var backKeyboard = CreateSingleButtonKeyboard("🏠 Главное меню", "cmd_back_main");
             await EditOrSendMessageAsync(chatId, messageId, noMarks, backKeyboard);
             return;
         }
@@ -1122,7 +1142,7 @@ public class MaxCommandService
         keyboard.Add(new List<Button>
         {
             new CallbackButton { Text = "🔄 Обновить", Payload = "cmd_calc_refresh" },
-            new CallbackButton { Text = "🔙 Главное меню", Payload = "cmd_back_main" }
+            new CallbackButton { Text = "🏠 Главное меню", Payload = "cmd_back_main" }
         });
 
         string text = "🎯 *Калькулятор целей и среднего балла*\n\n" +
@@ -1172,7 +1192,7 @@ public class MaxCommandService
             },
             new List<Button>
             {
-                new CallbackButton { Text = "🔙 Главное меню", Payload = "cmd_back_main" }
+                new CallbackButton { Text = "🏠 Главное меню", Payload = "cmd_back_main" }
             }
         };
 
@@ -1247,7 +1267,7 @@ public class MaxCommandService
             },
             new List<Button>
             {
-                new CallbackButton { Text = "🔙 Главное меню", Payload = "cmd_back_main" }
+                new CallbackButton { Text = "🏠 Главное меню", Payload = "cmd_back_main" }
             }
         };
 
@@ -1282,7 +1302,11 @@ public class MaxCommandService
 
         var keyboard = new List<List<Button>>
         {
-            new List<Button> { new CallbackButton { Text = "🔄 Обновить данные", Payload = "cmd_profile_refresh" } }
+            new List<Button>
+            {
+                new CallbackButton { Text = "🔄 Обновить", Payload = "cmd_profile_refresh" },
+                new CallbackButton { Text = "⚙️ Настройки", Payload = "cmd_settings" }
+            }
         };
 
         if (children != null && children.Count > 1)
@@ -1296,11 +1320,7 @@ public class MaxCommandService
         keyboard.Add(new List<Button>
         {
             new CallbackButton { Text = "🚪 Выйти", Payload = "cmd_logout" },
-            new CallbackButton { Text = "⚙️ Настройки", Payload = "cmd_settings" }
-        });
-        keyboard.Add(new List<Button>
-        {
-            new CallbackButton { Text = "🔙 Главное меню", Payload = "cmd_back_main" }
+            new CallbackButton { Text = "🏠 Главное меню", Payload = "cmd_back_main" }
         });
 
         await SendOrEditBannerScreenAsync(chatId, messageId, "banner_profile.png", text, keyboard);
@@ -1312,7 +1332,7 @@ public class MaxCommandService
         if (children == null || children.Count == 0)
         {
             var msg = "❌ Не удалось получить список детей из аккаунта Госуслуг. Убедитесь, что вы авторизованы.";
-            await EditOrSendMessageAsync(chatId, messageId, msg, CreateSingleButtonKeyboard("🔙 Главное меню", "cmd_back_main"));
+            await EditOrSendMessageAsync(chatId, messageId, msg, CreateSingleButtonKeyboard("🏠 Главное меню", "cmd_back_main"));
             return;
         }
 
@@ -1339,7 +1359,7 @@ public class MaxCommandService
             text += $"• *{name}*{activeMark}\n";
         }
 
-        keyboard.Add(new List<Button> { new CallbackButton { Text = "🔙 Главное меню", Payload = "cmd_back_main" } });
+        keyboard.Add(new List<Button> { new CallbackButton { Text = "🏠 Главное меню", Payload = "cmd_back_main" } });
 
         await EditOrSendMessageAsync(chatId, messageId, text, keyboard);
     }
@@ -1382,7 +1402,7 @@ public class MaxCommandService
                     Payload = shift == 1 ? "cmd_set_shift:2" : "cmd_set_shift:1"
                 }
             },
-            new List<Button> { new CallbackButton { Text = "🔙 Главное меню", Payload = "cmd_back_main" } }
+            new List<Button> { new CallbackButton { Text = "🏠 Главное меню", Payload = "cmd_back_main" } }
         };
 
         await SendOrEditBannerScreenAsync(chatId, messageId, "banner_now.png", text, keyboard);
@@ -1395,14 +1415,7 @@ public class MaxCommandService
     private async Task ShowSettingsMenuAsync(long chatId, string maxUserId, string? messageId = null)
     {
         var user = await EnsureUserExistsAsync(maxUserId);
-        var schedOn = user.IsScheduleReminderEnabled;
-        var schedTime = user.ScheduleReminderTime ?? "07:30";
-        var hwOn = user.IsHomeworkReminderEnabled;
-        var hwTime = user.HomeworkReminderTime ?? "17:00";
-        var equipOn = user.IsEquipmentReminderEnabled;
-        var equipTime = user.EquipmentReminderTime ?? "20:30";
         var alarmOn = user.IsAlarmEnabled;
-
         var maxBotApp = _config["MaxBot:Username"] ?? _config["MaxBotUsername"] ?? "se13960436_bot";
 
         var keyboard = new List<List<Button>>
@@ -1411,15 +1424,65 @@ public class MaxCommandService
             {
                 new CallbackButton
                 {
-                    Text = $"📅 Расписание: {(schedOn ? $"🟢 {schedTime}" : "🔴 ВЫКЛ")}",
-                    Payload = "cmd_alarm_sched"
+                    Text = $"⏰ Будильник: {(alarmOn ? "🟢 Вкл" : "🔴 Выкл")}",
+                    Payload = "cmd_alarm_menu"
+                }
+            },
+            new List<Button>
+            {
+                new OpenAppButton
+                {
+                    Text = "🔄 Госуслуги",
+                    WebApp = maxBotApp,
+                    Payload = maxUserId
+                },
+                new CallbackButton { Text = "🔗 Связать с Telegram", Payload = "cmd_link_account" }
+            },
+            new List<Button>
+            {
+                new CallbackButton { Text = "🗑 Удалить аккаунт", Payload = "cmd_delete_account" },
+                new CallbackButton { Text = "🏠 Главное меню", Payload = "cmd_back_main" }
+            }
+        };
+
+        string text = "⚙️ *Настройки*\n\n" +
+                      $"• ⏰ Будильник: {(alarmOn ? "`🟢 Включен`" : "`🔴 Выключен`")}\n" +
+                      $"• 👤 ID: `{maxUserId}`";
+
+        await SendOrEditBannerScreenAsync(chatId, messageId, "banner_settings.png", text, keyboard);
+    }
+
+    private async Task ShowAlarmMenuAsync(long chatId, string maxUserId, string? messageId = null)
+    {
+        var user = await EnsureUserExistsAsync(maxUserId);
+        var alarmOn = user.IsAlarmEnabled;
+        var schedOn = user.IsScheduleReminderEnabled;
+        var schedTime = user.ScheduleReminderTime ?? "07:30";
+        var hwOn = user.IsHomeworkReminderEnabled;
+        var hwTime = user.HomeworkReminderTime ?? "17:00";
+        var equipOn = user.IsEquipmentReminderEnabled;
+        var equipTime = user.EquipmentReminderTime ?? "20:30";
+
+        var keyboard = new List<List<Button>>
+        {
+            new List<Button>
+            {
+                new CallbackButton
+                {
+                    Text = alarmOn ? "🔔 Будильник: 🟢 ВКЛЮЧЁН" : "🔕 Будильник: 🔴 ВЫКЛЮЧЕН",
+                    Payload = "cmd_toggle_alarm"
                 }
             },
             new List<Button>
             {
                 new CallbackButton
                 {
-                    Text = $"📚 Домашка: {(hwOn ? $"🟢 {hwTime}" : "🔴 ВЫКЛ")}",
+                    Text = $"📅 Расписание: {(schedOn ? schedTime : "ВЫКЛ")}",
+                    Payload = "cmd_alarm_sched"
+                },
+                new CallbackButton
+                {
+                    Text = $"📚 Домашка: {(hwOn ? hwTime : "ВЫКЛ")}",
                     Payload = "cmd_alarm_hw"
                 }
             },
@@ -1427,50 +1490,29 @@ public class MaxCommandService
             {
                 new CallbackButton
                 {
-                    Text = $"🎒 Вещи и рюкзак: {(equipOn ? $"🟢 {equipTime}" : "🔴 ВЫКЛ")}",
+                    Text = $"🎒 Вещи: {(equipOn ? equipTime : "ВЫКЛ")}",
                     Payload = "cmd_alarm_equip"
-                }
-            },
-            new List<Button>
-            {
+                },
                 new CallbackButton
                 {
-                    Text = alarmOn ? "🔔 Умный будильник: ВКЛ" : "🔕 Умный будильник: ВЫКЛ",
-                    Payload = "cmd_toggle_alarm"
+                    Text = "⚡ Проверить вещи",
+                    Payload = "cmd_alarm_check_now"
                 }
             },
             new List<Button>
             {
-                new OpenAppButton
-                {
-                    Text = "🔄 Перепривязать Госуслуги",
-                    WebApp = maxBotApp,
-                    Payload = maxUserId
-                }
-            },
-            new List<Button>
-            {
-                new CallbackButton { Text = "🔗 Связать с Telegram", Payload = "cmd_link_account" }
-            },
-            new List<Button>
-            {
-                new CallbackButton { Text = "🗑 Удалить аккаунт", Payload = "cmd_delete_account" }
-            },
-            new List<Button>
-            {
-                new CallbackButton { Text = "🔙 Главное меню", Payload = "cmd_back_main" }
+                new CallbackButton { Text = "⬅️ Настройки", Payload = "cmd_settings" },
+                new CallbackButton { Text = "🏠 Главное меню", Payload = "cmd_back_main" }
             }
         };
 
-        string text = "⚙️ *Настройки уведомлений и умного будильника*\n\n" +
-                      "🔔 *Текущие напоминания:*\n" +
-                      $"• 📅 *Расписание*: {(schedOn ? $"`🟢 Вкл` (в *{schedTime}*)" : "`🔴 Выключено`")}\n" +
-                      $"• 📚 *Домашка*: {(hwOn ? $"`🟢 Вкл` (в *{hwTime}*)" : "`🔴 Выключено`")}\n" +
-                      $"• 🎒 *Вещи и рюкзак*: {(equipOn ? $"`🟢 Вкл` (в *{equipTime}*)" : "`🔴 Выключено`")}\n" +
-                      $"• 🔔 *Умный будильник*: {(alarmOn ? "`🟢 Включён`" : "`🔴 Выключен`")}\n\n" +
-                      "_Нажмите на нужный пункт ниже, чтобы настроить время или включить/выключить:_";
+        string text = "⏰ *Умный будильник*\n\n" +
+                      $"• 🔔 Статус: {(alarmOn ? "`🟢 Активен`" : "`🔴 Выключен`")}\n" +
+                      $"• 📅 Расписание: {(schedOn ? $"`{schedTime}`" : "`Выкл`")}\n" +
+                      $"• 📚 Домашка: {(hwOn ? $"`{hwTime}`" : "`Выкл`")}\n" +
+                      $"• 🎒 Вещи и рюкзак: {(equipOn ? $"`{equipTime}`" : "`Выкл`")}";
 
-        await SendOrEditBannerScreenAsync(chatId, messageId, "banner_settings.png", text, keyboard);
+        await SendOrEditBannerScreenAsync(chatId, messageId, "banner_alarm.png", text, keyboard);
     }
 
     private async Task ShowDeleteAccountConfirmationAsync(long chatId, string maxUserId, string? messageId)
@@ -1585,7 +1627,7 @@ public class MaxCommandService
         var user = await EnsureUserExistsAsync(maxUserId);
         user.IsAlarmEnabled = !user.IsAlarmEnabled;
         await _db.SaveChangesAsync();
-        await ShowSettingsMenuAsync(chatId, maxUserId, messageId);
+        await ShowAlarmMenuAsync(chatId, maxUserId, messageId);
     }
 
     // ─── Schedule Reminder Menu ───
@@ -1615,8 +1657,8 @@ public class MaxCommandService
             new List<Button> { new CallbackButton { Text = "✏️ Ввести другое время", Payload = "cmd_alarm_sched_custom" } },
             new List<Button>
             {
-                new CallbackButton { Text = "⬅️ К настройкам", Payload = "cmd_settings" },
-                new CallbackButton { Text = "🔙 Главное меню", Payload = "cmd_back_main" }
+                new CallbackButton { Text = "⬅️ К будильнику", Payload = "cmd_alarm_menu" },
+                new CallbackButton { Text = "🏠 Главное меню", Payload = "cmd_back_main" }
             }
         };
 
@@ -1674,8 +1716,8 @@ public class MaxCommandService
             new List<Button> { new CallbackButton { Text = "✏️ Ввести другое время", Payload = "cmd_alarm_hw_custom" } },
             new List<Button>
             {
-                new CallbackButton { Text = "⬅️ К настройкам", Payload = "cmd_settings" },
-                new CallbackButton { Text = "🔙 Главное меню", Payload = "cmd_back_main" }
+                new CallbackButton { Text = "⬅️ К будильнику", Payload = "cmd_alarm_menu" },
+                new CallbackButton { Text = "🏠 Главное меню", Payload = "cmd_back_main" }
             }
         };
 
@@ -1733,8 +1775,8 @@ public class MaxCommandService
             new List<Button> { new CallbackButton { Text = "✏️ Ввести другое время", Payload = "cmd_alarm_equip_custom" } },
             new List<Button>
             {
-                new CallbackButton { Text = "⬅️ К настройкам", Payload = "cmd_settings" },
-                new CallbackButton { Text = "🔙 Главное меню", Payload = "cmd_back_main" }
+                new CallbackButton { Text = "⬅️ К будильнику", Payload = "cmd_alarm_menu" },
+                new CallbackButton { Text = "🏠 Главное меню", Payload = "cmd_back_main" }
             }
         };
 
@@ -1848,7 +1890,7 @@ public class MaxCommandService
             });
         }
 
-        keyboard.Add(new List<Button> { new CallbackButton { Text = "🔙 Главное меню", Payload = "cmd_back_main" } });
+        keyboard.Add(new List<Button> { new CallbackButton { Text = "🏠 Главное меню", Payload = "cmd_back_main" } });
 
         await SendOrEditBannerScreenAsync(chatId, messageId, "banner_premium.png", text, keyboard);
     }
@@ -1869,7 +1911,7 @@ public class MaxCommandService
 
         var keyboard = new List<List<Button>>
         {
-            new List<Button> { new CallbackButton { Text = "🔙 Главное меню", Payload = "cmd_back_main" } }
+            new List<Button> { new CallbackButton { Text = "🏠 Главное меню", Payload = "cmd_back_main" } }
         };
 
         await EditOrSendMessageAsync(chatId, messageId, text, keyboard);
@@ -1888,18 +1930,28 @@ public class MaxCommandService
         var userCount = await _db.Users.CountAsync();
         var htCount = await _db.Users.CountAsync(u => u.Role == "HeadTeacher");
 
+        var adminKey = Environment.GetEnvironmentVariable("ADMIN_KEY") ?? _config["Security:AdminKey"] ?? "";
+        var baseUrl = (_config["MiniAppUrl"] ?? "https://miragediary.space").TrimEnd('/');
+        var adminWebUrl = $"{baseUrl}/admin?key={Uri.EscapeDataString(adminKey)}";
+
         var text = $"👑 *Админ-панель (MAX)*\n\n" +
                    $"👥 Пользователей в базе: *{userCount}*\n" +
                    $"🏫 Завучей: *{htCount}*\n" +
-                   $"🔧 Тех. работы: *{(isMaintenance ? "Включены" : "Выключены")}*";
+                   $"🔧 Тех. работы: *{(isMaintenance ? "Включены" : "Выключены")}*\n\n" +
+                   $"🔑 *Ключ администратора:*\n`{adminKey}`\n\n" +
+                   $"_Нажмите кнопку ниже для мгновенного входа в веб-консоль:_";
 
         var keyboard = new List<List<Button>>
         {
+            new List<Button> { new LinkButton { Text = "🌐 Войти в админку на сайте", Url = adminWebUrl } },
             new List<Button> { new CallbackButton { Text = "🏫 Управление завучами", Payload = "cmd_admin_headteachers" } },
             new List<Button> { new CallbackButton { Text = isMaintenance ? "🟢 Выключить тех. работы" : "🔧 Включить тех. работы", Payload = "cmd_admin_maintenance" } },
-            new List<Button> { new CallbackButton { Text = "📢 Рассылка", Payload = "cmd_admin_broadcast" } },
-            new List<Button> { new CallbackButton { Text = "📊 Статистика", Payload = "cmd_admin_stats" } },
-            new List<Button> { new CallbackButton { Text = "⬅️ Назад", Payload = "cmd_back_main" } }
+            new List<Button>
+            {
+                new CallbackButton { Text = "📢 Рассылка", Payload = "cmd_admin_broadcast" },
+                new CallbackButton { Text = "📊 Статистика", Payload = "cmd_admin_stats" }
+            },
+            new List<Button> { new CallbackButton { Text = "🏠 Главное меню", Payload = "cmd_back_main" } }
         };
 
         await SendOrEditBannerScreenAsync(chatId, messageId, "banner_admin.png", text, keyboard);

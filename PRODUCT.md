@@ -35,7 +35,7 @@ web
 - Часовой пояс аудитории — Екатеринбург, UTC+5; в коде зашит `AddHours(5)`.
 - Развёртывание: linux-x64 за Nginx, SQLite на диске, автоматические снимки БД.
 - Админ-консоль — один статический файл `wwwroot/admin.html`, доступ по общему ключу в заголовке `X-Admin-Key`.
-- Домен: `miragediary.space`. Источник данных: `dnevnik.egov66.ru`.
+- Домен: `miragediary.space`. Источник данных: ФГИС «Моя Школа» (Госуслуги).
 
 ## Capabilities and Constraints
 

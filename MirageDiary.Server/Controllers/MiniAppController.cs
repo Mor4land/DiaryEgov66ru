@@ -234,18 +234,33 @@ public class MiniAppController : ControllerBase
         try
         {
             var client = _httpFactory.CreateClient();
-            client.DefaultRequestHeaders.Authorization =
-                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", request.Token);
-            var resp = await client.GetAsync("https://dnevnik.egov66.ru/api/students");
+            if (request.Token.StartsWith("acc_t=") || request.Token.Contains(";"))
+            {
+                client.DefaultRequestHeaders.TryAddWithoutValidation("Cookie", request.Token);
+            }
+            else
+            {
+                client.DefaultRequestHeaders.Authorization =
+                    new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", request.Token);
+            }
+
+            var resp = await client.GetAsync("https://www.gosuslugi.ru/api/myschool/v2/auth/student");
             if (resp.IsSuccessStatusCode)
             {
                 var json = await resp.Content.ReadAsStringAsync();
                 using var doc = System.Text.Json.JsonDocument.Parse(json);
-                if (doc.RootElement.TryGetProperty("students", out var students) &&
+                if (doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Array && doc.RootElement.GetArrayLength() > 0)
+                {
+                    var s = doc.RootElement[0];
+                    studentId = s.TryGetProperty("student_id", out var id) ? id.GetString() ?? "" : "";
+                    className = s.TryGetProperty("class_name", out var cn) ? cn.GetString() ?? "" : "";
+                    orgName   = s.TryGetProperty("org_name",   out var org) ? org.GetString() ?? "" : "";
+                }
+                else if (doc.RootElement.TryGetProperty("students", out var students) &&
                     students.GetArrayLength() > 0)
                 {
                     var s = students[0];
-                    studentId = s.TryGetProperty("id",        out var id)  ? id.GetString()  ?? "" : "";
+                    studentId = s.TryGetProperty("student_id", out var sid) ? sid.GetString() ?? "" : (s.TryGetProperty("id", out var id) ? id.GetString() ?? "" : "");
                     className = s.TryGetProperty("className", out var cn)  ? cn.GetString()  ?? "" : "";
                     orgName   = s.TryGetProperty("orgName",   out var org) ? org.GetString() ?? "" : "";
                 }
