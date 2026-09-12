@@ -1,0 +1,88 @@
+# Build results & Binaries
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+[Ww][Ii][Nn]32/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+[Ll]og/
+[Ll]ogs/
+publish/
+publish_*/
+*.Backup.tmp
+
+# Visual Studio files
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# NuGet packages
+packages/
+*.nupkg
+
+# MiniApp / Frontend
+node_modules/
+dist/
+dist-ssr/
+.env.local
+.env.*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.impeccable/
+
+# Database & SQLite runtime
+miragediary.db
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# App config & Secrets
+appsettings.Development.json
+admins.json
+*.key
+*.pem
+*.pfx
+*.crt
+token_master.key
+*Token*.txt
+*dump*.json
+api_dump_*.json
+auth_dump*.json
+
+# Headless browser downloads & runtime
+chrome/
+**/chrome/
+.playwright/
+
+# APK / DEX / JADX artifacts
+*.dex
+*.apk
+jadx.zip
+jadx/
+jadx_*/
+out_*/
+
+# OS artifacts
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store
+
+# Temporary fonts and debug dumps
+*.ttf
+*.bin
+step_*.txt
+dump_*.bin
+

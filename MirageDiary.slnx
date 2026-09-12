@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="MirageDiary.Core/MirageDiary.Core.csproj" />
+  <Project Path="MirageDiary.Server/MirageDiary.Server.csproj" />
+</Solution>
