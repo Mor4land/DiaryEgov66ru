@@ -1,0 +1,29 @@
+# ==============================================================================
+# MirageDiary Project Requirements (п. 9.7 Регламента)
+# ==============================================================================
+# Примечание: Проект разработан на платформе .NET 10 (C# 14). В нативной экосистеме .NET
+# управление зависимостями осуществляется через NuGet и файлы проектов (*.csproj / .slnx).
+# Данный файл сформирован для соответствия требованиям формальной автоматической проверки регламента.
+# ==============================================================================
+
+# .NET 10 Target Framework & Web Engine
+Microsoft.AspNetCore.App 10.0
+Microsoft.EntityFrameworkCore.Sqlite 10.0.9
+Microsoft.Data.Sqlite 10.0.9
+Microsoft.AspNetCore.OpenApi 10.0.7
+
+# Security, Cryptography & 152-FZ Envelope Encryption
+System.Security.Cryptography.Algorithms
+System.Security.Cryptography.Cng
+Microsoft.AspNetCore.Cryptography.KeyDerivation
+
+# Messaging & Bot Gateways
+Telegram.Bot 22.10.1
+SaaSoft.MAX.Bot 1.2.1
+
+# Parsing & Web Automation
+Microsoft.Playwright 1.61.0
+System.Text.Json
+
+# Build Pipeline & Bytecode Protection
+Obfuscar 2.2.50

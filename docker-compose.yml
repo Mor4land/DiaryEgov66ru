@@ -12,6 +12,8 @@ services:
         required: false
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_HTTP_PORTS=5000
+      - ASPNETCORE_URLS=http://+:5000
       - TZ=Asia/Yekaterinburg
       - ConnectionStrings__DefaultConnection=Data Source=/app/data/miragediary.db
       - MIRAGE_SQLITE_CONNECTION=Data Source=/app/data/miragediary.db

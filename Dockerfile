@@ -55,7 +55,8 @@ RUN mkdir -p /app/data /app/data/backups \
     && chown -R app:app /app
 
 # 4. Production Environment Defaults
-ENV ASPNETCORE_URLS="http://+:5000" \
+ENV ASPNETCORE_HTTP_PORTS="5000" \
+    ASPNETCORE_URLS="http://+:5000" \
     ASPNETCORE_ENVIRONMENT="Production" \
     DOTNET_RUNNING_IN_CONTAINER="true" \
     ConnectionStrings__DefaultConnection="Data Source=/app/data/miragediary.db" \
