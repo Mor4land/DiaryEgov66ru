@@ -173,3 +173,93 @@ public class UpdateRoleResponse
     public bool Success { get; set; }
     public string Role { get; set; } = "";
 }
+
+public class GcCollectResponse
+{
+    public bool Success { get; set; } = true;
+    public long FreedBytes { get; set; }
+    public double FreedMb { get; set; }
+    public double CurrentMemoryMb { get; set; }
+}
+
+public class SyncAllUsersResponse
+{
+    public bool Success { get; set; } = true;
+    public int SyncedLinks { get; set; }
+}
+
+public class SessionRefreshResponse
+{
+    public bool Success { get; set; } = true;
+    public int QueuedUsers { get; set; }
+    public string Message { get; set; } = "";
+}
+
+public class AdminRolesStats
+{
+    public int Students { get; set; }
+    public int Parents { get; set; }
+    public int Teachers { get; set; }
+    public int Admins { get; set; }
+}
+
+public class AdminStatsResponse
+{
+    public int TotalUsers { get; set; }
+    public int ActiveSessions { get; set; }
+    public int CachedItems { get; set; }
+    public AdminRolesStats Roles { get; set; } = new();
+    public bool IsMaintenance { get; set; }
+    public string TelegramBotToken { get; set; } = "";
+    public string MaxBotToken { get; set; } = "";
+}
+
+public class AdminConfigResponse
+{
+    public string BotToken { get; set; } = "";
+    public string MaxBotToken { get; set; } = "";
+    public string MiniAppUrl { get; set; } = "";
+    public bool IsMaintenance { get; set; }
+}
+
+public class UpdateTokensResponse
+{
+    public bool Success { get; set; }
+    public bool RequiresRestart { get; set; }
+    public string Message { get; set; } = "";
+}
+
+public class MaintenanceToggleResponse
+{
+    public bool Success { get; set; } = true;
+    public bool IsMaintenance { get; set; }
+    public int Minutes { get; set; }
+}
+
+public class ClearCacheResponse
+{
+    public bool Success { get; set; } = true;
+    public int ClearedEntries { get; set; }
+}
+
+public class BackupFileInfoDto
+{
+    public string FileName { get; set; } = "";
+    public long SizeBytes { get; set; }
+    public string SizeFormatted { get; set; } = "";
+    public string CreatedAtUtc { get; set; } = "";
+}
+
+public class BackupCreateResponse
+{
+    public bool Success { get; set; } = true;
+    public string FileName { get; set; } = "";
+    public long SizeBytes { get; set; }
+    public string SizeFormatted { get; set; } = "";
+}
+
+public class SimpleErrorResponse
+{
+    public string Error { get; set; } = "";
+}
+

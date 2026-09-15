@@ -915,7 +915,7 @@
                         <span>База пользователей Mirage</span>
                     </div>
 
-                    <div style="display: flex; gap: 6px; align-items: center;">
+                    <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
                         <input type="text" id="userSearchInput" class="pill-input" placeholder="Поиск по ID, @username, имени, классу..." style="width: 250px; padding: 5px 12px; font-size: 11px;" oninput="debounceUserSearch()" />
                         <button class="btn btn-tonal" style="padding: 5px 12px;" onclick="loadUsersTable()">
                             <i data-lucide="search" style="width: 12px; height: 12px;"></i>
@@ -924,6 +924,10 @@
                         <button class="btn btn-tonal" style="padding: 5px 12px; color: var(--g-blue);" onclick="triggerSyncAllUsers()" title="Объединить и синхронизировать профили">
                             <i data-lucide="refresh-cw" style="width: 12px; height: 12px;"></i>
                             <span>Синхронизировать все</span>
+                        </button>
+                        <button class="btn btn-tonal" style="padding: 5px 12px; color: var(--g-green);" onclick="triggerRefreshAllSessions()" title="Продлить и обновить сессии Госуслуг для всех пользователей">
+                            <i data-lucide="shield-check" style="width: 12px; height: 12px;"></i>
+                            <span>Обновить все сессии</span>
                         </button>
                     </div>
                 </div>
@@ -1316,7 +1320,7 @@
                     showToast(`Память сжата: освобождено ${data.freedMb} MB (текущая: ${data.currentMemoryMb} MB)`, 'success');
                     loadTelemetry(true);
                 } else {
-                    showToast('Ошибка при вызове GC', 'error');
+                    showToast(data.error || 'Ошибка при вызове GC', 'error');
                 }
             } catch {
                 showToast('Ошибка соединения', 'error');
@@ -1511,7 +1515,7 @@
                     headers: { 'X-Admin-Key': adminKey }
                 });
                 const data = await res.json();
-                if (res.ok) {
+                if (res.ok && data.success) {
                     showToast(`Синхронизировано связей: ${data.syncedLinks}`, 'success');
                     loadUsersTable();
                 } else {
@@ -1519,6 +1523,27 @@
                 }
             } catch (err) {
                 showToast('Сетевая ошибка при синхронизации', 'error');
+            }
+        }
+
+        async function triggerRefreshAllSessions() {
+            if (!confirm('Запустить процесс обновления сессий Госуслуг для всех пользователей?')) return;
+            try {
+                showToast('Запуск обновления сессий...', 'info');
+                const res = await fetch('/api/admin/users/refresh-sessions', {
+                    method: 'POST',
+                    headers: { 'X-Admin-Key': adminKey }
+                });
+                const data = await res.json();
+                if (res.ok && data.success) {
+                    showToast(data.message || 'Обновление сессий успешно запущено', 'success');
+                    loadTelemetry(true);
+                    loadUsersTable();
+                } else {
+                    showToast(data.error || 'Ошибка при обновлении сессий', 'error');
+                }
+            } catch (err) {
+                showToast('Сетевая ошибка при обновлении сессий', 'error');
             }
         }
 

@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using MirageDiary.Server.Data;
 using MirageDiary.Server.Models;
 using MirageDiary.Server.Services;
@@ -108,21 +109,21 @@ public class AdminController : ControllerBase
         string currentTgToken = _config["BotToken"] ?? "";
         string currentMaxToken = _config["MaxBotToken"] ?? "";
 
-        return Ok(new
+        return Ok(new AdminStatsResponse
         {
-            totalUsers,
-            activeSessions,
-            cachedItems,
-            roles = new
+            TotalUsers = totalUsers,
+            ActiveSessions = activeSessions,
+            CachedItems = cachedItems,
+            Roles = new AdminRolesStats
             {
-                students = studentsCount,
-                parents = parentsCount,
-                teachers = teachersCount,
-                admins = adminsCount
+                Students = studentsCount,
+                Parents = parentsCount,
+                Teachers = teachersCount,
+                Admins = adminsCount
             },
-            isMaintenance,
-            telegramBotToken = MaskToken(currentTgToken),
-            maxBotToken = MaskToken(currentMaxToken)
+            IsMaintenance = isMaintenance,
+            TelegramBotToken = MaskToken(currentTgToken),
+            MaxBotToken = MaskToken(currentMaxToken)
         });
     }
 
@@ -132,12 +133,12 @@ public class AdminController : ControllerBase
     {
         if (!ValidateAdminKey()) return AdminUnauthorized();
 
-        return Ok(new
+        return Ok(new AdminConfigResponse
         {
-            botToken = _config["BotToken"] ?? "",
-            maxBotToken = _config["MaxBotToken"] ?? "",
-            miniAppUrl = _config["MiniAppUrl"] ?? "",
-            isMaintenance = _maintenanceService.IsMaintenanceModeActive()
+            BotToken = _config["BotToken"] ?? "",
+            MaxBotToken = _config["MaxBotToken"] ?? "",
+            MiniAppUrl = _config["MiniAppUrl"] ?? "",
+            IsMaintenance = _maintenanceService.IsMaintenanceModeActive()
         });
     }
 
@@ -177,16 +178,16 @@ public class AdminController : ControllerBase
             _eventLog.Warning("Настройки", "Токены ботов перезаписаны в appsettings.json — требуется перезапуск сервера", Actor());
 
             // Клиенты ботов создаются один раз при старте, поэтому новый токен подхватится только после перезапуска.
-            return Ok(new
+            return Ok(new UpdateTokensResponse
             {
-                success = true,
-                requiresRestart = true,
-                message = "Токены сохранены в appsettings.json. Боты подхватят их после перезапуска сервера."
+                Success = true,
+                RequiresRestart = true,
+                Message = "Токены сохранены в appsettings.json. Боты подхватят их после перезапуска сервера."
             });
         }
         catch (Exception ex)
         {
-            return StatusCode(500, new { error = $"Ошибка обновления токенов: {ex.Message}" });
+            return StatusCode(500, new SimpleErrorResponse { Error = $"Ошибка обновления токенов: {ex.Message}" });
         }
     }
 
@@ -298,7 +299,48 @@ public class AdminController : ControllerBase
         int count = await _userSyncService.SyncAllUsersAsync();
         _eventLog.Success("Синхронизация", $"Глобальная синхронизация аккаунтов выполнена: {count} связей обновлено", Actor());
 
-        return Ok(new { success = true, syncedLinks = count });
+        return Ok(new SyncAllUsersResponse { Success = true, SyncedLinks = count });
+    }
+
+    [HttpPost("users/refresh-sessions")]
+    public async Task<IActionResult> RefreshAllSessions()
+    {
+        if (!ValidateAdminKey()) return AdminUnauthorized();
+
+        var usersWithTokens = await _db.Users
+            .Where(u => !string.IsNullOrEmpty(u.AccessToken) || !string.IsNullOrEmpty(u.RefreshToken))
+            .CountAsync();
+
+        var tokenRefreshService = _serviceProvider.GetServices<IHostedService>()
+            .OfType<TokenRefreshBackgroundService>()
+            .FirstOrDefault();
+
+        if (tokenRefreshService == null)
+        {
+            return StatusCode(500, new SimpleErrorResponse { Error = "Фоновая служба обновления токенов не найдена." });
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await tokenRefreshService.RefreshAllTokensAsync();
+                await _userSyncService.SyncAllUsersAsync();
+            }
+            catch (Exception ex)
+            {
+                _eventLog.Error("Сессии", $"Ошибка фонового обновления сессий: {ex.Message}", Actor());
+            }
+        });
+
+        _eventLog.Info("Сессии", $"Администратор запустил принудительное обновление сессий для {usersWithTokens} пользователей", Actor());
+
+        return Ok(new SessionRefreshResponse
+        {
+            Success = true,
+            QueuedUsers = usersWithTokens,
+            Message = $"Запущено фоновое обновление сессий для {usersWithTokens} пользователей"
+        });
     }
 
     // ── BROADCAST MESSAGES ────────────────────────────────────────────────────
@@ -306,11 +348,11 @@ public class AdminController : ControllerBase
     public async Task<IActionResult> SendBroadcast([FromBody] BroadcastRequest req)
     {
         if (!ValidateAdminKey()) return AdminUnauthorized();
-        if (string.IsNullOrWhiteSpace(req.Text)) return BadRequest(new { error = "Текст сообщения не может быть пустым" });
+        if (string.IsNullOrWhiteSpace(req.Text)) return BadRequest(new SimpleErrorResponse { Error = "Текст сообщения не может быть пустым" });
 
         var tgBot = _serviceProvider.GetService<ITelegramBotClient>();
         var maxBot = _serviceProvider.GetService<IMaxBotClient>();
-        if (tgBot == null && maxBot == null) return StatusCode(500, new { error = "Клиенты ботов не инициализированы" });
+        if (tgBot == null && maxBot == null) return StatusCode(500, new SimpleErrorResponse { Error = "Клиенты ботов не инициализированы" });
 
         var usersQuery = _db.Users.AsQueryable();
         if (!string.IsNullOrWhiteSpace(req.TargetRole) && req.TargetRole != "All")
@@ -428,11 +470,11 @@ public class AdminController : ControllerBase
             _eventLog.Success("Техработы", "Резервный режим выключен, штатная работа восстановлена", Actor());
         }
 
-        return Ok(new
+        return Ok(new MaintenanceToggleResponse
         {
-            success = true,
-            isMaintenance = _maintenanceService.IsMaintenanceModeActive(),
-            minutes = maintenanceMinutes
+            Success = true,
+            IsMaintenance = _maintenanceService.IsMaintenanceModeActive(),
+            Minutes = maintenanceMinutes
         });
     }
 
@@ -446,7 +488,7 @@ public class AdminController : ControllerBase
 
         _eventLog.Warning("Кэш класса", $"Кэш очищен вручную, удалено записей: {cleared}", Actor());
 
-        return Ok(new { success = true, clearedEntries = cleared });
+        return Ok(new ClearCacheResponse { Success = true, ClearedEntries = cleared });
     }
 
     // ── SYSTEM TELEMETRY & METRICS ──────────────────────────────────────────
@@ -633,12 +675,12 @@ public class AdminController : ControllerBase
         long freed = Math.Max(0, memBefore - memAfter);
         _eventLog.Info("Память", $"Сборка мусора вручную: освобождено {Math.Round((double)freed / (1024 * 1024), 2)} МБ", Actor());
 
-        return Ok(new
+        return Ok(new GcCollectResponse
         {
-            success = true,
-            freedBytes = freed,
-            freedMb = Math.Round((double)freed / (1024 * 1024), 2),
-            currentMemoryMb = Math.Round((double)memAfter / (1024 * 1024), 2)
+            Success = true,
+            FreedBytes = freed,
+            FreedMb = Math.Round((double)freed / (1024 * 1024), 2),
+            CurrentMemoryMb = Math.Round((double)memAfter / (1024 * 1024), 2)
         });
     }
 
@@ -649,17 +691,17 @@ public class AdminController : ControllerBase
         if (!ValidateAdminKey()) return AdminUnauthorized();
 
         string backupDir = Path.Combine(AppContext.BaseDirectory, "backups");
-        if (!Directory.Exists(backupDir)) return Ok(new List<object>());
+        if (!Directory.Exists(backupDir)) return Ok(new List<BackupFileInfoDto>());
 
         var files = new DirectoryInfo(backupDir)
             .GetFiles("miragediary_*.db")
             .OrderByDescending(f => f.CreationTimeUtc)
-            .Select(f => new
+            .Select(f => new BackupFileInfoDto
             {
-                fileName = f.Name,
-                sizeBytes = f.Length,
-                sizeFormatted = FormatBytes(f.Length),
-                createdAtUtc = f.CreationTimeUtc.ToString("yyyy-MM-dd HH:mm:ss")
+                FileName = f.Name,
+                SizeBytes = f.Length,
+                SizeFormatted = FormatBytes(f.Length),
+                CreatedAtUtc = f.CreationTimeUtc.ToString("yyyy-MM-dd HH:mm:ss")
             })
             .ToList();
 
@@ -675,18 +717,18 @@ public class AdminController : ControllerBase
         if (string.IsNullOrEmpty(path))
         {
             _eventLog.Error("Снимки БД", "Не удалось создать снимок базы", Actor());
-            return StatusCode(500, new { error = "Не удалось создать резервную копию базы данных." });
+            return StatusCode(500, new SimpleErrorResponse { Error = "Не удалось создать резервную копию базы данных." });
         }
 
         var fileInfo = new FileInfo(path);
         _eventLog.Success("Снимки БД", $"Создан снимок {fileInfo.Name} ({FormatBytes(fileInfo.Length)})", Actor());
 
-        return Ok(new
+        return Ok(new BackupCreateResponse
         {
-            success = true,
-            fileName = fileInfo.Name,
-            sizeBytes = fileInfo.Length,
-            sizeFormatted = FormatBytes(fileInfo.Length)
+            Success = true,
+            FileName = fileInfo.Name,
+            SizeBytes = fileInfo.Length,
+            SizeFormatted = FormatBytes(fileInfo.Length)
         });
     }
 
