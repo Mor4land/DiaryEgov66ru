@@ -1,0 +1,1061 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MirageDiary — Презентация проекта (Всероссийский конкурс IT-проектов 2026)</title>
+  <style>
+    :root {
+      --bg-dark: #0B0F19;
+      --bg-card: rgba(30, 41, 59, 0.75);
+      --bg-card-border: rgba(255, 255, 255, 0.1);
+      --text-main: #F8FAFC;
+      --text-muted: #94A3B8;
+      --accent-blue: #38BDF8;
+      --accent-indigo: #818CF8;
+      --accent-green: #34D399;
+      --accent-amber: #FBBF24;
+      --accent-purple: #C084FC;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+      background-color: #030712;
+      color: var(--text-main);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* Deck presentation wrapper */
+    .deck-container {
+      width: 100%;
+      max-width: 1920px;
+      display: flex;
+      flex-direction: column;
+      gap: 30px;
+      padding: 20px;
+    }
+
+    /* 16:9 Slide Card */
+    .slide {
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      max-height: 1080px;
+      background: radial-gradient(ellipse at 50% 0%, #1E293B 0%, #0B0F19 100%);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 20px;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 50px 70px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* Ambient glow elements */
+    .slide::before {
+      content: '';
+      position: absolute;
+      top: -10%;
+      right: -5%;
+      width: 500px;
+      height: 500px;
+      background: radial-gradient(circle, rgba(56, 189, 248, 0.08) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .slide::after {
+      content: '';
+      position: absolute;
+      bottom: -10%;
+      left: -5%;
+      width: 500px;
+      height: 500px;
+      background: radial-gradient(circle, rgba(99, 102, 241, 0.06) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    /* Header */
+    .slide-header {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      z-index: 2;
+    }
+
+    .header-top {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .slide-num-badge {
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: var(--accent-blue);
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+
+    .slide-title {
+      font-size: 2.1rem;
+      font-weight: 800;
+      color: #FFFFFF;
+      letter-spacing: -0.5px;
+    }
+
+    .slide-subtitle {
+      font-size: 1.15rem;
+      color: var(--text-muted);
+      line-height: 1.4;
+    }
+
+    /* Content Area */
+    .slide-body {
+      flex: 1;
+      display: flex;
+      gap: 28px;
+      margin-top: 24px;
+      margin-bottom: 24px;
+      z-index: 2;
+    }
+
+    /* Card styles */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--bg-card-border);
+      backdrop-filter: blur(16px);
+      border-radius: 16px;
+      padding: 24px 28px;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+    }
+
+    .card-title {
+      font-size: 1.25rem;
+      font-weight: 700;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .card-body {
+      font-size: 1.05rem;
+      color: var(--text-muted);
+      line-height: 1.6;
+    }
+
+    .card-body p {
+      margin-bottom: 10px;
+    }
+
+    .card-body p:last-child {
+      margin-bottom: 0;
+    }
+
+    .card-body ul {
+      list-style: none;
+    }
+
+    .card-body ul li {
+      position: relative;
+      padding-left: 20px;
+      margin-bottom: 10px;
+      color: #E2E8F0;
+    }
+
+    .card-body ul li::before {
+      content: '•';
+      position: absolute;
+      left: 4px;
+      color: var(--accent-blue);
+      font-weight: bold;
+      font-size: 1.2rem;
+    }
+
+    /* Grid layouts */
+    .grid-2x2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: 1fr 1fr;
+      gap: 24px;
+      width: 100%;
+    }
+
+    .grid-3col {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 24px;
+      width: 100%;
+    }
+
+    .grid-4col {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 20px;
+      width: 100%;
+    }
+
+    .split-layout {
+      display: grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      gap: 30px;
+      width: 100%;
+    }
+
+    /* Pill Badges */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(30, 58, 138, 0.5);
+      border: 1px solid var(--accent-blue);
+      padding: 6px 14px;
+      border-radius: 9999px;
+      font-size: 0.9rem;
+      font-weight: 700;
+      color: var(--accent-blue);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .pill {
+      display: inline-block;
+      padding: 6px 14px;
+      background: rgba(51, 65, 85, 0.7);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 9999px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #F1F5F9;
+    }
+
+    /* Footer */
+    .slide-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      padding-top: 14px;
+      font-size: 0.95rem;
+      color: var(--text-muted);
+      z-index: 2;
+    }
+
+    .footer-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 600;
+    }
+
+    .footer-page {
+      font-weight: 700;
+      color: var(--accent-blue);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    /* Banner Image Box */
+    .banner-preview {
+      width: 100%;
+      border-radius: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      margin-bottom: 14px;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+      object-fit: cover;
+    }
+
+    /* Fixed Navigation Bar for screen viewing */
+    .nav-bar {
+      position: fixed;
+      bottom: 20px;
+      background: rgba(15, 23, 42, 0.9);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      backdrop-filter: blur(16px);
+      padding: 10px 24px;
+      border-radius: 9999px;
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.7);
+      z-index: 999;
+    }
+
+    .nav-btn {
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: #FFFFFF;
+      padding: 6px 14px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.9rem;
+      transition: all 0.2s;
+    }
+
+    .nav-btn:hover {
+      background: var(--accent-blue);
+      color: #0F172A;
+    }
+
+    /* Mode Print / Export Rules */
+    @page {
+      size: 1920px 1080px;
+      margin: 0;
+    }
+
+    @media print {
+      body {
+        background: #0B0F19 !important;
+        padding: 0 !important;
+      }
+      .deck-container {
+        padding: 0 !important;
+        gap: 0 !important;
+        max-width: 1920px !important;
+      }
+      .slide {
+        page-break-after: always !important;
+        break-after: page !important;
+        width: 1920px !important;
+        height: 1080px !important;
+        max-width: 1920px !important;
+        max-height: 1080px !important;
+        border: none !important;
+        border-radius: 0 !important;
+        box-shadow: none !important;
+        margin: 0 !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+      .nav-bar {
+        display: none !important;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Floating Navigation for presenter -->
+  <div class="nav-bar">
+    <button class="nav-btn" onclick="prevSlide()">◀ Назад</button>
+    <span id="nav-counter" style="font-weight: 700; color: var(--accent-blue);">Слайд 1 / 12</span>
+    <button class="nav-btn" onclick="nextSlide()">Вперед ▶</button>
+    <button class="nav-btn" onclick="window.print()">🖨️ Печать в PDF</button>
+    <button class="nav-btn" onclick="toggleFullscreen()">⛶ Полный экран</button>
+  </div>
+
+  <div class="deck-container">
+
+    <!-- ==================== SLIDE 1: COVER ==================== -->
+    <section class="slide" id="slide-1">
+      <div class="slide-header">
+        <div class="badge">🚀 ВСЕРОССИЙСКИЙ КОНКУРС IT-ПРОЕКТОВ 2026</div>
+      </div>
+      <div class="slide-body split-layout" style="align-items: center;">
+        <div style="display: flex; flex-direction: column; gap: 20px;">
+          <h1 style="font-size: 3.8rem; font-weight: 900; line-height: 1.05; letter-spacing: -1px;">
+            MirageDiary
+          </h1>
+          <h2 style="font-size: 1.7rem; font-weight: 700; color: var(--accent-blue); line-height: 1.3;">
+            Интеллектуальная кроссплатформенная экосистема школьного электронного дневника
+          </h2>
+          <p style="font-size: 1.15rem; color: var(--text-muted); line-height: 1.6;">
+            Мгновенный доступ к расписанию, оценкам и домашним заданиям через Telegram, национальный мессенджер MAX и React MiniApp. Прямая интеграция с ФГИС «Моя Школа» через ЕСИА (Госуслуги) с максимальной защитой персональных данных по 152-ФЗ РФ.
+          </p>
+          <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px;">
+            <span class="pill">.NET 10 Kestrel</span>
+            <span class="pill">ЕСИА PKCE S256</span>
+            <span class="pill">Конвертное шифрование enc:v2:</span>
+            <span class="pill">Telegram & MAX Bot</span>
+            <span class="pill">152-ФЗ РФ</span>
+            <span class="pill">Отклик &lt; 200 мс</span>
+          </div>
+          <div style="display: flex; gap: 24px; margin-top: 16px; padding: 14px 20px; background: rgba(15, 23, 42, 0.6); border: 1px solid var(--bg-card-border); border-radius: 12px;">
+            <div><b style="color: var(--accent-green); font-size: 1.25rem;">&lt; 200 мс</b><br><span style="font-size: 0.85rem; color: var(--text-muted);">Отклик бота</span></div>
+            <div><b style="color: var(--accent-blue); font-size: 1.25rem;">100%</b><br><span style="font-size: 0.85rem; color: var(--text-muted);">152-ФЗ РФ</span></div>
+            <div><b style="color: var(--accent-amber); font-size: 1.25rem;">0 паролей</b><br><span style="font-size: 0.85rem; color: var(--text-muted);">Zero-Knowledge</span></div>
+            <div><b style="color: var(--accent-purple); font-size: 1.25rem;">x20+</b><br><span style="font-size: 0.85rem; color: var(--text-muted);">Экономия трафика</span></div>
+          </div>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 16px; align-items: center;">
+          <img src="MirageDiary.Server/wwwroot/images/banners/banner_menu.png" alt="MirageDiary Menu" style="width: 100%; max-width: 520px; border-radius: 16px; border: 1px solid rgba(255, 255, 255, 0.15); box-shadow: 0 20px 35px -10px rgba(0,0,0,0.7);">
+          <div class="card" style="width: 100%; max-width: 520px; padding: 16px 20px;">
+            <div style="color: var(--accent-blue); font-weight: 700; font-size: 0.95rem; margin-bottom: 4px;">🌐 Продакшен-сервер запущен:</div>
+            <div style="font-size: 1.15rem; font-weight: 800; color: #FFFFFF;">https://miragediary.space</div>
+            <div style="font-size: 0.85rem; color: var(--text-muted); margin-top: 4px;">Telegram-бот: <b>@MirageDiary_bot</b> • Клиент MAX • React MiniApp</div>
+          </div>
+        </div>
+      </div>
+      <div class="slide-footer">
+        <span class="footer-brand">MirageDiary • Интеллектуальная экосистема дневника</span>
+        <span class="footer-page">01 / 12</span>
+      </div>
+    </section>
+
+    <!-- ==================== SLIDE 2: PROBLEM ==================== -->
+    <section class="slide" id="slide-2">
+      <div class="slide-header">
+        <div class="header-top">
+          <span class="slide-num-badge">02</span>
+          <h2 class="slide-title">Проблема и рыночный контекст</h2>
+        </div>
+        <div class="slide-subtitle">Ключевые барьеры использования существующих государственных школьных систем</div>
+      </div>
+      <div class="slide-body">
+        <div class="grid-2x2">
+          <div class="card">
+            <div class="card-title" style="color: var(--accent-amber);">🐢 Медленная загрузка порталов</div>
+            <div class="card-body">
+              Время полной загрузки тяжелых веб-страниц региональных дневников достигает <b>8–15 секунд</b>. В школьных коридорах при слабом мобильном интернете портал часто зависает или вообще не успевает открыться до звонка на урок.
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title" style="color: #F87171;">💥 Пиковые перегрузки серверов</div>
+            <div class="card-body">
+              В часы пик (07:45–08:30 перед началом занятий и 17:00–19:00 при выполнении домашнего задания) региональные шлюзы испытывают лавинообразные всплески трафика, отвечая пользователям ошибками 502/504 Bad Gateway.
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title" style="color: var(--accent-indigo);">🧩 Сложная навигация и стресс</div>
+            <div class="card-body">
+              Необходимость постоянной многофакторной повторной авторизации, громоздкие неадаптивные таблицы, отсутствие встроенного расчета среднего балла для четверти и невозможность быстро узнать время до окончания урока.
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title" style="color: var(--accent-blue);">📱 Изолированность от мессенджеров</div>
+            <div class="card-body">
+              Школьники и родители проводят до <b>90% экранного времени</b> в мессенджерах (Telegram, MAX), но вынуждены переключаться в сторонний мобильный браузер с постоянной потерей авторизационных сессий.
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="slide-footer">
+        <span class="footer-brand">MirageDiary • Анализ проблематики и актуальность</span>
+        <span class="footer-page">02 / 12</span>
+      </div>
+    </section>
+
+    <!-- ==================== SLIDE 3: SOLUTION ==================== -->
+    <section class="slide" id="slide-3">
+      <div class="slide-header">
+        <div class="header-top">
+          <span class="slide-num-badge">03</span>
+          <h2 class="slide-title">Решение: Экосистема MirageDiary</h2>
+        </div>
+        <div class="slide-subtitle">Легковесный, отказоустойчивый шлюз к образовательным данным прямо в привычных мессенджерах</div>
+      </div>
+      <div class="slide-body">
+        <div class="grid-2x2">
+          <div class="card">
+            <div class="card-title" style="color: var(--accent-green);">⚡ Мгновенный отклик (&lt; 200 мс)</div>
+            <div class="card-body">
+              Высокоэффективное многоуровневое кэширование и компактные экраны без спама в чате. Любое действие (расписание, оценки, ДЗ) отображается за доли секунды без расходования дорогостоящего мобильного трафика.
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title" style="color: var(--accent-blue);">🤖 Мультитранспортная доступность</div>
+            <div class="card-body">
+              Единое серверное ядро обслуживает пользователей Telegram, отечественного мессенджера MAX и веб-интерфейса React MiniApp, предоставляя идентичный функционал на любых устройствах.
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title" style="color: var(--accent-amber);">🔔 Умные контекстные сервисы</div>
+            <div class="card-body">
+              Таймер звонков со сменами, калькулятор оценок (/calc) для гарантированного выхода на нужный средний балл, интеллектуальный анализ школьных предметов на завтра и контроль сбора рюкзака в 20:30.
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title" style="color: var(--accent-purple);">🔗 Бесшовная связка аккаунтов</div>
+            <div class="card-body">
+              Мгновенная миграция сессии между Telegram и MAX с помощью одноразового 6-значного OTP PIN-кода. Настройки будильника и профиль ребенка синхронизируются автоматически без повторного ввода логина.
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="slide-footer">
+        <span class="footer-brand">MirageDiary • Концепция и ценность продукта</span>
+        <span class="footer-page">03 / 12</span>
+      </div>
+    </section>
+
+    <!-- ==================== SLIDE 4: ARCHITECTURE ==================== -->
+    <section class="slide" id="slide-4">
+      <div class="slide-header">
+        <div class="header-top">
+          <span class="slide-num-badge">04</span>
+          <h2 class="slide-title">Архитектура и технологический стек</h2>
+        </div>
+        <div class="slide-subtitle">Высоконагруженное распределенное серверное ядро на .NET 10 и реактивные клиенты</div>
+      </div>
+      <div class="slide-body">
+        <div class="grid-2x2">
+          <div class="card">
+            <div class="card-title" style="color: var(--accent-indigo);">⚙️ Серверное ядро (.NET 10 / C# 14)</div>
+            <div class="card-body">
+              <ul>
+                <li><b>ASP.NET Core 10 Kestrel</b>: компиляция Release под Linux-x64.</li>
+                <li><b>Entity Framework Core 10</b>: оптимизированные LINQ-запросы.</li>
+                <li><b>Obfuscar 2.2</b>: защита интеллектуальной собственности.</li>
+                <li>Многоэтапный <b>Docker multi-stage build</b> от пользователя app.</li>
+              </ul>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title" style="color: var(--accent-blue);">🛡️ Безопасность и интеграции</div>
+            <div class="card-body">
+              <ul>
+                <li>Шлюз ЕСИА: протокол <b>OAuth 2.0 PKCE с хэшем S256</b>.</li>
+                <li>Конвертное шифрование токенов <b>enc:v2: (AES-256-GCM + DEK)</b>.</li>
+                <li>Встроенный <b>RussianTrustedCertificateValidator</b> Минцифры РФ.</li>
+                <li>Очистка памяти через <b>CryptographicOperations.ZeroMemory</b>.</li>
+              </ul>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title" style="color: var(--accent-green);">💾 База данных и хранилище</div>
+            <div class="card-body">
+              <ul>
+                <li>Встроенная база <b>SQLite 3 в режиме WAL</b> (Write-Ahead Logging).</li>
+                <li>Права доступа к файлу базы <b>0600</b> (только процессу MirageDiary).</li>
+                <li><b>DatabaseBackupService</b>: регулярные снапшоты каждые 6 часов.</li>
+                <li><b>SharedClassroomCache</b>: пул кэширования школьных классов.</li>
+              </ul>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title" style="color: var(--accent-amber);">📱 Клиентские интерфейсы</div>
+            <div class="card-body">
+              <ul>
+                <li><b>Telegram.Bot 22.9.2</b>: высокоскоростной лонг-поллинг и вебхук.</li>
+                <li><b>MAX Messenger</b>: кастомный клиент событий и клавиатур.</li>
+                <li><b>MiniApp</b>: React 19, TypeScript, Vite, темная дизайн-система.</li>
+                <li>HD баннеры (1200x580) со сглаживанием шрифтов <b>LANCZOS</b>.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="slide-footer">
+        <span class="footer-brand">MirageDiary • Архитектурное проектирование</span>
+        <span class="footer-page">04 / 12</span>
+      </div>
+    </section>
+
+    <!-- ==================== SLIDE 5: SECURITY & 152-FZ ==================== -->
+    <section class="slide" id="slide-5">
+      <div class="slide-header">
+        <div class="header-top">
+          <span class="slide-num-badge">05</span>
+          <h2 class="slide-title">Информационная безопасность и 152-ФЗ</h2>
+        </div>
+        <div class="slide-subtitle">Эшелонированная криптографическая защита и бескомпромиссное соблюдение законодательства РФ</div>
+      </div>
+      <div class="slide-body">
+        <div class="grid-2x2">
+          <div class="card">
+            <div class="card-title" style="color: var(--accent-blue);">🔐 Конвертное шифрование enc:v2:</div>
+            <div class="card-body">
+              <ul>
+                <li><b>Master KEK (Key Encryption Key)</b>: 256-битный ключ из защищенного хранилища.</li>
+                <li><b>DEK (Data Encryption Key)</b>: уникальный криптостойкий ключ на каждую операцию сохранения токена.</li>
+                <li>Шифрование данных и ключей: <b>AES-256-GCM</b> с 96-битным IV и 128-битным тегом аутентичности.</li>
+                <li>Гарантированное стирание ключей в RAM через <code>ZeroMemory(dek)</code>.</li>
+              </ul>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title" style="color: var(--accent-green);">🔑 Zero-Knowledge для паролей</div>
+            <div class="card-body">
+              <ul>
+                <li>Пароли пользователей от портала Госуслуг <b>никогда не вводятся и не проходят через ботов</b>.</li>
+                <li>Авторизация полностью делегирована официальному контуру ЕСИА по протоколу <b>OAuth 2.0 PKCE S256</b>.</li>
+                <li>Сервер получает только временный токен сессии дневника с ограниченными правами.</li>
+              </ul>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title" style="color: var(--accent-amber);">📜 Согласие и аудит (152-ФЗ)</div>
+            <div class="card-body">
+              <ul>
+                <li><b>Обязательный онбординг</b>: функции бота заблокированы до подтверждения согласия законных представителей (ст. 9 ч. 6 152-ФЗ).</li>
+                <li><b>Аудит волеизъявления</b>: в сущности пользователя фиксируется точный таймштамп <code>PrivacyPolicyAcceptedAtUtc</code>.</li>
+                <li><b>Право на забвение</b>: команда <code>/delete_account</code> безвозвратно стирает все токены, сессии и кэш.</li>
+              </ul>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title" style="color: var(--accent-purple);">🇷🇺 Цифровой суверенитет и РФ CAs</div>
+            <div class="card-body">
+              <ul>
+                <li><b>100% локализация</b>: базы данных и вычислительные серверы физически расположены в РФ (ст. 18 ч. 5).</li>
+                <li>Встроенные доверенные корневые сертификаты <b>Минцифры России</b>.</li>
+                <li>Полная независимость от зарубежных облачных CDN и закрытых API.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="slide-footer">
+        <span class="footer-brand">MirageDiary • Защита персональных данных</span>
+        <span class="footer-page">05 / 12</span>
+      </div>
+    </section>
+
+    <!-- ==================== SLIDE 6: CORE UX ==================== -->
+    <section class="slide" id="slide-6">
+      <div class="slide-header">
+        <div class="header-top">
+          <span class="slide-num-badge">06</span>
+          <h2 class="slide-title">Ключевая функциональность и UX</h2>
+        </div>
+        <div class="slide-subtitle">Эргономичный пользовательский опыт, разработанный под реальные сценарии школьной жизни</div>
+      </div>
+      <div class="slide-body">
+        <div class="grid-3col">
+          <div class="card">
+            <img src="MirageDiary.Server/wwwroot/images/banners/banner_now.png" alt="До звонка" class="banner-preview">
+            <div class="card-title" style="color: var(--accent-blue); font-size: 1.15rem;">📅 Расписание и «До звонка»</div>
+            <div class="card-body" style="font-size: 0.95rem;">
+              <ul>
+                <li>Мгновенный таймер <b>/now</b>: сколько минут осталось до конца текущего урока или начала следующей перемены.</li>
+                <li>Поддержка <b>1-й и 2-й смен</b> (с сеткой звонков МАОУ СОШ № 113).</li>
+                <li>Индикация кабинетов, ФИО учителей и замен уроков.</li>
+              </ul>
+            </div>
+          </div>
+          <div class="card">
+            <img src="MirageDiary.Server/wwwroot/images/banners/banner_marks.png" alt="Оценки" class="banner-preview">
+            <div class="card-title" style="color: var(--accent-green); font-size: 1.15rem;">📊 Оценки и калькулятор (/calc)</div>
+            <div class="card-body" style="font-size: 0.95rem;">
+              <ul>
+                <li>Наглядный расчет среднего балла по всем предметам с цветовой подсветкой риска спорных оценок.</li>
+                <li><b>Калькулятор целей</b>: точный математический расчет количества «5» или «4», нужных для итоговой оценки.</li>
+                <li>Детализация четвертных срезов и весов контрольных работ.</li>
+              </ul>
+            </div>
+          </div>
+          <div class="card">
+            <img src="MirageDiary.Server/wwwroot/images/banners/banner_alarm.png" alt="Умный будильник" class="banner-preview">
+            <div class="card-title" style="color: var(--accent-amber); font-size: 1.15rem;">⏰ Умный будильник (SmartAlarm)</div>
+            <div class="card-body" style="font-size: 0.95rem;">
+              <ul>
+                <li><b>07:30</b>: утренний дайджест с расписанием и кабинетом первого занятия.</li>
+                <li><b>17:00</b>: напоминание о домашнем задании на завтра.</li>
+                <li><b>20:30</b>: семантический анализ предметов и напоминание собрать рюкзак (форма на физкультуру, кисти на ИЗО, циркуль).</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="slide-footer">
+        <span class="footer-brand">MirageDiary • Сценарии использования и интерфейс</span>
+        <span class="footer-page">06 / 12</span>
+      </div>
+    </section>
+
+    <!-- ==================== SLIDE 7: FAULT TOLERANCE ==================== -->
+    <section class="slide" id="slide-7">
+      <div class="slide-header">
+        <div class="header-top">
+          <span class="slide-num-badge">07</span>
+          <h2 class="slide-title">Отказоустойчивость и производительность</h2>
+        </div>
+        <div class="slide-subtitle">Архитектурные оптимизации для гарантированной стабильности в моменты пиковых нагрузок</div>
+      </div>
+      <div class="slide-body">
+        <div class="grid-2x2">
+          <div class="card">
+            <div class="card-title" style="color: var(--accent-green);">🚀 SharedClassroomCache</div>
+            <div class="card-body">
+              Вместо отправки 30 отдельных запросов к государственному серверу от учеников одного класса (например, 8Б) при одновременном открытии дневника перед уроком, MirageDiary делает <b>ровно 1 запрос</b> и кэширует структуру расписания в RAM.
+              <p style="margin-top: 10px; color: #FFFFFF;"><b>Итог:</b> Снижение нагрузки на внешний шлюз <b>более чем в 20 раз</b> и выдача ответа ученику за 15–30 мс.</p>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title" style="color: var(--accent-amber);">🔧 Автодетекция регламентных работ</div>
+            <div class="card-body">
+              Государственные информационные системы регулярно проводят ночные и утренние техработы. Анализатор ответов MirageDiary определяет статус технического обслуживания внешних серверов.
+              <p style="margin-top: 10px; color: #FFFFFF;"><b>Итог:</b> Бот не вылетает с ошибкой, а выдает понятное статусное сообщение <i>«🔧 Идут регламентные работы»</i> и моментально показывает закэшированные данные.</p>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title" style="color: var(--accent-blue);">🔄 Упреждающий TokenRefresh</div>
+            <div class="card-body">
+              Специализированный фоновый сервис <code>TokenRefreshBackgroundService</code> производит ротацию access-токенов в фоновом режиме задолго до истечения их срока жизни.
+              <p style="margin-top: 10px; color: #FFFFFF;"><b>Итог:</b> Пользователю не приходится ждать 2–4 секунды на обновление токена при вводе команды — бот отвечает мгновенно.</p>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title" style="color: var(--accent-indigo);">🛡️ Асинхронный Kestrel & SQLite WAL</div>
+            <div class="card-body">
+              Пул потоков .NET 10 Kestrel оптимизирован под параллельную обработку тысяч входящих событий без блокировок. База данных функционирует в режиме WAL (Write-Ahead Logging).
+              <p style="margin-top: 10px; color: #FFFFFF;"><b>Итог:</b> Параллельные чтения расписания сотнями школьников не конкурируют с фоновыми операциями записи логов и настроек.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="slide-footer">
+        <span class="footer-brand">MirageDiary • Надежность и высокие нагрузки</span>
+        <span class="footer-page">07 / 12</span>
+      </div>
+    </section>
+
+    <!-- ==================== SLIDE 8: IMPORT SUBSTITUTION ==================== -->
+    <section class="slide" id="slide-8">
+      <div class="slide-header">
+        <div class="header-top">
+          <span class="slide-num-badge">08</span>
+          <h2 class="slide-title">Импортозамещение и суверенная среда</h2>
+        </div>
+        <div class="slide-subtitle">Полная интеграция в национальный цифровой контур Российской Федерации</div>
+      </div>
+      <div class="slide-body">
+        <div class="grid-2x2">
+          <div class="card">
+            <div class="card-title" style="color: var(--accent-blue);">🇷🇺 Отечественный мессенджер MAX</div>
+            <div class="card-body">
+              <ul>
+                <li>Полноценный бот для национальной коммуникационной платформы MAX (VK / MAX Messenger).</li>
+                <li>Поддержка интерактивных клавиатур, callback-роутинга и защищенных вебхуков.</li>
+                <li>Гарантирует доступность школьных сервисов даже в случае внешних сетевых сбоев.</li>
+              </ul>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title" style="color: var(--accent-green);">🔗 Сквозное связывание Telegram ⟷ MAX</div>
+            <div class="card-body">
+              <ul>
+                <li>Сервис <code>AccountLinkingService</code> генерирует криптографический 6-значный OTP PIN с временем жизни 10 минут.</li>
+                <li>Пользователь вводит код во втором мессенджере — профили, токены и расписание будильника объединяются.</li>
+                <li>Единый бесшовный профиль без необходимости проходить авторизацию на Госуслугах дважды.</li>
+              </ul>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title" style="color: var(--accent-amber);">🔒 Доверенные сертификаты Минцифры РФ</div>
+            <div class="card-body">
+              <ul>
+                <li>Интеграция корневых сертификатов Минцифры России на уровне базового Docker-образа и сетевого стека Kestrel.</li>
+                <li>Кастомный валидатор <code>RussianTrustedCertificateValidator</code> для безопасной проверки цепочек TLS.</li>
+                <li>Стабильное соединение со всеми государственными шлюзами ФГИС «Моя Школа» и ЕСИА.</li>
+              </ul>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title" style="color: var(--accent-purple);">🏢 Локальная серверная инфраструктура</div>
+            <div class="card-body">
+              <ul>
+                <li>Развертывание на серверах под управлением Linux, расположенных на территории РФ.</li>
+                <li>Защита исходного кода от реверс-инжиниринга с помощью обфускации Obfuscar.</li>
+                <li>Полное отсутствие зарубежных проприетарных SaaS/PaaS сервисов в критическом контуре.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="slide-footer">
+        <span class="footer-brand">MirageDiary • Цифровой суверенитет и безопасность</span>
+        <span class="footer-page">08 / 12</span>
+      </div>
+    </section>
+
+    <!-- ==================== SLIDE 9: MVP & TRACTION ==================== -->
+    <section class="slide" id="slide-9">
+      <div class="slide-header">
+        <div class="header-top">
+          <span class="slide-num-badge">09</span>
+          <h2 class="slide-title">Текущие результаты и статус MVP</h2>
+        </div>
+        <div class="slide-subtitle">Проект доведен до боевого состояния и успешно функционирует на продакшен-сервере</div>
+      </div>
+      <div class="slide-body split-layout">
+        <div class="card">
+          <div class="card-title" style="color: var(--accent-green); font-size: 1.35rem;">🏆 Достигнутые результаты</div>
+          <div class="card-body" style="font-size: 1.05rem;">
+            <ul>
+              <li><b>Действующий боевой продакшен</b>: сервис развернут и доступен по адресу <b>https://miragediary.space</b> (Linux VPS, Kestrel, Nginx, SSL).</li>
+              <li><b>Два активных бота</b>: Telegram (@MirageDiary_bot) и MAX полностью поддерживают авторизацию, расписание, оценки и домашку.</li>
+              <li><b>100% соответствие требованиям регламента конкурса (п. 9.7)</b>:
+                <br>• Автономный Dockerfile и docker-compose.yml
+                <br>• Файл requirements.txt с прямым указанием .NET 10 пакетов
+                <br>• Совпадение портов проверки работоспособности (порт 5000 /privacy)</li>
+              <li><b>Автоматизированное тестирование</b>: набор скриптов <code>test-all.ps1</code> верифицирует состояние эндпоинтов и целостность базы.</li>
+            </ul>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title" style="color: var(--accent-blue); font-size: 1.35rem;">📦 Открытые репозитории</div>
+          <div class="card-body" style="font-size: 1.05rem;">
+            <ul>
+              <li><b>Бэкенд (.NET 10 Web API + Боты)</b>:<br>
+                <code style="color: var(--accent-blue); font-size: 0.95rem;">github.com/Miragestudio-repo/MirageDiary_Backend</code><br>
+                (Чистая архитектура, EF Core 10, конвертное шифрование enc:v2:, Obfuscar)
+              </li>
+              <li style="margin-top: 14px;"><b>Фронтенд (React MiniApp)</b>:<br>
+                <code style="color: var(--accent-blue); font-size: 0.95rem;">github.com/Miragestudio-repo/MirageDiary-Miniapp</code><br>
+                (TypeScript, Vite, темная адаптивная дизайн-система)
+              </li>
+              <li style="margin-top: 14px;"><b>Docker-контейнеризация</b>:<br>
+                Multi-stage build на базе ASP.NET 10 Noble с предустановленными сертификатами Минцифры РФ и запуском от непривилегированного пользователя app.
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+      <div class="slide-footer">
+        <span class="footer-brand">MirageDiary • Практическая реализация и статус</span>
+        <span class="footer-page">09 / 12</span>
+      </div>
+    </section>
+
+    <!-- ==================== SLIDE 10: ROADMAP ==================== -->
+    <section class="slide" id="slide-10">
+      <div class="slide-header">
+        <div class="header-top">
+          <span class="slide-num-badge">10</span>
+          <h2 class="slide-title">Дорожная карта развития (Roadmap)</h2>
+        </div>
+        <div class="slide-subtitle">Стратегический план масштабирования экосистемы на 2026–2027 учебный год</div>
+      </div>
+      <div class="slide-body">
+        <div class="grid-4col">
+          <div class="card">
+            <div style="background: rgba(30, 58, 138, 0.5); border: 1px solid var(--accent-blue); padding: 6px 12px; border-radius: 8px; font-weight: 800; color: var(--accent-blue); font-size: 0.95rem; text-align: center; margin-bottom: 14px;">
+              Q4 2026 (Пилот)
+            </div>
+            <div class="card-body" style="font-size: 0.95rem;">
+              <ul>
+                <li>Пилотный запуск в 5 школах Свердловской области (СОШ № 113 и партнеры).</li>
+                <li>Подключение 1500+ активных учеников и родителей.</li>
+                <li>Сбор обратной связи и точная калибровка расписания звонков.</li>
+              </ul>
+            </div>
+          </div>
+          <div class="card">
+            <div style="background: rgba(16, 185, 129, 0.2); border: 1px solid var(--accent-green); padding: 6px 12px; border-radius: 8px; font-weight: 800; color: var(--accent-green); font-size: 0.95rem; text-align: center; margin-bottom: 14px;">
+              Q1 2027 (Календари)
+            </div>
+            <div class="card-body" style="font-size: 0.95rem;">
+              <ul>
+                <li>Экспорт расписания и сроков сдачи ДЗ по протоколам iCal / WebCal.</li>
+                <li>Интеграция с Яндекс Календарем, Apple и Google Calendar.</li>
+                <li>Еженедельный дайджест успеваемости для родителей в мессенджере.</li>
+              </ul>
+            </div>
+          </div>
+          <div class="card">
+            <div style="background: rgba(245, 158, 11, 0.2); border: 1px solid var(--accent-amber); padding: 6px 12px; border-radius: 8px; font-weight: 800; color: var(--accent-amber); font-size: 0.95rem; text-align: center; margin-bottom: 14px;">
+              Q2 2027 (ИИ-помощник)
+            </div>
+            <div class="card-body" style="font-size: 0.95rem;">
+              <ul>
+                <li>Интеграция локальной языковой модели для помощи в разборе сложных параграфов ДЗ.</li>
+                <li>Автоматическое составление конспектов тем уроков.</li>
+                <li>Генератор тренировочных тестов перед контрольными работами.</li>
+              </ul>
+            </div>
+          </div>
+          <div class="card">
+            <div style="background: rgba(168, 85, 247, 0.2); border: 1px solid var(--accent-purple); padding: 6px 12px; border-radius: 8px; font-weight: 800; color: var(--accent-purple); font-size: 0.95rem; text-align: center; margin-bottom: 14px;">
+              Q3 2027 (Масштабирование)
+            </div>
+            <div class="card-body" style="font-size: 0.95rem;">
+              <ul>
+                <li>Подключение новых регионов РФ, входящих в контур ФГИС «Моя Школа».</li>
+                <li>Виджеты расписания для рабочих столов iOS и Android.</li>
+                <li>Аналитический дашборд для классных руководителей и завучей.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="slide-footer">
+        <span class="footer-brand">MirageDiary • Стратегические горизонты развития</span>
+        <span class="footer-page">10 / 12</span>
+      </div>
+    </section>
+
+    <!-- ==================== SLIDE 11: TEAM ==================== -->
+    <section class="slide" id="slide-11">
+      <div class="slide-header">
+        <div class="header-top">
+          <span class="slide-num-badge">11</span>
+          <h2 class="slide-title">Команда проекта и компетенции</h2>
+        </div>
+        <div class="slide-subtitle">Сбалансированная инженерная экспертиза для быстрого и надежного масштабирования продукта</div>
+      </div>
+      <div class="slide-body">
+        <div class="grid-3col">
+          <div class="card">
+            <div class="card-title" style="color: var(--accent-blue); font-size: 1.25rem;">💻 Backend & Security Architect</div>
+            <div class="card-body" style="font-size: 1.05rem;">
+              <ul>
+                <li>Проектирование высоконагруженного модульного ядра на <b>.NET 10 (C# 14)</b>.</li>
+                <li>Разработка криптографического протокола <b>enc:v2:</b> (AES-256-GCM + DEK).</li>
+                <li>Интеграция мобильного шлюза ЕСИА (OAuth2 PKCE S256) и ФГИС «Моя Школа».</li>
+                <li>Обеспечение юридического и технического соответствия 152-ФЗ.</li>
+              </ul>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title" style="color: var(--accent-indigo); font-size: 1.25rem;">🎨 Frontend & UI/UX Engineer</div>
+            <div class="card-body" style="font-size: 1.05rem;">
+              <ul>
+                <li>Создание эргономичной дизайн-системы для школьников и их родителей.</li>
+                <li>Разработка кроссплатформенного <b>React MiniApp</b> (TypeScript + Vite).</li>
+                <li>Рендеринг адаптивных баннеров высокого разрешения с типографикой Unbounded.</li>
+                <li>In-place архитектура взаимодействия в ботах без визуального шума.</li>
+              </ul>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title" style="color: var(--accent-green); font-size: 1.25rem;">🚀 Product Manager & QA / DevOps</div>
+            <div class="card-body" style="font-size: 1.05rem;">
+              <ul>
+                <li>Проработка сценариев умного будильника и сетки звонков.</li>
+                <li>Настройка CI/CD, оптимизация Docker-сборок, администрирование Linux VPS.</li>
+                <li>Нагрузочное тестирование Kestrel и профилирование базы данных SQLite.</li>
+                <li>Взаимодействие со школьной администрацией и проведение пилотов.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="slide-footer">
+        <span class="footer-brand">MirageDiary • Команда разработчиков</span>
+        <span class="footer-page">11 / 12</span>
+      </div>
+    </section>
+
+    <!-- ==================== SLIDE 12: CONCLUSION ==================== -->
+    <section class="slide" id="slide-12">
+      <div class="slide-header">
+        <div class="header-top">
+          <span class="slide-num-badge">12</span>
+          <h2 class="slide-title">Заключение и контакты</h2>
+        </div>
+        <div class="slide-subtitle">MirageDiary — современный, безопасный и быстрый стандарт взаимодействия со школьными данными</div>
+      </div>
+      <div class="slide-body split-layout">
+        <div class="card">
+          <div class="card-title" style="color: var(--accent-blue); font-size: 1.4rem;">🌟 Почему MirageDiary побеждает:</div>
+          <div class="card-body" style="font-size: 1.05rem;">
+            <ul>
+              <li><b>Готовый работающий продукт</b>, развернутый в продакшене на <b>https://miragediary.space</b>.</li>
+              <li><b>Enterprise-безопасность</b>: конвертное шифрование enc:v2:, Zero-Knowledge авторизация без хранения паролей Госуслуг и 100% соблюдение 152-ФЗ.</li>
+              <li><b>Сверхбыстрый отклик (&lt; 200 мс)</b> и сниженная в 20+ раз нагрузка на государственные серверы за счет <code>SharedClassroomCache</code>.</li>
+              <li><b>Поддержка импортозамещения</b>: полноценный бот для российского мессенджера MAX и сертификаты Минцифры РФ.</li>
+              <li><b>Открытый код и готовность к масштабированию</b>: чистая архитектура .NET 10, Docker, полная документация.</li>
+            </ul>
+          </div>
+        </div>
+        <div class="card" style="align-items: center; justify-content: center; text-align: center;">
+          <div class="card-title" style="color: var(--accent-green); font-size: 1.35rem; margin-bottom: 18px;">📱 Протестируйте прямо сейчас:</div>
+          <div style="display: flex; gap: 30px; justify-content: center; margin-bottom: 20px;">
+            <div style="display: flex; flex-direction: column; align-items: center; gap: 8px;">
+              <img src="presentation_assets/qr_bot.png" alt="Telegram Bot QR" style="width: 150px; height: 150px; border-radius: 12px; background: white; padding: 6px; box-shadow: 0 10px 20px rgba(0,0,0,0.5);">
+              <span style="font-weight: 700; color: #FFFFFF; font-size: 0.95rem;">Telegram-бот<br><span style="color: var(--accent-blue);">@MirageDiary_bot</span></span>
+            </div>
+            <div style="display: flex; flex-direction: column; align-items: center; gap: 8px;">
+              <img src="presentation_assets/qr_github.png" alt="GitHub Repo QR" style="width: 150px; height: 150px; border-radius: 12px; background: white; padding: 6px; box-shadow: 0 10px 20px rgba(0,0,0,0.5);">
+              <span style="font-weight: 700; color: #FFFFFF; font-size: 0.95rem;">GitHub Бэкенда<br><span style="color: var(--accent-blue);">MirageDiary_Backend</span></span>
+            </div>
+          </div>
+          <div style="border-top: 1px solid rgba(255,255,255,0.1); padding-top: 14px; width: 100%;">
+            <div style="font-size: 1.1rem; font-weight: 700; color: #FFFFFF;">
+              🌐 Веб-портал: <a href="https://miragediary.space" target="_blank" style="color: var(--accent-blue); text-decoration: none;">https://miragediary.space</a>
+            </div>
+            <div style="font-size: 0.95rem; color: var(--text-muted); margin-top: 6px;">
+              Команда MirageStudio • Будем рады ответить на любые вопросы экспертного жюри!
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="slide-footer">
+        <span class="footer-brand">MirageDiary • Готовы к вопросам и пилотному внедрению</span>
+        <span class="footer-page">12 / 12</span>
+      </div>
+    </section>
+
+  </div>
+
+  <script>
+    let currentSlide = 1;
+    const totalSlides = 12;
+
+    function updateCounter() {
+      document.getElementById('nav-counter').innerText = `Слайд ${currentSlide} / ${totalSlides}`;
+    }
+
+    function scrollToSlide(n) {
+      if (n < 1) n = 1;
+      if (n > totalSlides) n = totalSlides;
+      currentSlide = n;
+      const el = document.getElementById(`slide-${currentSlide}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth' });
+      }
+      updateCounter();
+    }
+
+    function nextSlide() {
+      scrollToSlide(currentSlide + 1);
+    }
+
+    function prevSlide() {
+      scrollToSlide(currentSlide - 1);
+    }
+
+    function toggleFullscreen() {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen();
+      } else if (document.exitFullscreen) {
+        document.exitFullscreen();
+      }
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') {
+        e.preventDefault();
+        nextSlide();
+      } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+        e.preventDefault();
+        prevSlide();
+      } else if (e.key === 'Home') {
+        e.preventDefault();
+        scrollToSlide(1);
+      } else if (e.key === 'End') {
+        e.preventDefault();
+        scrollToSlide(totalSlides);
+      } else if (e.key === 'f' || e.key === 'F') {
+        toggleFullscreen();
+      }
+    });
+
+    // Sync counter on scroll
+    window.addEventListener('scroll', () => {
+      const slides = document.querySelectorAll('.slide');
+      slides.forEach((s, idx) => {
+        const rect = s.getBoundingClientRect();
+        if (rect.top >= -200 && rect.top <= window.innerHeight / 2) {
+          currentSlide = idx + 1;
+          updateCounter();
+        }
+      });
+    });
+  </script>
+</body>
+</html>

@@ -16,6 +16,8 @@ using MirageDiary.Server.Models;
 using MirageDiary.Server.Services;
 using Telegram.Bot;
 using Telegram.Bot.Types.Enums;
+using MAX.Bot.Interfaces;
+using MAX.Bot.Interfaces.Models.Request.Message;
 
 namespace MirageDiary.Server.Controllers;
 
@@ -307,7 +309,8 @@ public class AdminController : ControllerBase
         if (string.IsNullOrWhiteSpace(req.Text)) return BadRequest(new { error = "Текст сообщения не может быть пустым" });
 
         var tgBot = _serviceProvider.GetService<ITelegramBotClient>();
-        if (tgBot == null) return StatusCode(500, new { error = "Telegram Bot Client не инициализирован" });
+        var maxBot = _serviceProvider.GetService<IMaxBotClient>();
+        if (tgBot == null && maxBot == null) return StatusCode(500, new { error = "Клиенты ботов не инициализированы" });
 
         var usersQuery = _db.Users.AsQueryable();
         if (!string.IsNullOrWhiteSpace(req.TargetRole) && req.TargetRole != "All")
@@ -323,9 +326,30 @@ public class AdminController : ControllerBase
         {
             try
             {
-                if (long.TryParse(userId, out long chatId))
+                if (userId.StartsWith("max_"))
                 {
-                    await tgBot.SendMessage(chatId, req.Text, parseMode: ParseMode.Markdown);
+                    if (long.TryParse(userId.Replace("max_", ""), out long maxChatId) && maxBot != null)
+                    {
+                        await maxBot.SendMessageAsync(new SendMessageRequest
+                        {
+                            UserId = maxChatId,
+                            Text = req.Text,
+                            Format = MessageFormat.Markdown
+                        });
+                        sentCount++;
+                        await Task.Delay(50);
+                    }
+                }
+                else if (long.TryParse(userId, out long chatId) && tgBot != null)
+                {
+                    try
+                    {
+                        await tgBot.SendMessage(chatId, req.Text, parseMode: ParseMode.Markdown);
+                    }
+                    catch
+                    {
+                        await tgBot.SendMessage(chatId, req.Text);
+                    }
                     sentCount++;
                     // Throttling: Cap at ~25 msg/sec to protect from Telegram 429 Too Many Requests
                     await Task.Delay(40);
@@ -352,7 +376,13 @@ public class AdminController : ControllerBase
         };
         _eventLog.Info("Рассылка", $"Отправлено {audience}: доставлено {sentCount}, ошибок {errorCount} из {targetUsers.Count}", Actor());
 
-        return Ok(new { success = true, sentCount, errorCount, totalTargeted = targetUsers.Count });
+        return Ok(new BroadcastSendResponse
+        {
+            Success = true,
+            SentCount = sentCount,
+            ErrorCount = errorCount,
+            TotalTargeted = targetUsers.Count
+        });
     }
 
     /// <summary>Сколько получателей затронет рассылка — считается до отправки, чтобы подтверждение не врало.</summary>
@@ -368,10 +398,15 @@ public class AdminController : ControllerBase
         }
 
         var ids = await usersQuery.Select(u => u.Id).ToListAsync();
-        // Считаем так же, как считает сама отправка: сообщение уйдёт только по числовому chat id.
-        var reachable = ids.Count(id => long.TryParse(id, out _));
+        // Считаем так же, как считает сама отправка: Telegram (числовой ID) или MAX (max_...)
+        var reachable = ids.Count(id => id.StartsWith("max_") || long.TryParse(id, out _));
 
-        return Ok(new { targetRole, total = ids.Count, reachable });
+        return Ok(new BroadcastAudienceResponse
+        {
+            TargetRole = targetRole,
+            Total = ids.Count,
+            Reachable = reachable
+        });
     }
 
     // ── MAINTENANCE & CACHE ───────────────────────────────────────────────────
@@ -687,6 +722,21 @@ public class BroadcastRequest
 {
     public string Text { get; set; } = "";
     public string TargetRole { get; set; } = "All";
+}
+
+public class BroadcastAudienceResponse
+{
+    public string TargetRole { get; set; } = "";
+    public int Total { get; set; }
+    public int Reachable { get; set; }
+}
+
+public class BroadcastSendResponse
+{
+    public bool Success { get; set; }
+    public int SentCount { get; set; }
+    public int ErrorCount { get; set; }
+    public int TotalTargeted { get; set; }
 }
 
 public class MaintenanceToggleRequest
