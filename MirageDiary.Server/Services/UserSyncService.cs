@@ -270,10 +270,11 @@ public class UserSyncService
             u.Username.ToLower() == ("@" + cleanHandle).ToLower());
         if (user != null) return user;
 
-        // 4. Name match
-        user = await _db.Users.FirstOrDefaultAsync(u =>
-            (u.FirstName + " " + u.LastName).ToLower().Contains(clean.ToLower()) ||
-            u.FirstName.ToLower() == clean.ToLower());
+        // 4. Name match (по расшифрованным в памяти полям PII)
+        var allUsers = await _db.Users.ToListAsync();
+        user = allUsers.FirstOrDefault(u =>
+            (!string.IsNullOrEmpty(u.FirstName) && !string.IsNullOrEmpty(u.LastName) && (u.FirstName + " " + u.LastName).Contains(clean, StringComparison.OrdinalIgnoreCase)) ||
+            (!string.IsNullOrEmpty(u.FirstName) && u.FirstName.Equals(clean, StringComparison.OrdinalIgnoreCase)));
 
         return user;
     }

@@ -117,8 +117,35 @@ public static class DatabaseInitializer
             cmd.CommandText = @"CREATE INDEX IF NOT EXISTS ""IX_Users_UpdatedAt"" ON ""Users"" (""UpdatedAt"");";
             await cmd.ExecuteNonQueryAsync();
 
-            // 4. Auto-encrypt or upgrade tokens in DB to envelope encryption (enc:v2)
+            // 4. Auto-encrypt or upgrade tokens and PII in DB to envelope encryption (enc:v2)
             var encryption = scope.ServiceProvider.GetRequiredService<ITokenEncryptionService>();
+
+            var unencryptedUserIds = new HashSet<string>();
+            using (var checkCmd = conn.CreateCommand())
+            {
+                checkCmd.CommandText = @"SELECT ""Id"", ""FirstName"", ""LastName"", ""OrgName"", ""ClassName"" FROM ""Users"";";
+                using var reader = await checkCmd.ExecuteReaderAsync();
+                while (await reader.ReadAsync())
+                {
+                    string id = reader.GetString(0);
+                    string? fn = reader.IsDBNull(1) ? null : reader.GetString(1);
+                    string? ln = reader.IsDBNull(2) ? null : reader.GetString(2);
+                    string? org = reader.IsDBNull(3) ? null : reader.GetString(3);
+                    string? cls = reader.IsDBNull(4) ? null : reader.GetString(4);
+
+                    bool needsMigration =
+                        (!string.IsNullOrEmpty(fn) && !fn.StartsWith("enc:v2:")) ||
+                        (!string.IsNullOrEmpty(ln) && !ln.StartsWith("enc:v2:")) ||
+                        (!string.IsNullOrEmpty(org) && !org.StartsWith("enc:v2:")) ||
+                        (!string.IsNullOrEmpty(cls) && !cls.StartsWith("enc:v2:"));
+
+                    if (needsMigration)
+                    {
+                        unencryptedUserIds.Add(id);
+                    }
+                }
+            }
+
             var usersToEncrypt = await db.Users.ToListAsync();
             bool updated = false;
 
@@ -142,12 +169,21 @@ public static class DatabaseInitializer
                         updated = true;
                     }
                 }
+
+                if (unencryptedUserIds.Contains(u.Id))
+                {
+                    if (!string.IsNullOrEmpty(u.FirstName)) db.Entry(u).Property(x => x.FirstName).IsModified = true;
+                    if (!string.IsNullOrEmpty(u.LastName)) db.Entry(u).Property(x => x.LastName).IsModified = true;
+                    if (!string.IsNullOrEmpty(u.OrgName)) db.Entry(u).Property(x => x.OrgName).IsModified = true;
+                    if (!string.IsNullOrEmpty(u.ClassName)) db.Entry(u).Property(x => x.ClassName).IsModified = true;
+                    updated = true;
+                }
             }
 
             if (updated)
             {
                 await db.SaveChangesAsync();
-                logger.LogInformation("[DatabaseInitializer] Tokens upgraded to envelope encryption (enc:v2) successfully.");
+                logger.LogInformation("[DatabaseInitializer] Tokens and PII fields upgraded to envelope encryption (enc:v2) successfully.");
             }
         }
         catch (Exception ex)

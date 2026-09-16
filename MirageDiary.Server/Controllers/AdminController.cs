@@ -197,22 +197,30 @@ public class AdminController : ControllerBase
     {
         if (!ValidateAdminKey()) return AdminUnauthorized();
 
-        var query = _db.Users.AsQueryable();
+        List<UserEntity> rawUsers;
         if (!string.IsNullOrWhiteSpace(search))
         {
             string s = search.Trim().ToLower();
             string cleanHandle = s.TrimStart('@');
-            query = query.Where(u =>
-                u.Id.Contains(s) ||
-                u.Username.ToLower().Contains(cleanHandle) ||
-                u.FirstName.ToLower().Contains(s) ||
-                u.LastName.ToLower().Contains(s) ||
-                u.OrgName.ToLower().Contains(s) ||
-                u.ClassName.ToLower().Contains(s) ||
-                u.Role.ToLower().Contains(s));
-        }
 
-        var rawUsers = await query.OrderByDescending(u => u.UpdatedAt).Take(100).ToListAsync();
+            // Загружаем пользователей (EF Core прозрачно расшифровывает PII-поля) и фильтруем в памяти
+            var allUsers = await _db.Users.ToListAsync();
+            rawUsers = allUsers.Where(u =>
+                (u.Id != null && u.Id.Contains(s, StringComparison.OrdinalIgnoreCase)) ||
+                (u.Username != null && u.Username.TrimStart('@').Contains(cleanHandle, StringComparison.OrdinalIgnoreCase)) ||
+                (u.FirstName != null && u.FirstName.Contains(s, StringComparison.OrdinalIgnoreCase)) ||
+                (u.LastName != null && u.LastName.Contains(s, StringComparison.OrdinalIgnoreCase)) ||
+                (u.OrgName != null && u.OrgName.Contains(s, StringComparison.OrdinalIgnoreCase)) ||
+                (u.ClassName != null && u.ClassName.Contains(s, StringComparison.OrdinalIgnoreCase)) ||
+                (u.Role != null && u.Role.Contains(s, StringComparison.OrdinalIgnoreCase)))
+                .OrderByDescending(u => u.UpdatedAt)
+                .Take(100)
+                .ToList();
+        }
+        else
+        {
+            rawUsers = await _db.Users.OrderByDescending(u => u.UpdatedAt).Take(100).ToListAsync();
+        }
         var users = rawUsers.Select(u => new UserListItemDto
         {
             Id = u.Id,

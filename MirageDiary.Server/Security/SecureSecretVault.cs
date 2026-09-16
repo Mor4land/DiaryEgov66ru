@@ -94,7 +94,27 @@ public static class SecureSecretVault
             }
         }
 
-        // 2. Деобфускация встроенного мастер-ключа приложения ("MirageDiary_Master_Security_Key_2026_Gosuslugi")
+        // 2. Проверка изолированного файла ключа на диске (POSIX 0600)
+        string baseDir = AppContext.BaseDirectory;
+        string currentDir = Directory.GetCurrentDirectory();
+        string[] candidateKeyPaths = new[]
+        {
+            Path.Combine(baseDir, "token_master.key"),
+            Path.Combine(currentDir, "token_master.key"),
+            Path.Combine(currentDir, "Data", "token_master.key"),
+            Path.Combine(baseDir, "data", "token_master.key")
+        };
+
+        foreach (var keyPath in candidateKeyPaths)
+        {
+            var loadedKey = TryLoadSecureKeyFile(keyPath);
+            if (loadedKey != null && loadedKey.Length == 32)
+            {
+                return loadedKey;
+            }
+        }
+
+        // 3. Деобфускация встроенного эталонного мастер-ключа приложения
         byte[] rawBytes = new byte[ObfuscatedMasterKey.Length];
         try
         {
@@ -105,16 +125,10 @@ public static class SecureSecretVault
 
             byte[] keyHash = SHA256.HashData(rawBytes);
 
-            // Синхронизируем эталонный ключ в файлы token_master.key с правами 0600
-            string baseDir = AppContext.BaseDirectory;
-            string dataDir = Path.Combine(Directory.GetCurrentDirectory(), "Data");
-            string persistentDataDir = Path.Combine(baseDir, "data");
+            // Сохраняем эталонный ключ в файлы token_master.key с правами 0600
             TrySaveSecureKeyFile(Path.Combine(baseDir, "token_master.key"), keyHash);
-            TrySaveSecureKeyFile(Path.Combine(dataDir, "token_master.key"), keyHash);
-            if (Directory.Exists(persistentDataDir))
-            {
-                TrySaveSecureKeyFile(Path.Combine(persistentDataDir, "token_master.key"), keyHash);
-            }
+            TrySaveSecureKeyFile(Path.Combine(currentDir, "token_master.key"), keyHash);
+            TrySaveSecureKeyFile(Path.Combine(currentDir, "Data", "token_master.key"), keyHash);
 
             return keyHash;
         }
