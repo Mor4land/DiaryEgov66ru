@@ -29,6 +29,9 @@ public class SmartAlarmWorker : BackgroundService
         "клей", "ножницы", "доклад", "реферат", "презентация"
     };
 
+    // In-memory deduplication cache: protects against repeating alarms if SQLite is temporarily locked
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _sentAlarmsToday = new();
+
     public SmartAlarmWorker(ILogger<SmartAlarmWorker> logger, IServiceProvider services)
     {
         _logger = logger;
@@ -109,9 +112,21 @@ public class SmartAlarmWorker : BackgroundService
                 return false;
             }
 
+            // Helper to check if reminder was already handled today (either in DB or in-memory)
+            bool WasHandledToday(string type, string lastDateFromDb)
+            {
+                if (lastDateFromDb == todayStr) return true;
+                return _sentAlarmsToday.TryGetValue($"{student.Id}_{type}", out var d) && d == todayStr;
+            }
+
+            void MarkHandledToday(string type)
+            {
+                _sentAlarmsToday[$"{student.Id}_{type}"] = todayStr;
+            }
+
             // ─── 1. SCHEDULE REMINDER ──────────────────────────────────────────
             if (student.IsScheduleReminderEnabled &&
-                student.LastScheduleReminderDate != todayStr &&
+                !WasHandledToday("sched", student.LastScheduleReminderDate) &&
                 IsInTimeWindow(student.ScheduleReminderTime))
             {
                 try
@@ -122,12 +137,14 @@ public class SmartAlarmWorker : BackgroundService
                         string msg = $"🔔 *Умный будильник: расписание уроков на сегодня!*\n\n{schedText}";
                         await SendMessageToUserAsync(student.Id, msg, tgBotClient, maxBotClient, stoppingToken);
                         student.LastScheduleReminderDate = todayStr;
+                        MarkHandledToday("sched");
                         dbChanged = true;
                     }
                     else if (IsTerminalEmptySchedule(schedText))
                     {
                         // Уроков на сегодня нет (выходной/каникулы): фиксируем проверку, чтобы не долбить Госуслуги каждую минуту
                         student.LastScheduleReminderDate = todayStr;
+                        MarkHandledToday("sched");
                         dbChanged = true;
                     }
                 }
@@ -139,7 +156,7 @@ public class SmartAlarmWorker : BackgroundService
 
             // ─── 2. HOMEWORK REMINDER ──────────────────────────────────────────
             if (student.IsHomeworkReminderEnabled &&
-                student.LastHomeworkReminderDate != todayStr &&
+                !WasHandledToday("hw", student.LastHomeworkReminderDate) &&
                 IsInTimeWindow(student.HomeworkReminderTime))
             {
                 try
@@ -150,12 +167,14 @@ public class SmartAlarmWorker : BackgroundService
                         string msg = $"📚 *Умный будильник: домашнее задание на завтра!*\n\n{hwText}";
                         await SendMessageToUserAsync(student.Id, msg, tgBotClient, maxBotClient, stoppingToken);
                         student.LastHomeworkReminderDate = todayStr;
+                        MarkHandledToday("hw");
                         dbChanged = true;
                     }
                     else if (IsTerminalEmptyHomework(hwText))
                     {
                         // Домашнего задания на завтра нет: фиксируем проверку без отправки пустого уведомления
                         student.LastHomeworkReminderDate = todayStr;
+                        MarkHandledToday("hw");
                         dbChanged = true;
                     }
                 }
@@ -167,7 +186,7 @@ public class SmartAlarmWorker : BackgroundService
 
             // ─── 3. EQUIPMENT / BACKPACK REMINDER ──────────────────────────────
             if (student.IsEquipmentReminderEnabled &&
-                student.LastEquipmentReminderDate != todayStr &&
+                !WasHandledToday("equip", student.LastEquipmentReminderDate) &&
                 IsInTimeWindow(student.EquipmentReminderTime))
             {
                 try
@@ -210,6 +229,7 @@ public class SmartAlarmWorker : BackgroundService
                     if (!isNetworkError)
                     {
                         student.LastEquipmentReminderDate = todayStr;
+                        MarkHandledToday("equip");
                         dbChanged = true;
                     }
                 }
@@ -221,7 +241,14 @@ public class SmartAlarmWorker : BackgroundService
 
             if (dbChanged)
             {
-                try { await db.SaveChangesAsync(stoppingToken); } catch { }
+                try
+                {
+                    await db.SaveChangesAsync(stoppingToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "[SmartAlarmWorker] Ошибка сохранения дат напоминаний в SQLite (in-memory дедупликация защищает от повторной отправки).");
+                }
             }
         }
     }

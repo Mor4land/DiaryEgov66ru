@@ -22,15 +22,22 @@ public class DatabaseBackupWorker : BackgroundService
     {
         _logger.LogInformation("[BackupWorker] 🛡️ Automated SQLite backup worker started (Interval: 6 hours).");
 
-        // Take startup snapshot
-        await _backupService.CreateBackupAsync("startup");
+        // Take startup snapshot safely
+        try
+        {
+            await _backupService.CreateBackupAsync("startup", stoppingToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[BackupWorker] ❌ Failed to take initial startup backup snapshot.");
+        }
 
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
                 await Task.Delay(Interval, stoppingToken);
-                await _backupService.CreateBackupAsync("scheduled");
+                await _backupService.CreateBackupAsync("scheduled", stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {

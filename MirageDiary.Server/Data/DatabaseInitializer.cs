@@ -92,10 +92,10 @@ public static class DatabaseInitializer
             );";
             await cmd.ExecuteNonQueryAsync();
 
-            // 2.5. Create performance indexes
+            // 2.5. Create performance indexes (drop index on non-deterministic encrypted columns)
             cmd.CommandText = @"
+                DROP INDEX IF EXISTS ""IX_Users_OrgName_ClassName"";
                 CREATE INDEX IF NOT EXISTS ""IX_Users_Role"" ON ""Users"" (""Role"");
-                CREATE INDEX IF NOT EXISTS ""IX_Users_OrgName_ClassName"" ON ""Users"" (""OrgName"", ""ClassName"");
                 CREATE INDEX IF NOT EXISTS ""IX_Cache_UpdatedAt"" ON ""Cache"" (""UpdatedAt"");
                 CREATE INDEX IF NOT EXISTS ""IX_Users_Username"" ON ""Users"" (""Username"");
                 CREATE INDEX IF NOT EXISTS ""IX_Users_Oid"" ON ""Users"" (""Oid"");

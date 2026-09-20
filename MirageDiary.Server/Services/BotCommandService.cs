@@ -11,6 +11,7 @@ using Telegram.Bot;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
 using Telegram.Bot.Types.ReplyMarkups;
+using MirageDiary.Server.Security;
 
 namespace MirageDiary.Server.Services;
 
@@ -106,8 +107,8 @@ public class BotCommandService
 
         var currentUser = await EnsureUserExistsAsync(chatIdStr, username, firstName, lastName);
 
-        // /start or /menu — always reset and show main menu
-        if (text.StartsWith("/start") || text.StartsWith("/menu") || text == "Отмена")
+        // /start or /menu or cancel — always reset and show main menu
+        if (text.StartsWith("/start") || text.StartsWith("/menu") || IsCancelCommand(text))
         {
             _stateService.ClearState(chatId);
             await ShowMainMenuAsync(chatId);
@@ -130,7 +131,7 @@ public class BotCommandService
 
         if (!CheckUserCooldown(chatId))
         {
-            await _botClient.SendMessage(chatId, "⏳ _Защита от спама: подождите 2 секунды перед следующим запросом._", parseMode: ParseMode.Markdown);
+            await SafeSendMessageAsync(chatId, "⏳ _Защита от спама: подождите 2 секунды перед следующим запросом._");
             return;
         }
 
@@ -158,10 +159,9 @@ public class BotCommandService
         }
         else if (text.StartsWith("/premium") || text.StartsWith("/sub") || text.StartsWith("/подписка"))
         {
-            await _botClient.SendMessage(chatId,
+            await SafeSendMessageAsync(chatId,
                 "⭐ *MirageDiary*\n\n" +
-                "Раздел платной подписки закрыт — все функции бота (расписание, оценки, калькулятор, домашка и уведомления) полностью бесплатны! 🚀",
-                parseMode: ParseMode.Markdown);
+                "Раздел платной подписки закрыт — все функции бота (расписание, оценки, калькулятор, домашка и уведомления) полностью бесплатны! 🚀");
         }
         else if (text.StartsWith("/link") || text.StartsWith("/sync") || text.StartsWith("/связать"))
         {
@@ -174,12 +174,14 @@ public class BotCommandService
         }
         else if (text.StartsWith("/homework"))
         {
-            string dateArg = text.Length > 9 ? text[9..].Trim() : "";
+            var parts = text.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+            string dateArg = parts.Length > 1 ? parts[1].Trim() : "";
             await ExecuteHomeworkAsync(chatId, chatIdStr, dateArg);
         }
         else if (text.StartsWith("/schedule"))
         {
-            string dateArg = text.Length > 9 ? text[9..].Trim() : "";
+            var parts = text.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+            string dateArg = parts.Length > 1 ? parts[1].Trim() : "";
             await ExecuteScheduleAsync(chatId, chatIdStr, dateArg);
         }
         else if (text.StartsWith("/marks") || text.StartsWith("/grades"))
@@ -229,10 +231,10 @@ public class BotCommandService
         schedule.UploadedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();
 
-        await _botClient.SendMessage(chatId,
-            $"✅ Расписание для школы *{user.OrgName}* успешно сохранено!\n\n" +
-            $"Теперь ученики смогут получить его через кнопку «📅 Расписание».",
-            parseMode: ParseMode.Markdown);
+        string safeOrg = TelegramMarkdownEscaper.Escape(user.OrgName);
+        await SafeSendMessageAsync(chatId,
+            $"✅ Расписание для школы *{safeOrg}* успешно сохранено!\n\n" +
+            $"Теперь ученики смогут получить его через кнопку «📅 Расписание».");
     }
 
     // ─── State machine input ──────────────────────────────────────────────────
@@ -241,27 +243,44 @@ public class BotCommandService
         switch (session.State)
         {
             case UserState.WaitingForHeadTeacherId:
+                if (IsCancelCommand(text))
+                {
+                    _stateService.ClearState(chatId);
+                    await SafeSendMessageAsync(chatId, "❌ Назначение завуча отменено.");
+                    return;
+                }
                 _stateService.UpdateState(chatId, UserState.WaitingForHeadTeacherOrg, text);
-                await _botClient.SendMessage(chatId,
-                    "🏫 Теперь введите название школы, к которой привязать этого завуча:\n_(или напишите «Отмена»)_",
-                    parseMode: ParseMode.Markdown);
+                await SafeSendMessageAsync(chatId,
+                    "🏫 Теперь введите название школы, к которой привязать этого завуча:\n_(или напишите «Отмена»)_");
                 break;
 
             case UserState.WaitingForHeadTeacherOrg:
+                if (IsCancelCommand(text))
+                {
+                    _stateService.ClearState(chatId);
+                    await SafeSendMessageAsync(chatId, "❌ Назначение завуча отменено.");
+                    return;
+                }
                 await SaveHeadTeacherAsync(chatId, session.TempData ?? "", text);
                 _stateService.ClearState(chatId);
                 break;
 
             case UserState.WaitingForBroadcastText:
+                if (IsCancelCommand(text))
+                {
+                    _stateService.ClearState(chatId);
+                    await SafeSendMessageAsync(chatId, "❌ Рассылка отменена.");
+                    return;
+                }
                 await DoBroadcastAsync(chatId, text);
                 _stateService.ClearState(chatId);
                 break;
 
             case UserState.WaitingForScheduleReminderTime:
-                if (text.Trim().Equals("отмена", StringComparison.OrdinalIgnoreCase))
+                if (IsCancelCommand(text))
                 {
                     _stateService.ClearState(chatId);
-                    await _botClient.SendMessage(chatId, "❌ Ввод времени отменён.");
+                    await SafeSendMessageAsync(chatId, "❌ Ввод времени отменён.");
                     return;
                 }
                 if (TryParseTime(text, out var schedTime))
@@ -271,19 +290,19 @@ public class BotCommandService
                     user.IsScheduleReminderEnabled = true;
                     await _db.SaveChangesAsync();
                     _stateService.ClearState(chatId);
-                    await _botClient.SendMessage(chatId, $"✅ Время напоминания о расписании установлено на *{schedTime}*!\n\nКаждое утро в это время вы будете получать список уроков.", parseMode: ParseMode.Markdown);
+                    await SafeSendMessageAsync(chatId, $"✅ Время напоминания о расписании установлено на *{schedTime}*!\n\nКаждое утро в это время вы будете получать список уроков.");
                 }
                 else
                 {
-                    await _botClient.SendMessage(chatId, "❌ Неверный формат времени. Введите время в формате *ЧЧ:ММ* (например: `07:30` или `8:00`) или напишите «Отмена»:", parseMode: ParseMode.Markdown);
+                    await SafeSendMessageAsync(chatId, "❌ Неверный формат времени. Введите время в формате *ЧЧ:ММ* (например: `07:30` или `8:00`) или напишите «Отмена»:");
                 }
                 break;
 
             case UserState.WaitingForHomeworkReminderTime:
-                if (text.Trim().Equals("отмена", StringComparison.OrdinalIgnoreCase))
+                if (IsCancelCommand(text))
                 {
                     _stateService.ClearState(chatId);
-                    await _botClient.SendMessage(chatId, "❌ Ввод времени отменён.");
+                    await SafeSendMessageAsync(chatId, "❌ Ввод времени отменён.");
                     return;
                 }
                 if (TryParseTime(text, out var hwTime))
@@ -293,19 +312,19 @@ public class BotCommandService
                     user.IsHomeworkReminderEnabled = true;
                     await _db.SaveChangesAsync();
                     _stateService.ClearState(chatId);
-                    await _botClient.SendMessage(chatId, $"✅ Время напоминания о домашке установлено на *{hwTime}*!\n\nКаждый день в это время бот пришлет список заданий на завтра.", parseMode: ParseMode.Markdown);
+                    await SafeSendMessageAsync(chatId, $"✅ Время напоминания о домашке установлено на *{hwTime}*!\n\nКаждый день в это время бот пришлет список заданий на завтра.");
                 }
                 else
                 {
-                    await _botClient.SendMessage(chatId, "❌ Неверный формат времени. Введите время в формате *ЧЧ:ММ* (например: `17:00` или `18:30`) или напишите «Отмена»:", parseMode: ParseMode.Markdown);
+                    await SafeSendMessageAsync(chatId, "❌ Неверный формат времени. Введите время в формате *ЧЧ:ММ* (например: `17:00` или `18:30`) или напишите «Отмена»:");
                 }
                 break;
 
             case UserState.WaitingForEquipmentReminderTime:
-                if (text.Trim().Equals("отмена", StringComparison.OrdinalIgnoreCase))
+                if (IsCancelCommand(text))
                 {
                     _stateService.ClearState(chatId);
-                    await _botClient.SendMessage(chatId, "❌ Ввод времени отменён.");
+                    await SafeSendMessageAsync(chatId, "❌ Ввод времени отменён.");
                     return;
                 }
                 if (TryParseTime(text, out var equipTime))
@@ -315,11 +334,11 @@ public class BotCommandService
                     user.IsEquipmentReminderEnabled = true;
                     await _db.SaveChangesAsync();
                     _stateService.ClearState(chatId);
-                    await _botClient.SendMessage(chatId, $"✅ Время сбора рюкзака установлено на *{equipTime}*!\n\nВечером бот напомнит, какие вещи и инструменты положить в рюкзак.", parseMode: ParseMode.Markdown);
+                    await SafeSendMessageAsync(chatId, $"✅ Время сбора рюкзака установлено на *{equipTime}*!\n\nВечером бот напомнит, какие вещи и инструменты положить в рюкзак.");
                 }
                 else
                 {
-                    await _botClient.SendMessage(chatId, "❌ Неверный формат времени. Введите время в формате *ЧЧ:ММ* (например: `20:30` или `21:00`) или напишите «Отмена»:", parseMode: ParseMode.Markdown);
+                    await SafeSendMessageAsync(chatId, "❌ Неверный формат времени. Введите время в формате *ЧЧ:ММ* (например: `20:30` или `21:00`) или напишите «Отмена»:");
                 }
                 break;
         }
@@ -762,14 +781,18 @@ public class BotCommandService
         }
         else if (role == "HeadTeacher")
         {
-            header = $"🏫 *Завуч* • {(!string.IsNullOrEmpty(user?.OrgName) ? user.OrgName : "Mirage Diary")}";
+            string safeOrg = !string.IsNullOrEmpty(user?.OrgName) ? TelegramMarkdownEscaper.Escape(user.OrgName) : "Mirage Diary";
+            header = $"🏫 *Завуч* • {safeOrg}";
         }
         else if (isAuthorized)
         {
-            if (!string.IsNullOrEmpty(user.ClassName) && !string.IsNullOrEmpty(user.OrgName))
-                header = $"🎓 *{user.ClassName}* • {user.OrgName}";
-            else if (!string.IsNullOrEmpty(user.ClassName))
-                header = $"🎓 *{user.ClassName}* • Mirage Diary";
+            string safeClass = !string.IsNullOrEmpty(user.ClassName) ? TelegramMarkdownEscaper.Escape(user.ClassName) : "";
+            string safeOrg = !string.IsNullOrEmpty(user.OrgName) ? TelegramMarkdownEscaper.Escape(user.OrgName) : "";
+
+            if (!string.IsNullOrEmpty(safeClass) && !string.IsNullOrEmpty(safeOrg))
+                header = $"🎓 *{safeClass}* • {safeOrg}";
+            else if (!string.IsNullOrEmpty(safeClass))
+                header = $"🎓 *{safeClass}* • Mirage Diary";
             else
                 header = "🎓 *Ученик* • Mirage Diary";
         }
@@ -927,11 +950,10 @@ public class BotCommandService
             try { await _botClient.DeleteMessage(chatId, msgId.Value); } catch { }
         }
 
-        await _botClient.SendMessage(
+        await SafeSendMessageAsync(
             chatId: chatId,
             text: goodbye,
-            parseMode: ParseMode.Markdown,
-            replyMarkup: new ReplyKeyboardRemove());
+            markup: new ReplyKeyboardRemove());
     }
 
     private async Task ShowLinkAccountAsync(long chatId, string chatIdStr, int? msgId = null)
@@ -940,9 +962,9 @@ public class BotCommandService
         string text = "🔗 *Связка аккаунтов Telegram и MAX*\n\n" +
                       $"Ваш код для связки: `{code}` _(нажмите, чтобы скопировать)_\n\n" +
                       "📌 *Инструкция:*\n" +
-                      "1️⃣ Откройте нашего бота в мессенджере **MAX**\n" +
+                      "1️⃣ Откройте нашего бота в мессенджере *MAX*\n" +
                       $"2️⃣ Отправьте команду:\n`/link {code}`\n\n" +
-                      "⏳ Код действует **15 минут**.\n" +
+                      "⏳ Код действует *15 минут*.\n" +
                       "После связки ваши токены Госуслуг, расписание, класс и настройки автоматически синхронизируются!";
 
         var markup = new InlineKeyboardMarkup(new[]
@@ -967,15 +989,15 @@ public class BotCommandService
         var (success, message, peer) = await _userSyncService.TryLinkAccountsByCodeAsync(chatIdStr, code);
         if (success)
         {
-            string peerInfo = peer != null && !string.IsNullOrEmpty(peer.FirstName) ? $" ({peer.FirstName})" : "";
-            await _botClient.SendMessage(chatId,
+            string peerInfo = peer != null && !string.IsNullOrEmpty(peer.FirstName) ? $" ({TelegramMarkdownEscaper.Escape(peer.FirstName)})" : "";
+            await SafeSendMessageAsync(chatId,
                 $"✅ *Аккаунты успешно связаны!*{peerInfo}\n\n" +
-                $"Все токены, класс, расписание и настройки синхронизированы с вашим аккаунтом на другой платформе.",
-                parseMode: ParseMode.Markdown);
+                $"Все токены, класс, расписание и настройки синхронизированы с вашим аккаунтом на другой платформе.");
         }
         else
         {
-            await _botClient.SendMessage(chatId, $"❌ *Ошибка связки:* {message}", parseMode: ParseMode.Markdown);
+            string safeMsg = TelegramMarkdownEscaper.Escape(message);
+            await SafeSendMessageAsync(chatId, $"❌ *Ошибка связки:* {safeMsg}");
         }
     }
 
@@ -1340,10 +1362,10 @@ public class BotCommandService
 
         await _userSyncService.SyncUserAcrossPlatformsAsync(user);
 
-        string displayTarget = !string.IsNullOrEmpty(user.Username) ? $"@{user.Username} (`{user.Id}`)" : $"`{user.Id}`";
-        await _botClient.SendMessage(adminChatId,
-            $"✅ Пользователь {displayTarget} назначен завучем школы *{orgName}*.\n\nВозвращайтесь в меню: /menu",
-            parseMode: ParseMode.Markdown);
+        string displayTarget = !string.IsNullOrEmpty(user.Username) ? $"@{TelegramMarkdownEscaper.Escape(user.Username)} (`{user.Id}`)" : $"`{user.Id}`";
+        string safeOrg = TelegramMarkdownEscaper.Escape(orgName);
+        await SafeSendMessageAsync(adminChatId,
+            $"✅ Пользователь {displayTarget} назначен завучем школы *{safeOrg}*.\n\nВозвращайтесь в меню: /menu");
     }
 
     private async Task RemoveHeadTeacherAsync(long chatId, int msgId, string chatIdStr, string htId)
@@ -1430,27 +1452,24 @@ public class BotCommandService
         var users = await _db.Users.Where(u => u.AccessToken != "").ToListAsync();
         int sent = 0, failed = 0;
 
-        await _botClient.SendMessage(adminChatId,
-            $"📢 Начинаю рассылку для *{users.Count}* пользователей...",
-            parseMode: ParseMode.Markdown);
+        await SafeSendMessageAsync(adminChatId,
+            $"📢 Начинаю рассылку для *{users.Count}* пользователей...");
 
         foreach (var user in users)
         {
             if (!long.TryParse(user.Id, out long uid)) continue;
             try
             {
-                await _botClient.SendMessage(uid,
-                    $"📢 *Сообщение от администратора:*\n\n{broadcastText}",
-                    parseMode: ParseMode.Markdown);
+                await SafeSendMessageAsync(uid,
+                    $"📢 *Сообщение от администратора:*\n\n{broadcastText}");
                 sent++;
                 await Task.Delay(50); // respect Telegram rate limits
             }
             catch { failed++; }
         }
 
-        await _botClient.SendMessage(adminChatId,
-            $"✅ Рассылка завершена.\n✔️ Доставлено: *{sent}*\n❌ Ошибок: *{failed}*\n\nВозвращайтесь: /menu",
-            parseMode: ParseMode.Markdown);
+        await SafeSendMessageAsync(adminChatId,
+            $"✅ Рассылка завершена.\n✔️ Доставлено: *{sent}*\n❌ Ошибок: *{failed}*\n\nВозвращайтесь: /menu");
     }
 
     // =========================================================================
@@ -1524,7 +1543,7 @@ public class BotCommandService
         catch (Exception ex)
         {
             Console.WriteLine($"[BotCommandService Error] Failed to execute homework command for chatId {chatId}: {ex}");
-            await _botClient.SendMessage(chatId, $"❌ Произошла ошибка при получении домашнего задания: {ex.Message}");
+            await SafeSendMessageAsync(chatId, $"❌ Произошла ошибка при получении домашнего задания: {TelegramMarkdownEscaper.Escape(ex.Message)}");
         }
     }
 
@@ -1549,6 +1568,9 @@ public class BotCommandService
                     }
                 });
 
+                string safeOrg = TelegramMarkdownEscaper.Escape(user.OrgName);
+                string scheduleCaption = $"📅 Расписание — {safeOrg}\n_(Загружено администрацией школы)_";
+
                 if (schedule.FileType == "photo")
                 {
                     if (msgId.HasValue)
@@ -1557,7 +1579,7 @@ public class BotCommandService
                         {
                             var inputMedia = new InputMediaPhoto(InputFile.FromFileId(schedule.FileId))
                             {
-                                Caption = $"📅 Расписание — {user.OrgName}\n_(Загружено администрацией школы)_",
+                                Caption = scheduleCaption,
                                 ParseMode = ParseMode.Markdown
                             };
                             await _botClient.EditMessageMedia(chatId, msgId.Value, inputMedia, replyMarkup: uploadedNavButtons);
@@ -1566,11 +1588,11 @@ public class BotCommandService
                         }
                         catch { }
                     }
-                    await _botClient.SendPhoto(chatId, InputFile.FromFileId(schedule.FileId), caption: $"📅 Расписание — {user.OrgName}\n_(Загружено администрацией школы)_", replyMarkup: uploadedNavButtons);
+                    await _botClient.SendPhoto(chatId, InputFile.FromFileId(schedule.FileId), caption: scheduleCaption, parseMode: ParseMode.Markdown, replyMarkup: uploadedNavButtons);
                 }
                 else
                 {
-                    await _botClient.SendDocument(chatId, InputFile.FromFileId(schedule.FileId), caption: $"📅 Расписание — {user.OrgName}\n_(Загружено администрацией школы)_", replyMarkup: uploadedNavButtons);
+                    await _botClient.SendDocument(chatId, InputFile.FromFileId(schedule.FileId), caption: scheduleCaption, parseMode: ParseMode.Markdown, replyMarkup: uploadedNavButtons);
                 }
                 return;
             }
@@ -1635,7 +1657,7 @@ public class BotCommandService
             if (msgId.HasValue)
                 await SafeEditTextOrCaptionAsync(chatId, msgId.Value, errMsg, reloginMarkup);
             else
-                await _botClient.SendMessage(chatId, errMsg, replyMarkup: reloginMarkup);
+                await SafeSendMessageAsync(chatId, errMsg, reloginMarkup);
             return;
         }
 
@@ -1651,7 +1673,7 @@ public class BotCommandService
             if (msgId.HasValue)
                 await SafeEditTextOrCaptionAsync(chatId, msgId.Value, marksText, reloginMarkup);
             else
-                await _botClient.SendMessage(chatId, marksText, replyMarkup: reloginMarkup);
+                await SafeSendMessageAsync(chatId, marksText, reloginMarkup);
             return;
         }
         var markup = new InlineKeyboardMarkup(new[]
@@ -1739,7 +1761,8 @@ public class BotCommandService
         string gpaDisplay = s.TotalWeight > 0 ? $"{s.AverageGpa:F2}" : "—";
         string forecastDisplay = s.FinalForecast > 0 ? $"*{s.FinalForecast}* {s.StatusEmoji}" : "не определен";
 
-        string text = $"📚 *Предмет:* {s.SubjectName}\n\n" +
+        string safeSubject = TelegramMarkdownEscaper.Escape(s.SubjectName);
+        string text = $"📚 *Предмет:* {safeSubject}\n\n" +
                       $"• *Текущие оценки*: {marksDisplay}\n" +
                       $"• *Текущий средний балл*: `{gpaDisplay}`\n" +
                       $"• *Прогноз в четверти*: {forecastDisplay}\n\n" +
@@ -1773,6 +1796,7 @@ public class BotCommandService
         }
 
         var s = subjects[subjectIndex];
+        string safeSubject = TelegramMarkdownEscaper.Escape(s.SubjectName);
         double targetThreshold = targetGrade switch
         {
             5 => 4.60,
@@ -1788,7 +1812,7 @@ public class BotCommandService
 
         if (W > 0 && currentGpa >= targetThreshold)
         {
-            text = $"🎉 *Отличные новости по предмету {s.SubjectName}!* 🚀\n\n" +
+            text = $"🎉 *Отличные новости по предмету {safeSubject}!* 🚀\n\n" +
                    $"Ваш текущий средний балл: `{currentGpa:F2}`\n" +
                    $"Он уже выше или равен порогу для оценки *{targetGrade}* (`{targetThreshold:F2}`)!\n\n" +
                    $"✨ *Совет:* продолжайте в том же духе и не получайте случайных двоек, чтобы удержать итоговую оценку!";
@@ -1818,7 +1842,7 @@ public class BotCommandService
             }
 
             text = $"🎯 *План для получения оценки «{targetGrade}»*\n" +
-                   $"📚 *Предмет:* {s.SubjectName}\n\n" +
+                   $"📚 *Предмет:* {safeSubject}\n\n" +
                    $"• *Текущий балл:* `{currentGpa:F2}`\n" +
                    $"• *Требуемый порог:* `≥ {targetThreshold:F2}`\n\n" +
                    $"Чтобы гарантированно получить *{targetGrade}* в четверти, вам нужно заработать:\n" +
@@ -1874,15 +1898,13 @@ public class BotCommandService
         if (foundTriggers.Any())
         {
             var items = string.Join("\n• ", foundTriggers.Select(t => char.ToUpper(t[0]) + t[1..]));
-            await _botClient.SendMessage(chatId,
-                $"🎒 *Умный будильник: сбор рюкзака на завтра!*\n\nВам понадобятся:\n• {items}\n\nНе забудьте положить их в рюкзак прямо сейчас! 🎒",
-                parseMode: ParseMode.Markdown);
+            await SafeSendMessageAsync(chatId,
+                $"🎒 *Умный будильник: сбор рюкзака на завтра!*\n\nВам понадобятся:\n• {items}\n\nНе забудьте положить их в рюкзак прямо сейчас! 🎒");
         }
         else
         {
-            await _botClient.SendMessage(chatId,
-                "🎒 *Умный будильник*\n\nСпецинструментов на завтра не требуется. Проверьте обычные тетради и учебники по расписанию! ✅",
-                parseMode: ParseMode.Markdown);
+            await SafeSendMessageAsync(chatId,
+                "🎒 *Умный будильник*\n\nСпецинструментов на завтра не требуется. Проверьте обычные тетради и учебники по расписанию! ✅");
         }
     }
 
@@ -1976,7 +1998,7 @@ public class BotCommandService
             if (msgId.HasValue)
                 await SafeEditTextOrCaptionAsync(chatId, msgId.Value, msg, markup: null, parseMode: ParseMode.Markdown);
             else
-                await _botClient.SendMessage(chatId, msg, parseMode: ParseMode.Markdown);
+                await SafeSendMessageAsync(chatId, msg);
             return;
         }
 
@@ -2000,7 +2022,8 @@ public class BotCommandService
                 InlineKeyboardButton.WithCallbackData($"👶 {name}{activeMark}", $"cmd_select_child:{child.StudentId}")
             });
 
-            text += $"• *{name}*{activeMark}\n";
+            string safeChildName = TelegramMarkdownEscaper.Escape(name);
+            text += $"• *{safeChildName}*{activeMark}\n";
         }
 
         buttons.Add(new[] { InlineKeyboardButton.WithCallbackData("🏠 Главное меню", "cmd_back_main") });
@@ -2010,7 +2033,7 @@ public class BotCommandService
         if (msgId.HasValue)
             await SafeEditTextOrCaptionAsync(chatId, msgId.Value, text, markup, ParseMode.Markdown);
         else
-            await _botClient.SendMessage(chatId, text, parseMode: ParseMode.Markdown, replyMarkup: markup);
+            await SafeSendMessageAsync(chatId, text, markup);
     }
 
     // =========================================================================
@@ -2078,7 +2101,7 @@ public class BotCommandService
                       "_Умные напоминания взять лыжи, спортивную форму, краски или циркуль накануне уроков._\n\n" +
                       "⚡️ *Максимальный приоритет P2P-кэша*\n" +
                       "_Мгновенная загрузка расписания и домашних заданий даже в дни падений Госуслуг._\n\n" +
-                      "💰 *Стоимость в период бета-теста:* **50 ₽ / месяц**";
+                       "💰 *Стоимость в период бета-теста:* *50 ₽ / месяц*";
 
         var buttons = new List<IEnumerable<InlineKeyboardButton>>();
 
@@ -2108,7 +2131,7 @@ public class BotCommandService
         }
 
         string text = "🎉 *Поздравляем с подключением MirageDiary Premium!*\n\n" +
-                      "На время бета-тестирования вам начислен **1 месяц полного доступа** за 50 ₽.\n\n" +
+                      "На время бета-тестирования вам начислен *1 месяц полного доступа* за 50 ₽.\n\n" +
                       "Все премиум-функции (Live-оценки по звонкам МАОУ СОШ № 113, умный будильник и приоритетный P2P-кэш) успешно активированы! 🚀\n\n" +
                       $"⭐️ *Срок действия:* до {DateTime.UtcNow.AddMonths(1):dd.MM.yyyy}";
 
@@ -2169,9 +2192,10 @@ public class BotCommandService
 
         string cleanChannel = channel.TrimStart('@');
         string channelLink = _config["Telegram:ChannelLink"] ?? $"https://t.me/{cleanChannel}";
+        string safeChannel = TelegramMarkdownEscaper.Escape(channel);
 
         string text = "📢 *Обязательная подписка на канал проекта*\n\n" +
-                      $"Для использования бота *Mirage Diary*, пожалуйста, подпишитесь на наш официальный Telegram-канал: *{channel}*\n\n" +
+                      $"Для использования бота *Mirage Diary*, пожалуйста, подпишитесь на наш официальный Telegram-канал: *{safeChannel}*\n\n" +
                       "В канале публикуются:\n" +
                       "🔔 Изменения в школьном расписании и звонках\n" +
                       "🚀 Обновления бота и Mini App\n" +
@@ -2187,7 +2211,7 @@ public class BotCommandService
         if (msgId.HasValue)
             await SafeEditTextOrCaptionAsync(chatId, msgId.Value, text, markup);
         else
-            await _botClient.SendMessage(chatId, text, parseMode: ParseMode.Markdown, replyMarkup: markup);
+            await SafeSendMessageAsync(chatId, text, markup);
 
         return false;
     }
@@ -2271,21 +2295,42 @@ public class BotCommandService
         }
 
         // 2. Fallback: send fresh text message
+        await SafeSendMessageAsync(chatId, text, markup, parseMode);
+    }
+
+    private async Task<Message?> SafeSendMessageAsync(
+        long chatId,
+        string text,
+        ReplyMarkup? markup = null,
+        ParseMode parseMode = ParseMode.Markdown,
+        CancellationToken ct = default)
+    {
         try
         {
-            await _botClient.SendMessage(
+            return await _botClient.SendMessage(
                 chatId: chatId,
                 text: text,
                 parseMode: parseMode,
-                replyMarkup: markup);
+                replyMarkup: markup,
+                cancellationToken: ct);
         }
         catch (Telegram.Bot.Exceptions.ApiRequestException ex) when (ex.Message.Contains("can't parse entities"))
         {
-            await _botClient.SendMessage(
+            return await _botClient.SendMessage(
                 chatId: chatId,
                 text: text,
-                replyMarkup: markup);
+                replyMarkup: markup,
+                cancellationToken: ct);
         }
+    }
+
+    private static bool IsCancelCommand(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        var trimmed = text.Trim();
+        return trimmed.Equals("отмена", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.Equals("cancel", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.Equals("/cancel", StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task SendOrEditBannerScreenAsync(
@@ -2391,12 +2436,24 @@ public class BotCommandService
                 freshFile = InputFile.FromUri($"{baseUrl}/images/banners/{bannerFileName}");
             }
 
-            var sentMsg = await _botClient.SendPhoto(
-                chatId: chatId,
-                photo: freshFile,
-                caption: caption,
-                parseMode: ParseMode.Markdown,
-                replyMarkup: markup);
+            Message sentMsg;
+            try
+            {
+                sentMsg = await _botClient.SendPhoto(
+                    chatId: chatId,
+                    photo: freshFile,
+                    caption: caption,
+                    parseMode: ParseMode.Markdown,
+                    replyMarkup: markup);
+            }
+            catch (Telegram.Bot.Exceptions.ApiRequestException ex) when (ex.Message.Contains("can't parse entities"))
+            {
+                sentMsg = await _botClient.SendPhoto(
+                    chatId: chatId,
+                    photo: freshFile,
+                    caption: caption,
+                    replyMarkup: markup);
+            }
 
             _currentBannerByChat[chatId] = bannerFileName;
 
@@ -2417,7 +2474,7 @@ public class BotCommandService
                 }
                 catch { }
             }
-            await _botClient.SendMessage(chatId, caption, parseMode: ParseMode.Markdown, replyMarkup: markup);
+            await SafeSendMessageAsync(chatId, caption, markup);
         }
     }
 }

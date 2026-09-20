@@ -5,6 +5,7 @@ using MirageDiary.Core;
 using MirageDiary.Server.Data;
 using MirageDiary.Core.Models;
 using Microsoft.Extensions.DependencyInjection;
+using MirageDiary.Server.Security;
 
 namespace MirageDiary.Server.Services;
 
@@ -179,8 +180,8 @@ public class DiaryInteractionService
                         string response = $"📚 Домашнее задание на {displayDate} _(⚡ из кэша класса)_:\n\n";
                         foreach (var item in cachedHw)
                         {
-                            string title = !string.IsNullOrWhiteSpace(item.LessonName) ? item.LessonName : "Предмет";
-                            string desc = string.IsNullOrWhiteSpace(item.Description) ? "Нет описания" : item.Description;
+                            string title = TelegramMarkdownEscaper.Escape(!string.IsNullOrWhiteSpace(item.LessonName) ? item.LessonName : "Предмет");
+                            string desc = TelegramMarkdownEscaper.Escape(string.IsNullOrWhiteSpace(item.Description) ? "Нет описания" : item.Description);
                             response += $"• *{title}*: {desc}\n";
                         }
                         return response;
@@ -219,8 +220,8 @@ public class DiaryInteractionService
                     string response = $"📚 Домашнее задание на {displayDate}:\n\n";
                     foreach (var item in hw)
                     {
-                        string title = !string.IsNullOrWhiteSpace(item.LessonName) ? item.LessonName : "Предмет";
-                        string desc = string.IsNullOrWhiteSpace(item.Description) ? "Нет описания" : item.Description;
+                        string title = TelegramMarkdownEscaper.Escape(!string.IsNullOrWhiteSpace(item.LessonName) ? item.LessonName : "Предмет");
+                        string desc = TelegramMarkdownEscaper.Escape(string.IsNullOrWhiteSpace(item.Description) ? "Нет описания" : item.Description);
                         response += $"• *{title}*: {desc}\n";
                     }
                     return response;
@@ -242,8 +243,8 @@ public class DiaryInteractionService
                     string response = $"Домашнего задания на сегодня ({displayDate}) нет.\n\n📚 Домашнее задание на {displayTomorrow}:\n\n";
                     foreach (var item in hwTomorrow)
                     {
-                        string title = !string.IsNullOrWhiteSpace(item.LessonName) ? item.LessonName : "Предмет";
-                        string desc = string.IsNullOrWhiteSpace(item.Description) ? "Нет описания" : item.Description;
+                        string title = TelegramMarkdownEscaper.Escape(!string.IsNullOrWhiteSpace(item.LessonName) ? item.LessonName : "Предмет");
+                        string desc = TelegramMarkdownEscaper.Escape(string.IsNullOrWhiteSpace(item.Description) ? "Нет описания" : item.Description);
                         response += $"• *{title}*: {desc}\n";
                     }
                     _homeworkCache[memCacheKey] = (DateTime.UtcNow.AddMinutes(3), response);
@@ -341,9 +342,10 @@ public class DiaryInteractionService
                     int num = 1;
                     foreach (var l in lessons)
                     {
-                        string subject = !string.IsNullOrEmpty(l.SubjectName) ? l.SubjectName : l.LessonName;
-                        string time = !string.IsNullOrEmpty(l.StartTime) ? $" ({l.StartTime}-{l.EndTime})" : "";
-                        string room = !string.IsNullOrEmpty(l.Room) ? $" [Каб. {l.Room}]" : "";
+                        string rawSubject = !string.IsNullOrEmpty(l.SubjectName) ? l.SubjectName : l.LessonName;
+                        string subject = TelegramMarkdownEscaper.Escape(rawSubject);
+                        string time = !string.IsNullOrEmpty(l.StartTime) ? $" ({TelegramMarkdownEscaper.Escape(l.StartTime)}-{TelegramMarkdownEscaper.Escape(l.EndTime)})" : "";
+                        string room = !string.IsNullOrEmpty(l.Room) ? $" (Каб. {TelegramMarkdownEscaper.Escape(l.Room)})" : "";
                         res += $"{num}. *{subject}*{time}{room}\n";
                         num++;
                     }
@@ -497,7 +499,8 @@ public class DiaryInteractionService
                     string gpaStr = s.TotalWeight > 0 ? $"{s.AverageGpa:F2}" : "—";
                     string forecastStr = s.FinalForecast > 0 ? $" (итог: *{s.FinalForecast}*)" : "";
                     
-                    sb.AppendLine($"{s.StatusEmoji} *{s.SubjectName}* — `{gpaStr}`{forecastStr}");
+                    string safeSubject = TelegramMarkdownEscaper.Escape(s.SubjectName);
+                    sb.AppendLine($"{s.StatusEmoji} *{safeSubject}* — `{gpaStr}`{forecastStr}");
 
                     // List marks
                     var markStrings = s.Marks.Select(m =>
@@ -622,7 +625,7 @@ public class DiaryInteractionService
         }
         catch (Exception ex)
         {
-            profileCard += $"⚠️ _Не удалось загрузить статус Госуслуг: {ex.Message}_\n\n";
+            profileCard += $"⚠️ _Не удалось загрузить статус Госуслуг: {TelegramMarkdownEscaper.Escape(ex.Message)}_\n\n";
         }
 
         string platformName = userId.StartsWith("max_") ? "MAX" : "Telegram";
@@ -733,8 +736,10 @@ public class DiaryInteractionService
             string response = prefix;
             foreach (var item in hw)
             {
-                string title = !string.IsNullOrWhiteSpace(item.LessonName) ? item.LessonName : "Предмет";
-                response += $"* {title}: {item.Description}\n";
+                string rawTitle = !string.IsNullOrWhiteSpace(item.LessonName) ? item.LessonName : "Предмет";
+                string safeTitle = TelegramMarkdownEscaper.Escape(rawTitle);
+                string safeDesc = TelegramMarkdownEscaper.Escape(item.Description ?? string.Empty);
+                response += $"• *{safeTitle}*: {safeDesc}\n";
             }
             return response;
         }

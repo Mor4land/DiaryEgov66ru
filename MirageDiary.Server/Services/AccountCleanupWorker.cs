@@ -68,8 +68,19 @@ public class AccountCleanupWorker : BackgroundService
 
         var cutoffUtc = DateTime.UtcNow.AddDays(-30);
 
+        // Аккаунт считается действительно заброшенным ТОЛЬКО если:
+        // 1. Не является администратором или завучем
+        // 2. Не проявлял активности более 30 дней
+        // 3. Нет сохраненных сессионных токенов (уже вышел или не авторизован)
+        // 4. Нет активной платной или бессрочной подписки
+        // 5. Не включены активные умные будильники / напоминания
         var staleUsers = await db.Users
-            .Where(u => u.Role != "Admin" && u.UpdatedAt != null && u.UpdatedAt < cutoffUtc)
+            .Where(u => u.Role != "Admin" && u.Role != "HeadTeacher" &&
+                        u.UpdatedAt != null && u.UpdatedAt < cutoffUtc &&
+                        string.IsNullOrEmpty(u.AccessToken) && string.IsNullOrEmpty(u.RefreshToken) &&
+                        !u.IsSubscribed &&
+                        (u.SubscriptionExpiresAtUtc == null || u.SubscriptionExpiresAtUtc < DateTime.UtcNow) &&
+                        (!u.IsAlarmEnabled || (!u.IsScheduleReminderEnabled && !u.IsHomeworkReminderEnabled && !u.IsEquipmentReminderEnabled)))
             .ToListAsync(stoppingToken);
 
         if (staleUsers.Count == 0)
@@ -77,7 +88,7 @@ public class AccountCleanupWorker : BackgroundService
             return;
         }
 
-        _logger.LogInformation($"[AccountCleanupWorker] Найдено {staleUsers.Count} неактивных аккаунтов для удаления (>30 дней без активности)...");
+        _logger.LogInformation($"[AccountCleanupWorker] Найдено {staleUsers.Count} заброшенных аккаунтов для удаления (>30 дней без токенов/будильников)...");
 
         int deletedCount = 0;
         foreach (var user in staleUsers)
@@ -86,6 +97,16 @@ public class AccountCleanupWorker : BackgroundService
 
             try
             {
+                // Отвязываем парный аккаунт, чтобы не оставлять висячих ссылок в LinkedUserId
+                if (!string.IsNullOrEmpty(user.LinkedUserId))
+                {
+                    var peer = await db.Users.FirstOrDefaultAsync(u => u.Id == user.LinkedUserId, stoppingToken);
+                    if (peer != null && peer.LinkedUserId == user.Id)
+                    {
+                        peer.LinkedUserId = "";
+                    }
+                }
+
                 await tokenStore.RevokeTokensAsync(user.Id);
                 db.Users.Remove(user);
                 deletedCount++;

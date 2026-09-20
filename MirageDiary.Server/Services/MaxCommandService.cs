@@ -146,7 +146,7 @@ public class MaxCommandService
         }
 
         // /start, /menu, Cancel — reset state and show main menu
-        if (text.StartsWith("/start") || text.StartsWith("/menu") || text.Equals("Отмена", StringComparison.OrdinalIgnoreCase))
+        if (text.StartsWith("/start") || text.StartsWith("/menu") || IsCancelCommand(text))
         {
             _stateService.ClearState(chatId);
             await ShowMainMenuAsync(chatId, maxUserId);
@@ -314,6 +314,16 @@ public class MaxCommandService
         switch (session.State)
         {
             case UserState.WaitingForHeadTeacherId:
+                if (IsCancelCommand(text))
+                {
+                    _stateService.ClearState(chatId);
+                    await SendUserMessageAsync(chatId, new SendMessageRequest
+                    {
+                        Text = "❌ Назначение завуча отменено.",
+                        Format = null
+                    });
+                    return;
+                }
                 _stateService.UpdateState(chatId, UserState.WaitingForHeadTeacherOrg, text);
                 await SendUserMessageAsync(chatId, new SendMessageRequest
                 {
@@ -323,16 +333,46 @@ public class MaxCommandService
                 break;
 
             case UserState.WaitingForHeadTeacherOrg:
+                if (IsCancelCommand(text))
+                {
+                    _stateService.ClearState(chatId);
+                    await SendUserMessageAsync(chatId, new SendMessageRequest
+                    {
+                        Text = "❌ Назначение завуча отменено.",
+                        Format = null
+                    });
+                    return;
+                }
                 await SaveHeadTeacherAsync(chatId, session.TempData ?? "", text);
                 _stateService.ClearState(chatId);
                 break;
 
             case UserState.WaitingForBroadcastText:
+                if (IsCancelCommand(text))
+                {
+                    _stateService.ClearState(chatId);
+                    await SendUserMessageAsync(chatId, new SendMessageRequest
+                    {
+                        Text = "❌ Рассылка отменена.",
+                        Format = null
+                    });
+                    return;
+                }
                 await DoBroadcastAsync(chatId, text);
                 _stateService.ClearState(chatId);
                 break;
 
             case UserState.WaitingForScheduleReminderTime:
+                if (IsCancelCommand(text))
+                {
+                    _stateService.ClearState(chatId);
+                    await SendUserMessageAsync(chatId, new SendMessageRequest
+                    {
+                        Text = "❌ Ввод времени отменён.",
+                        Format = null
+                    });
+                    return;
+                }
                 if (TryParseTime(text, out string schedTime))
                 {
                     await SetScheduleReminderTimeAsync(chatId, null, maxUserId, schedTime);
@@ -349,6 +389,16 @@ public class MaxCommandService
                 break;
 
             case UserState.WaitingForHomeworkReminderTime:
+                if (IsCancelCommand(text))
+                {
+                    _stateService.ClearState(chatId);
+                    await SendUserMessageAsync(chatId, new SendMessageRequest
+                    {
+                        Text = "❌ Ввод времени отменён.",
+                        Format = null
+                    });
+                    return;
+                }
                 if (TryParseTime(text, out string hwTime))
                 {
                     await SetHomeworkReminderTimeAsync(chatId, null, maxUserId, hwTime);
@@ -365,6 +415,16 @@ public class MaxCommandService
                 break;
 
             case UserState.WaitingForEquipmentReminderTime:
+                if (IsCancelCommand(text))
+                {
+                    _stateService.ClearState(chatId);
+                    await SendUserMessageAsync(chatId, new SendMessageRequest
+                    {
+                        Text = "❌ Ввод времени отменён.",
+                        Format = null
+                    });
+                    return;
+                }
                 if (TryParseTime(text, out string equipTime))
                 {
                     await SetEquipmentReminderTimeAsync(chatId, null, maxUserId, equipTime);
@@ -2242,7 +2302,18 @@ public class MaxCommandService
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to edit MAX message {MessageId}, sending a new message instead.", messageId);
+                _logger.LogWarning(ex, "Failed to edit MAX message {MessageId} with Markdown, attempting PlainText fallback.", messageId);
+                try
+                {
+                    await _botClient.EditMessageByIdAsync(messageId, new SendMessageRequest
+                    {
+                        Text = text,
+                        Format = null,
+                        Attachments = attachments
+                    });
+                    return;
+                }
+                catch { }
             }
         }
 
@@ -2262,10 +2333,22 @@ public class MaxCommandService
             request.ChatId = null;
             await _botClient.SendMessageAsync(request);
         }
+        catch (Exception ex) when (request.Format == MessageFormat.Markdown)
+        {
+            _logger.LogWarning(ex, "Failed to send MAX message with Markdown to user {UserId}. Retrying with PlainText fallback.", userId);
+            try
+            {
+                request.Format = null;
+                await _botClient.SendMessageAsync(request);
+            }
+            catch (Exception retryEx)
+            {
+                _logger.LogError(retryEx, "Failed to send MAX message in PlainText fallback to user {UserId}", userId);
+            }
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to send MAX message to user {UserId}", userId);
-            throw;
         }
     }
 
@@ -2372,5 +2455,14 @@ public class MaxCommandService
             return true;
         }
         return false;
+    }
+
+    private static bool IsCancelCommand(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        var trimmed = text.Trim();
+        return trimmed.Equals("отмена", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.Equals("cancel", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.Equals("/cancel", StringComparison.OrdinalIgnoreCase);
     }
 }

@@ -172,6 +172,7 @@ public class TokenRefreshBackgroundService : BackgroundService
                 catch (DiarySessionExpiredException)
                 {
                     _logger.LogInformation($"[TokenRefreshWorker] 🔄 Сессия устарела для {user.Id}. Запуск экстренного авто-продления...");
+                    bool renewed = false;
                     
                     if (isMobile)
                     {
@@ -186,6 +187,7 @@ public class TokenRefreshBackgroundService : BackgroundService
                                 tokenData.SessionId = renewResult.SessionId;
                                 await tokenStore.SaveTokensAsync(user.Id, tokenData);
                                 _logger.LogInformation($"[TokenRefreshWorker] 🚀 Экстренно продлена мобильная сессия для {user.Id}!");
+                                renewed = true;
                                 continue;
                             }
                         }
@@ -195,17 +197,23 @@ public class TokenRefreshBackgroundService : BackgroundService
                         }
                     }
 
-                    var refreshedCookies = await PlaywrightSessionRefresher.TryRefreshCookiesAsync(tokenData.AccessToken);
-                    if (!string.IsNullOrEmpty(refreshedCookies))
+                    if (!renewed && !isMobile)
                     {
-                        tokenData.AccessToken = refreshedCookies;
-                        tokenData.RefreshToken = refreshedCookies;
-                        await tokenStore.SaveTokensAsync(user.Id, tokenData);
-                        _logger.LogInformation($"[TokenRefreshWorker] 🚀 Сессия успешно продлена через Playwright для {user.Id}!");
+                        var refreshedCookies = await PlaywrightSessionRefresher.TryRefreshCookiesAsync(tokenData.AccessToken);
+                        if (!string.IsNullOrEmpty(refreshedCookies))
+                        {
+                            tokenData.AccessToken = refreshedCookies;
+                            tokenData.RefreshToken = refreshedCookies;
+                            await tokenStore.SaveTokensAsync(user.Id, tokenData);
+                            _logger.LogInformation($"[TokenRefreshWorker] 🚀 Сессия успешно продлена через Playwright для {user.Id}!");
+                            renewed = true;
+                        }
                     }
-                    else
+
+                    if (!renewed)
                     {
-                        _logger.LogWarning($"[TokenRefreshWorker] ⚠️ Не удалось продлить сессию для {user.Id} (требуется повторный вход).");
+                        _logger.LogWarning($"[TokenRefreshWorker] ⚠️ Не удалось продлить сессию для {user.Id} (сессия окончательно истекла). Сбрасываем недействительные токены...");
+                        await tokenStore.RevokeTokensAsync(user.Id);
                     }
                 }
             }

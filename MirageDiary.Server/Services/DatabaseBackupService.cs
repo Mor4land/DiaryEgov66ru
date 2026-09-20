@@ -13,7 +13,7 @@ public class DatabaseBackupService
 {
     private readonly IServiceProvider _services;
     private readonly ILogger<DatabaseBackupService> _logger;
-    private static readonly object _backupLock = new();
+    private static readonly System.Threading.SemaphoreSlim _backupSemaphore = new(1, 1);
 
     public DatabaseBackupService(IServiceProvider services, ILogger<DatabaseBackupService> logger)
     {
@@ -25,11 +25,12 @@ public class DatabaseBackupService
     /// Performs an atomic, non-blocking point-in-time snapshot of the active SQLite database
     /// using SQLite's native VACUUM INTO command, guaranteeing zero WAL corruption during live operations.
     /// </summary>
-    public async Task<string?> CreateBackupAsync(string reason = "auto")
+    public async Task<string?> CreateBackupAsync(string reason = "auto", System.Threading.CancellationToken ct = default)
     {
-        lock (_backupLock)
+        if (!await _backupSemaphore.WaitAsync(TimeSpan.FromSeconds(30), ct))
         {
-            // Ensure single-threaded backup execution
+            _logger.LogWarning("[Backup] ⚠️ Another backup operation is already running. Skipping request ({Reason}).", reason);
+            return null;
         }
 
         try
@@ -41,9 +42,15 @@ public class DatabaseBackupService
                 : Path.Combine(baseDir, "backups");
             Directory.CreateDirectory(backupDir);
 
-            string timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
+            string timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss_fff");
             string backupFileName = $"miragediary_{timestamp}_{reason}.db";
             string backupPath = Path.Combine(backupDir, backupFileName);
+
+            if (File.Exists(backupPath))
+            {
+                backupFileName = $"miragediary_{timestamp}_{Guid.NewGuid():N}_{reason}.db";
+                backupPath = Path.Combine(backupDir, backupFileName);
+            }
 
             using (var scope = _services.CreateScope())
             {
@@ -52,7 +59,7 @@ public class DatabaseBackupService
                 // Native SQLite atomic snapshot
                 string escapedPath = backupPath.Replace("'", "''");
 #pragma warning disable EF1002
-                await db.Database.ExecuteSqlRawAsync($"VACUUM INTO '{escapedPath}'");
+                await db.Database.ExecuteSqlRawAsync($"VACUUM INTO '{escapedPath}'", ct);
 #pragma warning restore EF1002
             }
 
@@ -69,6 +76,10 @@ public class DatabaseBackupService
         {
             _logger.LogError(ex, "[Backup] ❌ Failed to create database backup snapshot.");
             return null;
+        }
+        finally
+        {
+            _backupSemaphore.Release();
         }
     }
 
