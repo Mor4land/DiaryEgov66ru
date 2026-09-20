@@ -196,6 +196,14 @@ public class BotCommandService
         {
             await ShowChildrenMenuAsync(chatId, chatIdStr);
         }
+        else if (text.StartsWith("/settings") || text.StartsWith("/настройки"))
+        {
+            await ShowSettingsMenuAsync(chatId, null, chatIdStr);
+        }
+        else if (text.StartsWith("/help") || text.StartsWith("/помощь") || text.StartsWith("/команды"))
+        {
+            await ShowHelpAsync(chatId, null);
+        }
     }
 
     // ─── File upload (schedule) ───────────────────────────────────────────────
@@ -544,6 +552,10 @@ public class BotCommandService
                 break;
 
             // ── Settings & Smart Reminders ──────────────────────────────────
+            case "cmd_help":
+                await ShowHelpAsync(chatId.Value, msgId);
+                break;
+
             case "cmd_settings":
                 await ShowSettingsMenuAsync(chatId.Value, msgId, chatIdStr);
                 break;
@@ -813,7 +825,7 @@ public class BotCommandService
     }
 
     // ─── Settings & Account ───────────────────────────────────────────
-    private async Task ShowSettingsMenuAsync(long chatId, int msgId, string chatIdStr)
+    private async Task ShowSettingsMenuAsync(long chatId, int? msgId, string chatIdStr)
     {
         var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == chatIdStr);
         var alarmOn = user?.IsAlarmEnabled ?? true;
@@ -829,7 +841,11 @@ public class BotCommandService
             },
             new[]
             {
-                InlineKeyboardButton.WithCallbackData("🗑 Удалить аккаунт", "cmd_delete_account"),
+                InlineKeyboardButton.WithCallbackData("ℹ️ Справка", "cmd_help"),
+                InlineKeyboardButton.WithCallbackData("🗑 Удалить аккаунт", "cmd_delete_account")
+            },
+            new[]
+            {
                 InlineKeyboardButton.WithCallbackData("🏠 Главное меню", "cmd_back_main")
             }
         });
@@ -839,6 +855,30 @@ public class BotCommandService
                       $"• 👤 ID: `{chatIdStr}`";
 
         await SendOrEditBannerScreenAsync(chatId, msgId, "banner_settings.png", text, buttons);
+    }
+
+    // ─── Help & Commands List ───────────────────────────────────────────
+    private async Task ShowHelpAsync(long chatId, int? msgId = null)
+    {
+        var text = "ℹ️ *Команды Mirage Diary*\n\n" +
+                   "• /start — 🏠 Главное меню\n" +
+                   "• /schedule `[дата]` — 📅 Расписание уроков\n" +
+                   "• /homework `[дата]` — 📚 Домашнее задание\n" +
+                   "• /marks — 📊 Оценки и средний балл\n" +
+                   "• /calc — 🎯 Калькулятор целей (сколько оценок до 5, 4, 3)\n" +
+                   "• /now — 🔔 Какой урок идёт прямо сейчас и сколько до звонка\n" +
+                   "• /alarm — 🎒 Умный будильник и проверка рюкзака\n" +
+                   "• /profile — 👤 Данные профиля ученика\n" +
+                   "• /settings — ⚙️ Настройки и напоминания\n" +
+                   "• /link — 🔗 Связка с мессенджером MAX\n" +
+                   "• /help — ℹ️ Справка по всем командам";
+
+        var markup = new InlineKeyboardMarkup(new[]
+        {
+            new[] { InlineKeyboardButton.WithCallbackData("🏠 Главное меню", "cmd_back_main") }
+        });
+
+        await SendOrEditBannerScreenAsync(chatId, msgId, "banner_menu.png", text, markup);
     }
 
     // ─── Dedicated Smart Alarm Menu ───────────────────────────────────────────
