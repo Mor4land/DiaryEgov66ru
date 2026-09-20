@@ -117,10 +117,16 @@ public class SmartAlarmWorker : BackgroundService
                 try
                 {
                     var schedText = await diaryService.GetScheduleStringAsync(student.Id, todayStr);
-                    if (!string.IsNullOrEmpty(schedText) && !schedText.Contains("отсутствует"))
+                    if (HasScheduleContent(schedText))
                     {
                         string msg = $"🔔 *Умный будильник: расписание уроков на сегодня!*\n\n{schedText}";
                         await SendMessageToUserAsync(student.Id, msg, tgBotClient, maxBotClient, stoppingToken);
+                        student.LastScheduleReminderDate = todayStr;
+                        dbChanged = true;
+                    }
+                    else if (IsTerminalEmptySchedule(schedText))
+                    {
+                        // Уроков на сегодня нет (выходной/каникулы): фиксируем проверку, чтобы не долбить Госуслуги каждую минуту
                         student.LastScheduleReminderDate = todayStr;
                         dbChanged = true;
                     }
@@ -139,10 +145,16 @@ public class SmartAlarmWorker : BackgroundService
                 try
                 {
                     var hwText = await diaryService.GetHomeworkStringAsync(student.Id, "завтра");
-                    if (!string.IsNullOrEmpty(hwText) && !hwText.Contains("отсутствует"))
+                    if (HasHomeworkContent(hwText))
                     {
                         string msg = $"📚 *Умный будильник: домашнее задание на завтра!*\n\n{hwText}";
                         await SendMessageToUserAsync(student.Id, msg, tgBotClient, maxBotClient, stoppingToken);
+                        student.LastHomeworkReminderDate = todayStr;
+                        dbChanged = true;
+                    }
+                    else if (IsTerminalEmptyHomework(hwText))
+                    {
+                        // Домашнего задания на завтра нет: фиксируем проверку без отправки пустого уведомления
                         student.LastHomeworkReminderDate = todayStr;
                         dbChanged = true;
                     }
@@ -194,8 +206,12 @@ public class SmartAlarmWorker : BackgroundService
                         await SendMessageToUserAsync(student.Id, msg, tgBotClient, maxBotClient, stoppingToken);
                     }
 
-                    student.LastEquipmentReminderDate = todayStr;
-                    dbChanged = true;
+                    bool isNetworkError = combined.Contains("таймаут") || combined.Contains("ошибка при");
+                    if (!isNetworkError)
+                    {
+                        student.LastEquipmentReminderDate = todayStr;
+                        dbChanged = true;
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -235,5 +251,51 @@ public class SmartAlarmWorker : BackgroundService
                 await tgBotClient.SendMessage(chatId, msg, cancellationToken: ct);
             }
         }
+    }
+
+    private static bool HasScheduleContent(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        if (text.Contains("отсутствует", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("не загружено", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("недоступен", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("не авторизованы", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("таймаут", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("Ошибка", StringComparison.OrdinalIgnoreCase) ||
+            text.StartsWith("🔒"))
+        {
+            return false;
+        }
+        return text.Contains("1. *") || text.Contains("1.*");
+    }
+
+    private static bool IsTerminalEmptySchedule(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        return text.Contains("отсутствует", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("не загружено", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool HasHomeworkContent(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        if (text.Contains("нет.", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("отсутствует", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("недоступен", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("не авторизованы", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("таймаут", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("Ошибка", StringComparison.OrdinalIgnoreCase) ||
+            text.StartsWith("🔒"))
+        {
+            return false;
+        }
+        return text.Contains("• *") || text.Contains("•*");
+    }
+
+    private static bool IsTerminalEmptyHomework(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        return text.Contains("нет.", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("отсутствует", StringComparison.OrdinalIgnoreCase);
     }
 }

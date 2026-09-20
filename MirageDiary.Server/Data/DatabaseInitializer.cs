@@ -36,7 +36,46 @@ public static class DatabaseInitializer
             await cmd.ExecuteNonQueryAsync();
             logger.LogInformation("[DatabaseInitializer] ⚡ SQLite WAL mode and busy_timeout (5000ms) configured.");
 
-            // 1. Create Cache table if not exists
+            // 1. Create Users table if not exists
+            cmd.CommandText = @"CREATE TABLE IF NOT EXISTS ""Users"" (
+                ""Id"" TEXT NOT NULL CONSTRAINT ""PK_Users"" PRIMARY KEY,
+                ""AccessToken"" TEXT NOT NULL DEFAULT '',
+                ""RefreshToken"" TEXT NOT NULL DEFAULT '',
+                ""StudentId"" TEXT NOT NULL DEFAULT '',
+                ""Oid"" TEXT NOT NULL DEFAULT '',
+                ""SessionId"" TEXT NOT NULL DEFAULT '',
+                ""DeviceId"" TEXT NOT NULL DEFAULT '',
+                ""ClassName"" TEXT NOT NULL DEFAULT '',
+                ""OrgName"" TEXT NOT NULL DEFAULT '',
+                ""Role"" TEXT NOT NULL DEFAULT 'Student',
+                ""IsAlarmEnabled"" INTEGER NOT NULL DEFAULT 1,
+                ""IsScheduleReminderEnabled"" INTEGER NOT NULL DEFAULT 1,
+                ""ScheduleReminderTime"" TEXT NOT NULL DEFAULT '07:30',
+                ""LastScheduleReminderDate"" TEXT NOT NULL DEFAULT '',
+                ""IsHomeworkReminderEnabled"" INTEGER NOT NULL DEFAULT 1,
+                ""HomeworkReminderTime"" TEXT NOT NULL DEFAULT '17:00',
+                ""LastHomeworkReminderDate"" TEXT NOT NULL DEFAULT '',
+                ""IsEquipmentReminderEnabled"" INTEGER NOT NULL DEFAULT 1,
+                ""EquipmentReminderTime"" TEXT NOT NULL DEFAULT '20:30',
+                ""LastEquipmentReminderDate"" TEXT NOT NULL DEFAULT '',
+                ""UtcOffsetHours"" INTEGER NOT NULL DEFAULT 5,
+                ""SelectedStudentId"" TEXT NOT NULL DEFAULT '',
+                ""IsSubscribed"" INTEGER NOT NULL DEFAULT 0,
+                ""SubscriptionExpiresAtUtc"" TEXT NULL,
+                ""LastMarksHash"" TEXT NOT NULL DEFAULT '',
+                ""Shift"" INTEGER NOT NULL DEFAULT 1,
+                ""HasAcceptedPrivacyPolicy"" INTEGER NOT NULL DEFAULT 0,
+                ""PrivacyPolicyAcceptedAtUtc"" TEXT NULL,
+                ""Username"" TEXT NOT NULL DEFAULT '',
+                ""FirstName"" TEXT NOT NULL DEFAULT '',
+                ""LastName"" TEXT NOT NULL DEFAULT '',
+                ""Platform"" TEXT NOT NULL DEFAULT 'telegram',
+                ""LinkedUserId"" TEXT NOT NULL DEFAULT '',
+                ""UpdatedAt"" TEXT NULL
+            );";
+            await cmd.ExecuteNonQueryAsync();
+
+            // 2. Create Cache table if not exists
             cmd.CommandText = @"CREATE TABLE IF NOT EXISTS ""Cache"" (
                 ""CacheKey"" TEXT NOT NULL CONSTRAINT ""PK_Cache"" PRIMARY KEY,
                 ""JsonData"" TEXT NOT NULL DEFAULT '',

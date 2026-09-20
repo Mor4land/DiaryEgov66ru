@@ -2131,7 +2131,7 @@ public class BotCommandService
                       "2. 🚫 *Без сохранения паролей:* Пароли от Госуслуг не передаются и не сохраняются на сервере — авторизация происходит напрямую через защищенный протокол ЕСИА.\n" +
                       "3. 👨‍👩‍👧 *Для учащихся и родителей:* Сервис предназначен для образовательных целей. Несовершеннолетние пользователи используют сервис с согласия родителей (законных представителей) согласно ч. 6 ст. 9 152-ФЗ.\n" +
                       "4. 🇷🇺 *Хранение в РФ:* База данных расположена на серверах в Российской Федерации в строгом соответствии с 152-ФЗ.\n" +
-                      "5. 🗑 *Право на отзыв и забвение:* Вы можете в любой момент отозвать согласие и полностью удалить свой аккаунт со всеми токенами через команду /delete_account в настройках.\n\n" +
+                      "5. 🗑 *Право на отзыв и забвение:* Вы можете в любой момент отозвать согласие и полностью удалить свой аккаунт со всеми токенами через команду `/delete_account` в настройках.\n\n" +
                       "Нажмите *«✅ Согласен с политикой (152-ФЗ)»*, чтобы начать пользоваться сервисом.";
 
         var markup = new InlineKeyboardMarkup(new[]
@@ -2140,10 +2140,7 @@ public class BotCommandService
             new[] { InlineKeyboardButton.WithCallbackData("✅ Согласен с политикой (152-ФЗ)", "cmd_accept_privacy") }
         });
 
-        if (msgId.HasValue)
-            await SafeEditTextOrCaptionAsync(chatId, msgId.Value, text, markup);
-        else
-            await _botClient.SendMessage(chatId, text, parseMode: ParseMode.Markdown, replyMarkup: markup);
+        await SafeEditTextOrCaptionAsync(chatId, msgId, text, markup);
     }
 
     private async Task<bool> EnsureChannelSubscribedAsync(long chatId, string chatIdStr, int? msgId = null)
@@ -2219,6 +2216,19 @@ public class BotCommandService
             {
                 return;
             }
+            catch (Telegram.Bot.Exceptions.ApiRequestException ex) when (ex.Message.Contains("can't parse entities"))
+            {
+                try
+                {
+                    await _botClient.EditMessageText(
+                        chatId: chatId,
+                        messageId: msgId.Value,
+                        text: text,
+                        replyMarkup: markup);
+                    return;
+                }
+                catch { }
+            }
             catch (Telegram.Bot.Exceptions.ApiRequestException ex) when (ex.Message.Contains("there is no text in the message to edit"))
             {
                 // Message is a PHOTO message with a caption! Edit caption directly!
@@ -2236,6 +2246,19 @@ public class BotCommandService
                 {
                     return;
                 }
+                catch (Telegram.Bot.Exceptions.ApiRequestException capEx) when (capEx.Message.Contains("can't parse entities"))
+                {
+                    try
+                    {
+                        await _botClient.EditMessageCaption(
+                            chatId: chatId,
+                            messageId: msgId.Value,
+                            caption: text,
+                            replyMarkup: markup);
+                        return;
+                    }
+                    catch { }
+                }
                 catch
                 {
                     try { await _botClient.DeleteMessage(chatId, msgId.Value); } catch { }
@@ -2248,11 +2271,21 @@ public class BotCommandService
         }
 
         // 2. Fallback: send fresh text message
-        await _botClient.SendMessage(
-            chatId: chatId,
-            text: text,
-            parseMode: parseMode,
-            replyMarkup: markup);
+        try
+        {
+            await _botClient.SendMessage(
+                chatId: chatId,
+                text: text,
+                parseMode: parseMode,
+                replyMarkup: markup);
+        }
+        catch (Telegram.Bot.Exceptions.ApiRequestException ex) when (ex.Message.Contains("can't parse entities"))
+        {
+            await _botClient.SendMessage(
+                chatId: chatId,
+                text: text,
+                replyMarkup: markup);
+        }
     }
 
     private async Task SendOrEditBannerScreenAsync(
