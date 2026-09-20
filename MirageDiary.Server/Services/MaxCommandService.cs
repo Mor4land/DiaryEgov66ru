@@ -1626,6 +1626,18 @@ public class MaxCommandService
     {
         var user = await EnsureUserExistsAsync(maxUserId);
         user.IsAlarmEnabled = !user.IsAlarmEnabled;
+        if (!user.IsAlarmEnabled)
+        {
+            user.IsScheduleReminderEnabled = false;
+            user.IsHomeworkReminderEnabled = false;
+            user.IsEquipmentReminderEnabled = false;
+        }
+        else
+        {
+            user.IsScheduleReminderEnabled = true;
+            user.IsHomeworkReminderEnabled = true;
+            user.IsEquipmentReminderEnabled = true;
+        }
         await _db.SaveChangesAsync();
         await ShowAlarmMenuAsync(chatId, maxUserId, messageId);
     }
@@ -1675,6 +1687,8 @@ public class MaxCommandService
     {
         var user = await EnsureUserExistsAsync(maxUserId);
         user.IsScheduleReminderEnabled = !user.IsScheduleReminderEnabled;
+        if (user.IsScheduleReminderEnabled) user.IsAlarmEnabled = true;
+        else if (!user.IsHomeworkReminderEnabled && !user.IsEquipmentReminderEnabled) user.IsAlarmEnabled = false;
         await _db.SaveChangesAsync();
         await ShowScheduleReminderMenuAsync(chatId, messageId, maxUserId);
     }
@@ -1684,6 +1698,7 @@ public class MaxCommandService
         var user = await EnsureUserExistsAsync(maxUserId);
         user.ScheduleReminderTime = time;
         user.IsScheduleReminderEnabled = true;
+        user.IsAlarmEnabled = true;
         await _db.SaveChangesAsync();
         await ShowScheduleReminderMenuAsync(chatId, messageId, maxUserId);
     }
@@ -1734,6 +1749,8 @@ public class MaxCommandService
     {
         var user = await EnsureUserExistsAsync(maxUserId);
         user.IsHomeworkReminderEnabled = !user.IsHomeworkReminderEnabled;
+        if (user.IsHomeworkReminderEnabled) user.IsAlarmEnabled = true;
+        else if (!user.IsScheduleReminderEnabled && !user.IsEquipmentReminderEnabled) user.IsAlarmEnabled = false;
         await _db.SaveChangesAsync();
         await ShowHomeworkReminderMenuAsync(chatId, messageId, maxUserId);
     }
@@ -1743,6 +1760,7 @@ public class MaxCommandService
         var user = await EnsureUserExistsAsync(maxUserId);
         user.HomeworkReminderTime = time;
         user.IsHomeworkReminderEnabled = true;
+        user.IsAlarmEnabled = true;
         await _db.SaveChangesAsync();
         await ShowHomeworkReminderMenuAsync(chatId, messageId, maxUserId);
     }
@@ -1793,6 +1811,8 @@ public class MaxCommandService
     {
         var user = await EnsureUserExistsAsync(maxUserId);
         user.IsEquipmentReminderEnabled = !user.IsEquipmentReminderEnabled;
+        if (user.IsEquipmentReminderEnabled) user.IsAlarmEnabled = true;
+        else if (!user.IsScheduleReminderEnabled && !user.IsHomeworkReminderEnabled) user.IsAlarmEnabled = false;
         await _db.SaveChangesAsync();
         await ShowEquipmentReminderMenuAsync(chatId, messageId, maxUserId);
     }
@@ -1802,6 +1822,7 @@ public class MaxCommandService
         var user = await EnsureUserExistsAsync(maxUserId);
         user.EquipmentReminderTime = time;
         user.IsEquipmentReminderEnabled = true;
+        user.IsAlarmEnabled = true;
         await _db.SaveChangesAsync();
         await ShowEquipmentReminderMenuAsync(chatId, messageId, maxUserId);
     }

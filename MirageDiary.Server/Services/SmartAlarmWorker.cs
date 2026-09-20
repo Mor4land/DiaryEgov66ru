@@ -84,9 +84,9 @@ public class SmartAlarmWorker : BackgroundService
         var tgBotClient = scope.ServiceProvider.GetService<ITelegramBotClient>();
         var maxBotClient = scope.ServiceProvider.GetService<IMaxBotClient>();
 
-        // Query only users who actually have active tokens and at least one notification enabled
+        // Query only users who actually have active tokens, master alarm enabled, and at least one notification enabled
         var students = await db.Users
-            .Where(u => !string.IsNullOrEmpty(u.AccessToken) && 
+            .Where(u => !string.IsNullOrEmpty(u.AccessToken) && u.IsAlarmEnabled &&
                        (u.IsScheduleReminderEnabled || u.IsHomeworkReminderEnabled || u.IsEquipmentReminderEnabled))
             .ToListAsync(stoppingToken);
 
@@ -119,11 +119,11 @@ public class SmartAlarmWorker : BackgroundService
                     var schedText = await diaryService.GetScheduleStringAsync(student.Id, todayStr);
                     if (!string.IsNullOrEmpty(schedText) && !schedText.Contains("отсутствует"))
                     {
-                        string msg = $"🔔 *Доброе утро! Расписание на сегодня:*\n\n{schedText}";
+                        string msg = $"🔔 *Умный будильник: расписание уроков на сегодня!*\n\n{schedText}";
                         await SendMessageToUserAsync(student.Id, msg, tgBotClient, maxBotClient, stoppingToken);
+                        student.LastScheduleReminderDate = todayStr;
+                        dbChanged = true;
                     }
-                    student.LastScheduleReminderDate = todayStr;
-                    dbChanged = true;
                 }
                 catch (Exception ex)
                 {
@@ -139,13 +139,13 @@ public class SmartAlarmWorker : BackgroundService
                 try
                 {
                     var hwText = await diaryService.GetHomeworkStringAsync(student.Id, "завтра");
-                    if (!string.IsNullOrEmpty(hwText))
+                    if (!string.IsNullOrEmpty(hwText) && !hwText.Contains("отсутствует"))
                     {
-                        string msg = $"📚 *Напоминание о домашнем задании на завтра:*\n\n{hwText}";
+                        string msg = $"📚 *Умный будильник: домашнее задание на завтра!*\n\n{hwText}";
                         await SendMessageToUserAsync(student.Id, msg, tgBotClient, maxBotClient, stoppingToken);
+                        student.LastHomeworkReminderDate = todayStr;
+                        dbChanged = true;
                     }
-                    student.LastHomeworkReminderDate = todayStr;
-                    dbChanged = true;
                 }
                 catch (Exception ex)
                 {
@@ -186,15 +186,11 @@ public class SmartAlarmWorker : BackgroundService
                     if (combined.Contains("технология") || combined.Contains("труд"))
                         foundTriggers.Add("принадлежности для урока труда");
 
+                    // Отправляем уведомление ТОЛЬКО если найдены специфические вещи на завтра
                     if (foundTriggers.Any())
                     {
                         string items = string.Join("\n• ", foundTriggers.Select(t => char.ToUpper(t[0]) + t[1..]));
                         string msg = $"🎒 *Умный будильник: собираем рюкзак на завтра!*\n\nНе забудьте взять с собой:\n• {items}\n\n✨ _Положите их в рюкзак прямо сейчас, чтобы не забыть утром!_";
-                        await SendMessageToUserAsync(student.Id, msg, tgBotClient, maxBotClient, stoppingToken);
-                    }
-                    else
-                    {
-                        string msg = "🎒 *Умный будильник:*\nСпецинструментов на завтра не требуется. Проверьте тетради и учебники по расписанию! 🎒";
                         await SendMessageToUserAsync(student.Id, msg, tgBotClient, maxBotClient, stoppingToken);
                     }
 

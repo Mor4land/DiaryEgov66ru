@@ -61,9 +61,32 @@ public static class DatabaseInitializer
                 CREATE INDEX IF NOT EXISTS ""IX_Users_Username"" ON ""Users"" (""Username"");
                 CREATE INDEX IF NOT EXISTS ""IX_Users_Oid"" ON ""Users"" (""Oid"");
                 CREATE INDEX IF NOT EXISTS ""IX_Users_StudentId"" ON ""Users"" (""StudentId"");
-                CREATE INDEX IF NOT EXISTS ""IX_Users_LinkedUserId"" ON ""Users"" (""LinkedUserId"");
             ";
             await cmd.ExecuteNonQueryAsync();
+
+            // 2.6. Proactive SQLite index health check & automated self-healing
+            try
+            {
+                cmd.CommandText = "PRAGMA quick_check;";
+                var checkResult = (string?)await cmd.ExecuteScalarAsync();
+                if (checkResult != "ok")
+                {
+                    logger.LogWarning($"[DatabaseInitializer] SQLite integrity warning: {checkResult}. Running automatic REINDEX...");
+                    cmd.CommandText = "REINDEX;";
+                    await cmd.ExecuteNonQueryAsync();
+                    logger.LogInformation("[DatabaseInitializer] SQLite REINDEX completed successfully.");
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "[DatabaseInitializer] SQLite quick_check encountered an error; attempting recovery via REINDEX...");
+                try
+                {
+                    cmd.CommandText = "REINDEX;";
+                    await cmd.ExecuteNonQueryAsync();
+                }
+                catch { }
+            }
 
             // 3. Migrate Users table schema safely
             var userCols = new (string Name, string Def)[]
