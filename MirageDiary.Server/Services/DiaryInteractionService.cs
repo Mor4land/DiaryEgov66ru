@@ -415,7 +415,12 @@ public class DiaryInteractionService
         var clientWithUser = new DiaryClient(client, tokenStore, userId);
 
         var marks = await clientWithUser.GetMarksAsync();
-        if (marks == null || marks.Count == 0) return new List<SubjectGradeSummary>();
+        if (marks == null || marks.Count == 0)
+        {
+            var emptyList = new List<SubjectGradeSummary>();
+            _marksCache[userId] = (DateTime.UtcNow.AddMinutes(2), emptyList);
+            return emptyList;
+        }
 
         var grouped = marks
             .Where(m => !string.IsNullOrWhiteSpace(m.SubjectName))

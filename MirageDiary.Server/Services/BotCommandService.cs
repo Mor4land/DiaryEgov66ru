@@ -200,7 +200,7 @@ public class BotCommandService
         {
             await ShowSettingsMenuAsync(chatId, null, chatIdStr);
         }
-        else if (text.StartsWith("/help") || text.StartsWith("/помощь") || text.StartsWith("/команды"))
+        else if (text == "/" || text.StartsWith("/help") || text.StartsWith("/помощь") || text.StartsWith("/команды"))
         {
             await ShowHelpAsync(chatId, null);
         }

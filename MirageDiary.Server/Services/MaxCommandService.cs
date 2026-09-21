@@ -153,8 +153,8 @@ public class MaxCommandService
             return;
         }
 
-        // Direct /help command
-        if (text.StartsWith("/help"))
+        // Direct /help or / command
+        if (text == "/" || text.StartsWith("/help") || text.StartsWith("/помощь") || text.StartsWith("/команды"))
         {
             _stateService.ClearState(chatId);
             await ShowHelpAsync(chatId, maxUserId);
@@ -162,7 +162,7 @@ public class MaxCommandService
         }
 
         // Direct /login or /auth command
-        if (text.StartsWith("/login") || text.StartsWith("/auth"))
+        if (text.StartsWith("/login") || text.StartsWith("/auth") || text.StartsWith("/войти"))
         {
             _stateService.ClearState(chatId);
             await ShowLoginPromptAsync(chatId, maxUserId);
@@ -170,7 +170,7 @@ public class MaxCommandService
         }
 
         // Direct /logout command
-        if (text.StartsWith("/logout"))
+        if (text.StartsWith("/logout") || text.StartsWith("/выйти"))
         {
             _stateService.ClearState(chatId);
             await ShowLogoutConfirmationAsync(chatId, maxUserId);
@@ -195,37 +195,39 @@ public class MaxCommandService
         }
 
         // Text command shortcuts
-        if (text.StartsWith("/homework"))
+        if (text.StartsWith("/homework") || text.StartsWith("/домашка") || text.StartsWith("/дз"))
         {
-            string dateArg = text.Length > 9 ? text[9..].Trim() : "";
+            var parts = text.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+            string dateArg = parts.Length > 1 ? parts[1].Trim() : "";
             await ExecuteHomeworkAsync(chatId, maxUserId, dateArg);
         }
-        else if (text.StartsWith("/schedule"))
+        else if (text.StartsWith("/schedule") || text.StartsWith("/расписание"))
         {
-            string dateArg = text.Length > 9 ? text[9..].Trim() : "";
+            var parts = text.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+            string dateArg = parts.Length > 1 ? parts[1].Trim() : "";
             await ExecuteScheduleAsync(chatId, maxUserId, dateArg);
         }
-        else if (text.StartsWith("/marks") || text.StartsWith("/grades"))
+        else if (text.StartsWith("/marks") || text.StartsWith("/grades") || text.StartsWith("/оценки"))
         {
             await ExecuteMarksAsync(chatId, maxUserId);
         }
-        else if (text.StartsWith("/calc"))
+        else if (text.StartsWith("/calc") || text.StartsWith("/calculator") || text.StartsWith("/калькулятор"))
         {
             await ShowGradeCalculatorSubjectsAsync(chatId, maxUserId);
         }
-        else if (text.StartsWith("/profile"))
+        else if (text.StartsWith("/profile") || text.StartsWith("/профиль") || text.StartsWith("/me"))
         {
             await ExecuteProfileAsync(chatId, maxUserId);
         }
-        else if (text.StartsWith("/now") || text.StartsWith("/bell"))
+        else if (text.StartsWith("/now") || text.StartsWith("/bell") || text.StartsWith("/звонок"))
         {
             await ExecuteNowAsync(chatId, maxUserId);
         }
-        else if (text.StartsWith("/settings"))
+        else if (text.StartsWith("/settings") || text.StartsWith("/настройки"))
         {
             await ShowSettingsMenuAsync(chatId, maxUserId);
         }
-        else if (text.StartsWith("/alarm"))
+        else if (text.StartsWith("/alarm") || text.StartsWith("/будильник"))
         {
             await ExecuteAlarmCheckAsync(chatId, maxUserId);
         }
@@ -460,18 +462,21 @@ public class MaxCommandService
 
         if (!string.IsNullOrEmpty(cb.CallbackId))
         {
-            try
+            _ = Task.Run(async () =>
             {
-                await _botClient.AnswerCallbackAsync(new AnswerCallbackRequest
+                try
                 {
-                    CallbackId = cb.CallbackId,
-                    Notification = "👌"
-                });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to answer callback query {CallbackId}", cb.CallbackId);
-            }
+                    await _botClient.AnswerCallbackAsync(new AnswerCallbackRequest
+                    {
+                        CallbackId = cb.CallbackId,
+                        Notification = "👌"
+                    });
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to answer callback query {CallbackId}", cb.CallbackId);
+                }
+            });
         }
 
         if (!data.StartsWith("cmd_admin_"))
@@ -595,6 +600,10 @@ public class MaxCommandService
                 break;
 
             // ─── Settings ───
+            case "cmd_help":
+                await ShowHelpAsync(chatId, maxUserId, messageId);
+                break;
+
             case "cmd_settings":
                 await ShowSettingsMenuAsync(chatId, maxUserId, messageId);
                 break;
@@ -890,28 +899,29 @@ public class MaxCommandService
         await EditOrSendMessageAsync(chatId, messageId, text, keyboard);
     }
 
-    private async Task ShowHelpAsync(long chatId, string maxUserId)
+    private async Task ShowHelpAsync(long chatId, string maxUserId, string? messageId = null)
     {
-        var text = "ℹ️ *Справка по командам Mirage Diary (MAX)*\n\n" +
-                   "• /menu или /start — Главное интерактивное меню\n" +
-                   "• /homework [дата] — Домашнее задание\n" +
-                   "• /schedule [дата] — Расписание уроков\n" +
-                   "• /marks — Оценки и средний балл за четверть\n" +
-                   "• /calc — Калькулятор целей (сколько оценок нужно до 5, 4, 3)\n" +
-                   "• /now — Какой урок идёт прямо сейчас и время до звонка\n" +
-                   "• /profile — Данные ученика, класс, школа и смена\n" +
-                   "• /settings — Настройки будильника и уведомлений\n" +
-                   "• /alarm — Проверка вещей в рюкзак на завтра\n" +
-                   "• /login — Авторизация через Госуслуги в Mini App\n" +
-                   "• /logout — Выход из текущего профиля\n" +
-                   "• /subscription — Возможности Mirage Premium";
+        var text = "ℹ️ *Команды Mirage Diary (MAX)*\n\n" +
+                   "• /start — 🏠 Главное интерактивное меню\n" +
+                   "• /schedule `[дата]` — 📅 Расписание уроков\n" +
+                   "• /homework `[дата]` — 📚 Домашнее задание\n" +
+                   "• /marks — 📊 Оценки и средний балл за четверть\n" +
+                   "• /calc — 🎯 Калькулятор целей (сколько оценок до 5, 4, 3)\n" +
+                   "• /now — 🔔 Какой урок идёт прямо сейчас и время до звонка\n" +
+                   "• /alarm — 🎒 Умный будильник и проверка рюкзака\n" +
+                   "• /profile — 👤 Данные ученика, класс, школа и смена\n" +
+                   "• /settings — ⚙️ Настройки будильника и уведомлений\n" +
+                   "• /login — 🔐 Авторизация через Госуслуги в Mini App\n" +
+                   "• /logout — 🚪 Выход из текущего профиля\n" +
+                   "• /subscription — ⭐ Возможности Mirage Premium\n" +
+                   "• /help — ℹ️ Справка по всем командам";
 
         var keyboard = new List<List<Button>>
         {
             new List<Button> { new CallbackButton { Text = "🏠 Главное меню", Payload = "cmd_back_main" } }
         };
 
-        await SendOrEditBannerScreenAsync(chatId, null, "banner_menu.png", text, keyboard);
+        await SendOrEditBannerScreenAsync(chatId, messageId, "banner_menu.png", text, keyboard);
     }
 
     private async Task ShowLoginPromptAsync(long chatId, string maxUserId, string? messageId = null)
@@ -1500,7 +1510,11 @@ public class MaxCommandService
             },
             new List<Button>
             {
-                new CallbackButton { Text = "🗑 Удалить аккаунт", Payload = "cmd_delete_account" },
+                new CallbackButton { Text = "ℹ️ Справка", Payload = "cmd_help" },
+                new CallbackButton { Text = "🗑 Удалить аккаунт", Payload = "cmd_delete_account" }
+            },
+            new List<Button>
+            {
                 new CallbackButton { Text = "🏠 Главное меню", Payload = "cmd_back_main" }
             }
         };

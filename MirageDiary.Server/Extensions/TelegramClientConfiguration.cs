@@ -65,8 +65,14 @@ public static class TelegramClientConfiguration
                 }
 
                 return handler;
-            })
-            .AddTypedClient<ITelegramBotClient>(httpClient => new TelegramBotClient(botToken, httpClient));
+            });
+
+        services.AddSingleton<ITelegramBotClient>(sp =>
+        {
+            var httpClientFactory = sp.GetRequiredService<IHttpClientFactory>();
+            var httpClient = httpClientFactory.CreateClient("tgwebhook");
+            return new TelegramBotClient(botToken, httpClient);
+        });
 
         return services;
     }

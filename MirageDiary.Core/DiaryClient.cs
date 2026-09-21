@@ -409,14 +409,21 @@ public class DiaryClient
                 }) ?? new List<DatamartResponseItem>();
 
                 bool hasData = parsed.Any(p => p.Data != null && p.Data.Count > 0);
-                if (hasData || (parsed.Count > 0 && parsed[0].DataStatus == "snapshot"))
+                bool isPending = parsed.Any(p =>
+                    string.Equals(p.DataStatus, "pending", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(p.DataStatus, "processing", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(p.DataStatus, "in_progress", StringComparison.OrdinalIgnoreCase));
+
+                // If we have data or if the status is not pending (e.g. ready/snapshot or empty dataset), return immediately.
+                // Do NOT waste 15 seconds looping 4 times on non-pending empty responses.
+                if (hasData || !isPending)
                 {
                     return parsed;
                 }
 
                 if (retry < 3)
                 {
-                    await Task.Delay(1500);
+                    await Task.Delay(1000);
                 }
                 else
                 {
