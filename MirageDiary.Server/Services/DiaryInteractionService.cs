@@ -566,7 +566,7 @@ public class DiaryInteractionService
         var clientWithUser = new DiaryClient(client, tokenStore, userId);
 
         // Auto-resolve school and class if not present in DB
-        if (user != null && (string.IsNullOrEmpty(user.OrgName) || string.IsNullOrEmpty(user.ClassName)))
+        if (user != null && string.IsNullOrEmpty(user.ClassName))
         {
             try
             {
@@ -592,22 +592,48 @@ public class DiaryInteractionService
                                         var classInfo = JsonSerializer.Deserialize<GosuslugiClassInfo>(elem.GetRawText(), new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
                                         if (classInfo != null && (!string.IsNullOrEmpty(classInfo.ShortName) || !string.IsNullOrEmpty(classInfo.ClassNum)))
                                         {
-                                            user.ClassName = $"{classInfo.ClassNum}{classInfo.ClassLetter}".Trim();
-                                            user.OrgName = classInfo.ShortName;
+                                            string resolvedClass = !string.IsNullOrEmpty(classInfo.ShortName)
+                                                ? classInfo.ShortName
+                                                : $"{classInfo.ClassNum}{classInfo.ClassLetter}".Trim();
+                                            user.ClassName = resolvedClass;
+
+                                            string resolvedSchool = "";
+                                            if (elem.TryGetProperty("school_name", out var sn) ||
+                                                elem.TryGetProperty("schoolName", out sn) ||
+                                                elem.TryGetProperty("org_name", out sn) ||
+                                                elem.TryGetProperty("orgName", out sn) ||
+                                                elem.TryGetProperty("organization", out sn) ||
+                                                elem.TryGetProperty("organization_name", out sn))
+                                            {
+                                                resolvedSchool = sn.GetString()?.Trim() ?? "";
+                                            }
+
+                                            if (!string.IsNullOrEmpty(resolvedSchool) && !string.Equals(resolvedSchool, resolvedClass, StringComparison.OrdinalIgnoreCase))
+                                            {
+                                                user.OrgName = resolvedSchool;
+                                            }
+
                                             await dbContext.SaveChangesAsync();
                                             break;
                                         }
                                     }
                                 }
-                                if (!string.IsNullOrEmpty(user.OrgName)) break;
+                                if (!string.IsNullOrEmpty(user.ClassName)) break;
                             }
                         }
-                        if (!string.IsNullOrEmpty(user.OrgName)) break;
+                        if (!string.IsNullOrEmpty(user.ClassName)) break;
                     }
-                    if (!string.IsNullOrEmpty(user.OrgName)) break;
+                    if (!string.IsNullOrEmpty(user.ClassName)) break;
                 }
             }
             catch { }
+        }
+
+        // Clean up legacy corrupted OrgName where school was set to the class name
+        if (user != null && !string.IsNullOrEmpty(user.OrgName) && string.Equals(user.OrgName.Trim(), user.ClassName?.Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            user.OrgName = "";
+            await dbContext.SaveChangesAsync();
         }
 
         string profileCard = "👤 *Профиль пользователя*\n\n";
@@ -633,11 +659,17 @@ public class DiaryInteractionService
             profileCard += $"⚠️ _Не удалось загрузить статус Госуслуг: {TelegramMarkdownEscaper.Escape(ex.Message)}_\n\n";
         }
 
+        string displayOrg = user?.OrgName ?? "";
+        if (string.Equals(displayOrg.Trim(), user?.ClassName?.Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            displayOrg = "";
+        }
+
         string platformName = userId.StartsWith("max_") ? "MAX" : "Telegram";
         profileCard += "⚙️ *Данные в MirageDiary:*\n";
         profileCard += $"🎭 *Роль*: `{user?.Role ?? "Student"}`\n";
-        profileCard += $"🏫 *Школа*: `{user?.OrgName ?? "Не указана"}`\n";
-        profileCard += $"📚 *Класс*: `{user?.ClassName ?? "Не указан"}`\n";
+        profileCard += $"🏫 *Школа*: `{(string.IsNullOrWhiteSpace(displayOrg) ? "Не указана" : displayOrg)}`\n";
+        profileCard += $"📚 *Класс*: `{(string.IsNullOrWhiteSpace(user?.ClassName) ? "Не указан" : user.ClassName)}`\n";
         profileCard += $"🔔 *Будильник*: {(user?.IsAlarmEnabled ?? true ? "🟢 Включен" : "🔴 Выключен")}\n" +
                        $"📱 *Платформа*: `{platformName}`\n";
 
@@ -707,8 +739,31 @@ public class DiaryInteractionService
                                 var classInfo = JsonSerializer.Deserialize<GosuslugiClassInfo>(elem.GetRawText(), new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
                                 if (classInfo != null && (!string.IsNullOrEmpty(classInfo.ShortName) || !string.IsNullOrEmpty(classInfo.ClassNum)))
                                 {
-                                    user.ClassName = $"{classInfo.ClassNum}{classInfo.ClassLetter}".Trim();
-                                    user.OrgName = classInfo.ShortName;
+                                    string resolvedClass = !string.IsNullOrEmpty(classInfo.ShortName)
+                                        ? classInfo.ShortName
+                                        : $"{classInfo.ClassNum}{classInfo.ClassLetter}".Trim();
+                                    user.ClassName = resolvedClass;
+
+                                    string resolvedSchool = "";
+                                    if (elem.TryGetProperty("school_name", out var sn) ||
+                                        elem.TryGetProperty("schoolName", out sn) ||
+                                        elem.TryGetProperty("org_name", out sn) ||
+                                        elem.TryGetProperty("orgName", out sn) ||
+                                        elem.TryGetProperty("organization", out sn) ||
+                                        elem.TryGetProperty("organization_name", out sn))
+                                    {
+                                        resolvedSchool = sn.GetString()?.Trim() ?? "";
+                                    }
+
+                                    if (!string.IsNullOrEmpty(resolvedSchool) && !string.Equals(resolvedSchool, resolvedClass, StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        user.OrgName = resolvedSchool;
+                                    }
+                                    else if (string.Equals(user.OrgName, user.ClassName, StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        user.OrgName = "";
+                                    }
+
                                     await dbContext.SaveChangesAsync();
                                     break;
                                 }

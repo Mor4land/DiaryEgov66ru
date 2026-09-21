@@ -581,20 +581,37 @@ public class MiniAppController : ControllerBase
                                             var classInfo = JsonSerializer.Deserialize<GosuslugiClassInfo>(elem.GetRawText(), new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
                                             if (classInfo != null && (!string.IsNullOrEmpty(classInfo.ShortName) || !string.IsNullOrEmpty(classInfo.ClassNum)))
                                             {
-                                                className = $"{classInfo.ClassNum} {classInfo.ClassLetter}".Trim();
-                                                orgName = classInfo.ShortName;
+                                                className = !string.IsNullOrEmpty(classInfo.ShortName)
+                                                    ? classInfo.ShortName
+                                                    : $"{classInfo.ClassNum}{classInfo.ClassLetter}".Trim();
+
+                                                string resolvedSchool = "";
+                                                if (elem.TryGetProperty("school_name", out var sn) ||
+                                                    elem.TryGetProperty("schoolName", out sn) ||
+                                                    elem.TryGetProperty("org_name", out sn) ||
+                                                    elem.TryGetProperty("orgName", out sn) ||
+                                                    elem.TryGetProperty("organization", out sn) ||
+                                                    elem.TryGetProperty("organization_name", out sn))
+                                                {
+                                                    resolvedSchool = sn.GetString()?.Trim() ?? "";
+                                                }
+
+                                                if (!string.IsNullOrEmpty(resolvedSchool) && !string.Equals(resolvedSchool, className, StringComparison.OrdinalIgnoreCase))
+                                                {
+                                                    orgName = resolvedSchool;
+                                                }
                                                 break;
                                             }
                                         }
                                     }
-                                    if (!string.IsNullOrEmpty(orgName)) break;
+                                    if (!string.IsNullOrEmpty(className)) break;
                                 }
                             }
                         }
                         catch { }
-                        if (!string.IsNullOrEmpty(orgName)) break;
+                        if (!string.IsNullOrEmpty(className)) break;
                     }
-                    if (!string.IsNullOrEmpty(orgName)) break;
+                    if (!string.IsNullOrEmpty(className)) break;
                 }
             }
         }
