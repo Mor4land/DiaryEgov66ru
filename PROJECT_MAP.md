@@ -103,3 +103,11 @@
 * **`docker-compose.yml`** — продакшен-манифест с healthcheck, ротацией логов и монтированием директории `./data:/app/data`.
 * **`DOCKER.md`** — детальное руководство по сборке, запуску и сопровождению контейнера.
 
+---
+
+## 8. Спецификация API «Госуслуги Моя Школа»
+* **`GOSUSLUGI_APP_API.md`** — полная спецификация API мобильного клиента `MP_SCHOOL` (`ru.gosuslugi.school`):
+  - Реестр всех 12 контрактов Datamart (`student_lessons`, `student_marks`, `student_subject_plan`, `student_statsubject` и др.).
+  - Авторизация, сессии (`createSession`, `saveToken`, `entToken`), TRM (`esia-rs/api/public/v1/trm/push`).
+  - Скрытые эндпоинты: чеклисты готовности портфеля, похвалы учителей (`praise.json`), связка с Алисой (`/api/linking/get_pin`), геолокация и QR-турникеты.
+

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using MirageDiary.Core.Models;
 using MirageDiary.Server.Models;
 
 namespace MirageDiary.Server.Services;
@@ -18,6 +19,27 @@ public static class GradeCalculator
         3 => 2.60,
         _ => 4.60
     };
+
+    /// <summary>
+    /// Извлекает отдельные числовые оценки (1..5) из сырой строки Госуслуг.
+    /// Поддерживает как разделенные оценки ("5/4", "5, 4", "5 4"), так и слитные ("54", "45", "55").
+    /// </summary>
+    public static List<int> ParseMarkValues(string? raw)
+    {
+        var result = new List<int>();
+        if (string.IsNullOrWhiteSpace(raw)) return result;
+
+        string normalized = GosuslugiMarkItem.NormalizeMarkValue(raw);
+        var parts = normalized.Split(new[] { '/', '\\', ' ', ',', ';' }, StringSplitOptions.RemoveEmptyEntries);
+        foreach (var p in parts)
+        {
+            if (int.TryParse(p.Trim(), out int g) && g is >= 1 and <= 5)
+            {
+                result.Add(g);
+            }
+        }
+        return result;
+    }
 
     public static (int weightedSum, int totalWeight, double gpa) CalculateGpa(IEnumerable<(int mark, int weight)> marks)
     {

@@ -472,18 +472,49 @@ public class GosuslugiMarkItem
     [JsonConverter(typeof(FlexibleStringConverter))]
     public string RawValue { get; set; } = string.Empty;
 
+    public static string NormalizeMarkValue(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return string.Empty;
+        raw = raw.Trim();
+
+        // 1. If it contains separators (/ \ , ; space)
+        if (raw.IndexOfAny(new[] { '/', '\\', ',', ';', ' ' }) >= 0)
+        {
+            var parts = raw.Split(new[] { '/', '\\', ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length > 1 && parts.All(p => int.TryParse(p.Trim(), out int g) && g is >= 1 and <= 5))
+            {
+                return string.Join("/", parts.Select(p => p.Trim()));
+            }
+        }
+
+        // 2. If it is 2 or more contiguous grade digits (e.g. "54" -> "5/4", "45" -> "4/5", "55" -> "5/5", "544" -> "5/4/4")
+        if (raw.Length >= 2 && raw.All(c => c is >= '1' and <= '5'))
+        {
+            return string.Join("/", raw.Select(c => c.ToString()));
+        }
+
+        return raw;
+    }
+
     [JsonIgnore]
     public string Value
     {
         get
         {
+            string raw;
             if (!string.IsNullOrEmpty(MarkValue1))
             {
                 if (!string.IsNullOrEmpty(MarkValue2))
-                    return $"{MarkValue1}/{MarkValue2}";
-                return MarkValue1;
+                    raw = $"{MarkValue1}/{MarkValue2}";
+                else
+                    raw = MarkValue1;
             }
-            return RawValue;
+            else
+            {
+                raw = RawValue;
+            }
+
+            return NormalizeMarkValue(raw);
         }
         set => RawValue = value;
     }

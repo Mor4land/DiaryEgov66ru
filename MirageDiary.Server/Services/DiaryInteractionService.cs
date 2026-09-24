@@ -567,6 +567,7 @@ public class DiaryInteractionService
         List<GosuslugiMarkItem>? allMarks = null;
 
         // 1. Быстрая загрузка из постоянного кэша БД
+        bool isDbCacheFresh = false;
         if (!forceRefresh)
         {
             var dbEntry = await dbContext.Cache.FirstOrDefaultAsync(c => c.CacheKey == dbCacheKey);
@@ -575,13 +576,18 @@ public class DiaryInteractionService
                 try
                 {
                     allMarks = JsonSerializer.Deserialize<List<GosuslugiMarkItem>>(dbEntry.JsonData, DiaryClient.DatamartJsonOptions);
+                    // Считаем кэш свежим, если он обновлялся менее 5 минут назад
+                    if (allMarks != null && allMarks.Count > 0 && (DateTime.UtcNow - dbEntry.UpdatedAt).TotalMinutes < 5)
+                    {
+                        isDbCacheFresh = true;
+                    }
                 }
                 catch { }
             }
         }
 
-        // 2. Если в БД нет данных или запрошено принудительное обновление — идем в API Госуслуг
-        if (allMarks == null || forceRefresh)
+        // 2. Если в БД нет данных, кэш старше 5 минут или запрошено принудительное обновление — идем в API Госуслуг
+        if (!isDbCacheFresh || forceRefresh)
         {
             var httpClientFactory = scope.ServiceProvider.GetRequiredService<System.Net.Http.IHttpClientFactory>();
             var client = httpClientFactory.CreateClient();
@@ -677,14 +683,29 @@ public class DiaryInteractionService
             {
                 if (string.IsNullOrWhiteSpace(m.Value)) continue;
 
-                var parts = m.Value.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries);
+                var parts = m.Value.Split(new[] { '/', '\\', ' ', ',', ';' }, StringSplitOptions.RemoveEmptyEntries);
                 foreach (var part in parts)
                 {
-                    if (int.TryParse(part.Trim(), out int gradeVal) && gradeVal >= 1 && gradeVal <= 5)
+                    if (int.TryParse(part.Trim(), out int gradeVal))
                     {
-                        int w = (m.Weight.HasValue && m.Weight.Value > 0) ? m.Weight.Value : 1;
-                        wSum += gradeVal * w;
-                        totalW += w;
+                        if (gradeVal is >= 1 and <= 5)
+                        {
+                            int w = (m.Weight.HasValue && m.Weight.Value > 0) ? m.Weight.Value : 1;
+                            wSum += gradeVal * w;
+                            totalW += w;
+                        }
+                        else if (gradeVal is >= 11 and <= 55)
+                        {
+                            // Decompose concatenated grades e.g. 54 -> 5 and 4
+                            int d1 = gradeVal / 10;
+                            int d2 = gradeVal % 10;
+                            if (d1 is >= 1 and <= 5 && d2 is >= 1 and <= 5)
+                            {
+                                int w = (m.Weight.HasValue && m.Weight.Value > 0) ? m.Weight.Value : 1;
+                                wSum += (d1 + d2) * w;
+                                totalW += w * 2;
+                            }
+                        }
                     }
                 }
             }
@@ -713,8 +734,8 @@ public class DiaryInteractionService
 
         _memoryCache.Set(memKey, result, new MemoryCacheEntryOptions
         {
-            SlidingExpiration = TimeSpan.FromMinutes(15),
-            AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(1),
+            SlidingExpiration = TimeSpan.FromMinutes(2),
+            AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5),
             Size = 1
         });
         return result;
@@ -789,8 +810,8 @@ public class DiaryInteractionService
                 string res = sb.ToString().TrimEnd();
                 _memoryCache.Set(marksStrKey, res, new MemoryCacheEntryOptions
                 {
-                    SlidingExpiration = TimeSpan.FromMinutes(10),
-                    AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(1),
+                    SlidingExpiration = TimeSpan.FromMinutes(2),
+                    AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5),
                     Size = 1
                 });
                 return res;

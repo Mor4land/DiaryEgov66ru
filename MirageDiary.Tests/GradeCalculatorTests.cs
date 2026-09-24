@@ -89,4 +89,55 @@ public class GradeCalculatorTests
         var (s, w, gpa) = GradeCalculator.CalculateGpa(new List<(int, int)> { (3, 1), (4, 1), (4, 1) });
         Assert.True(gpa >= 3.60);
     }
+
+    [Theory]
+    [InlineData("54", "5/4")]
+    [InlineData("45", "4/5")]
+    [InlineData("55", "5/5")]
+    [InlineData("34", "3/4")]
+    [InlineData("5 4", "5/4")]
+    [InlineData("5, 4", "5/4")]
+    [InlineData("5/4", "5/4")]
+    [InlineData("544", "5/4/4")]
+    [InlineData("5", "5")]
+    [InlineData("Н", "Н")]
+    [InlineData("", "")]
+    [InlineData(null, "")]
+    public void NormalizeMarkValue_FormatsDoubleMarksCorrectly(string? input, string expected)
+    {
+        string actual = MirageDiary.Core.Models.GosuslugiMarkItem.NormalizeMarkValue(input);
+        Assert.Equal(expected, actual);
+    }
+
+    [Fact]
+    public void GosuslugiMarkItem_ValueProperty_NormalizesFiftyFourToFiveSlashFour()
+    {
+        var item1 = new MirageDiary.Core.Models.GosuslugiMarkItem { RawValue = "54" };
+        Assert.Equal("5/4", item1.Value);
+
+        var item2 = new MirageDiary.Core.Models.GosuslugiMarkItem { MarkValue1 = "54" };
+        Assert.Equal("5/4", item2.Value);
+
+        var item3 = new MirageDiary.Core.Models.GosuslugiMarkItem { MarkValue1 = "5", MarkValue2 = "4" };
+        Assert.Equal("5/4", item3.Value);
+    }
+
+    [Fact]
+    public void ParseMarkValues_DecomposesConcatenatedAndSeparatedMarks()
+    {
+        var marks54 = GradeCalculator.ParseMarkValues("54");
+        Assert.Equal(new List<int> { 5, 4 }, marks54);
+
+        var marks5Slash4 = GradeCalculator.ParseMarkValues("5/4");
+        Assert.Equal(new List<int> { 5, 4 }, marks5Slash4);
+
+        var marks5Space4 = GradeCalculator.ParseMarkValues("5 4");
+        Assert.Equal(new List<int> { 5, 4 }, marks5Space4);
+
+        var marksSingle = GradeCalculator.ParseMarkValues("5");
+        Assert.Equal(new List<int> { 5 }, marksSingle);
+
+        var marksNonNumeric = GradeCalculator.ParseMarkValues("Н");
+        Assert.Empty(marksNonNumeric);
+    }
 }

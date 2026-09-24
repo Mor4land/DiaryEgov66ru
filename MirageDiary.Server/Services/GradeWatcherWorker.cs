@@ -7,12 +7,14 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using MirageDiary.Core;
 using MirageDiary.Core.Models;
 using MirageDiary.Server.Data;
+using MirageDiary.Server.Models;
 using MirageDiary.Server.Security;
 using Telegram.Bot;
 using Telegram.Bot.Types.Enums;
@@ -33,6 +35,8 @@ public class GradeWatcherWorker : BackgroundService
     private readonly IServiceProvider _services;
     private readonly SchoolBellScheduleService _bellSchedule;
     private DateTime _lastWindowLogTime = DateTime.MinValue;
+    private DateTime _lastBellCheck = DateTime.MinValue;
+    private DateTime _lastPeriodicCheck = DateTime.MinValue;
 
     public GradeWatcherWorker(
         ILogger<GradeWatcherWorker> logger,
@@ -46,7 +50,7 @@ public class GradeWatcherWorker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("[GradeWatcher] 🚀 Live Grade Watcher по звонкам успешно запущен.");
+        _logger.LogInformation("[GradeWatcher] 🚀 Live Grade Watcher успешно запущен (интервалы: звонки 2м, день 10м).");
         bool maintenanceAnnounced = false;
 
         while (!stoppingToken.IsCancellationRequested)
@@ -70,15 +74,46 @@ public class GradeWatcherWorker : BackgroundService
                 }
 
                 var localTime = DateTime.UtcNow.AddHours(5); // Екатеринбург UTC+5
+                bool isBellWindow = _bellSchedule.IsLessonEndingOrBreakWindow(localTime);
 
-                if (_bellSchedule.IsLessonEndingOrBreakWindow(localTime))
+                bool shouldCheck = false;
+                if (isBellWindow)
                 {
-                    if ((localTime - _lastWindowLogTime).TotalMinutes >= 5)
+                    // В окнах звонков/перемен проверяем каждые 2 минуты
+                    if ((localTime - _lastBellCheck).TotalMinutes >= 2)
                     {
-                        _logger.LogInformation($"[GradeWatcher] 🔔 Окно звонка активно ({localTime:HH:mm}). Запуск проверки оценок...");
-                        _lastWindowLogTime = localTime;
+                        shouldCheck = true;
+                        _lastBellCheck = localTime;
+                        _lastPeriodicCheck = localTime;
+                        if ((localTime - _lastWindowLogTime).TotalMinutes >= 5)
+                        {
+                            _logger.LogInformation($"[GradeWatcher] 🔔 Окно звонка активно ({localTime:HH:mm}). Запуск проверки оценок...");
+                            _lastWindowLogTime = localTime;
+                        }
                     }
+                }
+                else if (localTime.Hour >= 8 && localTime.Hour < 22)
+                {
+                    // В учебное и вечернее время проверки ДЗ учителями (08:00–22:00) проверяем каждые 10 минут
+                    if ((localTime - _lastPeriodicCheck).TotalMinutes >= 10)
+                    {
+                        shouldCheck = true;
+                        _lastPeriodicCheck = localTime;
+                        _logger.LogInformation($"[GradeWatcher] ⏰ Периодическая проверка оценок ({localTime:HH:mm})...");
+                    }
+                }
+                else
+                {
+                    // Ночные часы (22:00–08:00) — раз в 60 минут
+                    if ((localTime - _lastPeriodicCheck).TotalMinutes >= 60)
+                    {
+                        shouldCheck = true;
+                        _lastPeriodicCheck = localTime;
+                    }
+                }
 
+                if (shouldCheck)
+                {
                     await CheckMarksForActiveUsersAsync(stoppingToken);
                 }
             }
@@ -129,6 +164,31 @@ public class GradeWatcherWorker : BackgroundService
                 var marks = await diaryClient.GetMarksAsync();
                 if (marks == null || marks.Count == 0)
                     continue;
+
+                // Синхронизируем с кэшем БД (marks_db:{studentId}), чтобы при открытии бота у пользователя сразу были свежие оценки
+                string studentId = !string.IsNullOrEmpty(tokenData.StudentId) ? tokenData.StudentId : user.Id;
+                string dbCacheKey = $"marks_db:{studentId}";
+                var existingDb = await db.Cache.FirstOrDefaultAsync(c => c.CacheKey == dbCacheKey, stoppingToken);
+                string marksJson = JsonSerializer.Serialize(marks, DiaryClient.DatamartJsonOptions);
+                if (existingDb != null)
+                {
+                    existingDb.JsonData = marksJson;
+                    existingDb.UpdatedAt = DateTime.UtcNow;
+                }
+                else
+                {
+                    db.Cache.Add(new CachedData { CacheKey = dbCacheKey, JsonData = marksJson, UpdatedAt = DateTime.UtcNow });
+                }
+
+                var memCache = scope.ServiceProvider.GetService<IMemoryCache>();
+                if (memCache != null)
+                {
+                    for (int q = 0; q <= 4; q++)
+                    {
+                        memCache.Remove($"user_marks:{user.Id}:q{q}");
+                        memCache.Remove($"user_marks_str:{user.Id}:q{q}");
+                    }
+                }
 
                 string currentHash = ComputeMarksHash(marks);
 

@@ -708,12 +708,12 @@ public class DiaryBotWorkflowEngine
         {
             var row = new List<BotButton>();
             var s1 = subjects[i];
-            row.Add(BotButton.Callback($"{s1.StatusEmoji} {Truncate(s1.SubjectName, 14)}", $"calc_subj_{i}"));
+            row.Add(BotButton.Callback($"{s1.StatusEmoji} {Truncate(s1.SubjectName, 14)}", $"cmd_calc_subj:{i}"));
 
             if (i + 1 < subjects.Count)
             {
                 var s2 = subjects[i + 1];
-                row.Add(BotButton.Callback($"{s2.StatusEmoji} {Truncate(s2.SubjectName, 14)}", $"calc_subj_{i + 1}"));
+                row.Add(BotButton.Callback($"{s2.StatusEmoji} {Truncate(s2.SubjectName, 14)}", $"cmd_calc_subj:{i + 1}"));
             }
             buttons.Add(row);
         }
@@ -744,9 +744,9 @@ public class DiaryBotWorkflowEngine
         {
             new()
             {
-                BotButton.Callback("🟢 Цель 5", $"calc_target_{subjectIndex}_5"),
-                BotButton.Callback("🟡 Цель 4", $"calc_target_{subjectIndex}_4"),
-                BotButton.Callback("🔴 Цель 3", $"calc_target_{subjectIndex}_3")
+                BotButton.Callback("🟢 Цель 5", $"cmd_calc_target:{subjectIndex}:5"),
+                BotButton.Callback("🟡 Цель 4", $"cmd_calc_target:{subjectIndex}:4"),
+                BotButton.Callback("🔴 Цель 3", $"cmd_calc_target:{subjectIndex}:3")
             },
             new()
             {
@@ -821,7 +821,7 @@ public class DiaryBotWorkflowEngine
         {
             new()
             {
-                BotButton.Callback("⬅️ К целям предмета", $"calc_subj_{subjectIndex}"),
+                BotButton.Callback("⬅️ К целям предмета", $"cmd_calc_subj:{subjectIndex}"),
                 BotButton.Callback("📚 К предметам", "cmd_calc")
             },
             new()
@@ -1640,15 +1640,18 @@ public class DiaryBotWorkflowEngine
                 await adapter.RenderScreenAsync(chatId, messageId, await BuildGradeCalculatorSubjectsScreenAsync(userId));
                 break;
 
-            case { } s when s.StartsWith("cmd_calc_subj:"):
-                if (int.TryParse(s["cmd_calc_subj:".Length..], out int subjIdx))
+            case { } s when s.StartsWith("cmd_calc_subj:") || s.StartsWith("calc_subj_"):
+                string sIdxStr = s.StartsWith("cmd_calc_subj:") ? s["cmd_calc_subj:".Length..] : s["calc_subj_".Length..];
+                if (int.TryParse(sIdxStr, out int subjIdx))
                 {
                     await adapter.RenderScreenAsync(chatId, messageId, await BuildSubjectTargetOptionsScreenAsync(userId, subjIdx));
                 }
                 break;
 
-            case { } s when s.StartsWith("cmd_calc_target:"):
-                var parts = s["cmd_calc_target:".Length..].Split(':');
+            case { } s when s.StartsWith("cmd_calc_target:") || s.StartsWith("calc_target_"):
+                string tStr = s.StartsWith("cmd_calc_target:") ? s["cmd_calc_target:".Length..] : s["calc_target_".Length..];
+                char delim = s.StartsWith("cmd_calc_target:") ? ':' : '_';
+                var parts = tStr.Split(delim);
                 if (parts.Length == 2 && int.TryParse(parts[0], out int sIdx) && int.TryParse(parts[1], out int targetG))
                 {
                     await adapter.RenderScreenAsync(chatId, messageId, await BuildTargetCalculationResultScreenAsync(userId, sIdx, targetG));
