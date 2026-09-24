@@ -35,7 +35,7 @@ public class DbTokenStore : ITokenStore
         {
             AccessToken = access,
             RefreshToken = refresh,
-            StudentId = user.StudentId ?? "",
+            StudentId = !string.IsNullOrEmpty(user.SelectedStudentId) ? user.SelectedStudentId : (user.StudentId ?? ""),
             Oid = user.Oid ?? "",
             SessionId = user.SessionId ?? "",
             DeviceId = user.DeviceId ?? ""

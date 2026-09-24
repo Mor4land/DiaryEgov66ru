@@ -4,11 +4,13 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
 using MirageDiary.Core;
 using MirageDiary.Core.Models;
 using MirageDiary.Server.Data;
+using MirageDiary.Server.Models;
 using MirageDiary.Server.Security;
 
 namespace MirageDiary.Server.Services;
@@ -507,10 +509,38 @@ public class DiaryInteractionService
         public string StatusEmoji { get; set; } = "⚪";
     }
 
-    public async Task<List<SubjectGradeSummary>> GetSubjectGradesSummaryAsync(string userId, bool forceRefresh = false)
+    public static int GetCurrentQuarter(DateTime? date = null)
     {
-        string marksKey = $"user_marks:{userId}";
-        if (!forceRefresh && _memoryCache.TryGetValue(marksKey, out List<SubjectGradeSummary>? cachedMarks) && cachedMarks != null)
+        var dt = date ?? DateTime.UtcNow.AddHours(5);
+        int m = dt.Month;
+        if (m is 9 or 10) return 1;
+        if (m is 11 or 12) return 2;
+        if (m is 1 or 2 or 3) return 3;
+        if (m is 4 or 5 or 6) return 4;
+        return 1;
+    }
+
+    public static int GetMarkQuarter(string? dateStr)
+    {
+        if (string.IsNullOrWhiteSpace(dateStr)) return 0;
+        if (DateTime.TryParse(dateStr.Trim(), out var dt))
+        {
+            int m = dt.Month;
+            if (m is 9 or 10) return 1;
+            if (m is 11 or 12) return 2;
+            if (m is 1 or 2 or 3) return 3;
+            if (m is 4 or 5 or 6) return 4;
+        }
+        return 0;
+    }
+
+    public async Task<List<SubjectGradeSummary>> GetSubjectGradesSummaryAsync(string userId, int? quarter = null, bool forceRefresh = false)
+    {
+        int currentQ = GetCurrentQuarter();
+        int targetQ = quarter ?? currentQ;
+        string memKey = $"user_marks:{userId}:q{targetQ}";
+
+        if (!forceRefresh && _memoryCache.TryGetValue(memKey, out List<SubjectGradeSummary>? cachedMarks) && cachedMarks != null)
         {
             _serviceProvider.GetService<ServerMetricsService>()?.RecordCacheHit();
             return cachedMarks;
@@ -523,26 +553,109 @@ public class DiaryInteractionService
 
         using var scope = _serviceProvider.CreateScope();
         var tokenStore = scope.ServiceProvider.GetRequiredService<ITokenStore>();
-        
+        var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
         var tokenData = await tokenStore.GetTokensAsync(userId);
         if (tokenData == null || string.IsNullOrEmpty(tokenData.AccessToken))
         {
             return new List<SubjectGradeSummary>();
         }
 
-        var httpClientFactory = scope.ServiceProvider.GetRequiredService<System.Net.Http.IHttpClientFactory>();
-        var client = httpClientFactory.CreateClient();
-        var clientWithUser = new DiaryClient(client, tokenStore, userId);
+        string studentId = !string.IsNullOrEmpty(tokenData.StudentId) ? tokenData.StudentId : userId;
+        string dbCacheKey = $"marks_db:{studentId}";
 
-        var marks = await clientWithUser.GetMarksAsync();
-        if (marks == null || marks.Count == 0)
+        List<GosuslugiMarkItem>? allMarks = null;
+
+        // 1. Быстрая загрузка из постоянного кэша БД
+        if (!forceRefresh)
+        {
+            var dbEntry = await dbContext.Cache.FirstOrDefaultAsync(c => c.CacheKey == dbCacheKey);
+            if (dbEntry != null && !string.IsNullOrEmpty(dbEntry.JsonData))
+            {
+                try
+                {
+                    allMarks = JsonSerializer.Deserialize<List<GosuslugiMarkItem>>(dbEntry.JsonData, DiaryClient.DatamartJsonOptions);
+                }
+                catch { }
+            }
+        }
+
+        // 2. Если в БД нет данных или запрошено принудительное обновление — идем в API Госуслуг
+        if (allMarks == null || forceRefresh)
+        {
+            var httpClientFactory = scope.ServiceProvider.GetRequiredService<System.Net.Http.IHttpClientFactory>();
+            var client = httpClientFactory.CreateClient();
+            var clientWithUser = new DiaryClient(client, tokenStore, userId);
+
+            try
+            {
+                var apiMarks = await clientWithUser.GetMarksAsync();
+                if (apiMarks != null)
+                {
+                    // Загружаем предыдущие оценки из БД для слияния (чтобы прошлые четверти не терялись при смещении 12-недельного окна)
+                    var existingDb = await dbContext.Cache.FirstOrDefaultAsync(c => c.CacheKey == dbCacheKey);
+                    var existingList = new List<GosuslugiMarkItem>();
+                    if (existingDb != null && !string.IsNullOrEmpty(existingDb.JsonData))
+                    {
+                        try
+                        {
+                            existingList = JsonSerializer.Deserialize<List<GosuslugiMarkItem>>(existingDb.JsonData, DiaryClient.DatamartJsonOptions) ?? new();
+                        }
+                        catch { }
+                    }
+
+                    var mergedDict = new Dictionary<string, GosuslugiMarkItem>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var m in existingList)
+                    {
+                        string k = !string.IsNullOrEmpty(m.Id) ? m.Id : $"{m.SubjectName}_{m.Date}_{m.Value}_{m.WorkKind}";
+                        mergedDict[k] = m;
+                    }
+                    foreach (var m in apiMarks)
+                    {
+                        string k = !string.IsNullOrEmpty(m.Id) ? m.Id : $"{m.SubjectName}_{m.Date}_{m.Value}_{m.WorkKind}";
+                        mergedDict[k] = m;
+                    }
+
+                    allMarks = mergedDict.Values.OrderByDescending(m => m.Date).ToList();
+
+                    string json = JsonSerializer.Serialize(allMarks, DiaryClient.DatamartJsonOptions);
+                    if (existingDb != null)
+                    {
+                        existingDb.JsonData = json;
+                        existingDb.UpdatedAt = DateTime.UtcNow;
+                    }
+                    else
+                    {
+                        dbContext.Cache.Add(new CachedData { CacheKey = dbCacheKey, JsonData = json, UpdatedAt = DateTime.UtcNow });
+                    }
+                    await dbContext.SaveChangesAsync();
+                }
+            }
+            catch (DiarySessionExpiredException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[DiaryInteractionService] ⚠️ Ошибка запроса оценок API: {ex.Message}");
+            }
+        }
+
+        allMarks ??= new List<GosuslugiMarkItem>();
+
+        // 3. Фильтрация по четвертям (если targetQ == 0, показываем за весь учебный год)
+        var marksForQuarter = (targetQ > 0)
+            ? allMarks.Where(m => GetMarkQuarter(m.Date) == targetQ).ToList()
+            : allMarks;
+
+        if (marksForQuarter.Count == 0)
         {
             var emptyList = new List<SubjectGradeSummary>();
-            _memoryCache.Set(marksKey, emptyList, new MemoryCacheEntryOptions { SlidingExpiration = TimeSpan.FromMinutes(2), Size = 1 });
+            _memoryCache.Set(memKey, emptyList, new MemoryCacheEntryOptions { SlidingExpiration = TimeSpan.FromMinutes(5), Size = 1 });
             return emptyList;
         }
 
-        var grouped = marks
+        var grouped = marksForQuarter
             .Where(m => !string.IsNullOrWhiteSpace(m.SubjectName))
             .GroupBy(m => m.SubjectName.Trim(), StringComparer.OrdinalIgnoreCase)
             .OrderBy(g => g.Key);
@@ -598,18 +711,25 @@ public class DiaryInteractionService
             result.Add(summary);
         }
 
-        _memoryCache.Set(marksKey, result, new MemoryCacheEntryOptions
+        _memoryCache.Set(memKey, result, new MemoryCacheEntryOptions
         {
-            SlidingExpiration = TimeSpan.FromMinutes(5),
-            AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(20),
+            SlidingExpiration = TimeSpan.FromMinutes(15),
+            AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(1),
             Size = 1
         });
         return result;
     }
 
-    public async Task<string> GetMarksStringAsync(string userId, bool forceRefresh = false)
+    public async Task<List<SubjectGradeSummary>> GetSubjectGradesSummaryAsync(string userId, bool forceRefresh)
     {
-        string marksStrKey = $"user_marks_str:{userId}";
+        return await GetSubjectGradesSummaryAsync(userId, quarter: null, forceRefresh);
+    }
+
+    public async Task<string> GetMarksStringAsync(string userId, int? quarter = null, bool forceRefresh = false)
+    {
+        int currentQ = GetCurrentQuarter();
+        int targetQ = quarter ?? currentQ;
+        string marksStrKey = $"user_marks_str:{userId}:q{targetQ}";
         try
         {
             if (!forceRefresh && _memoryCache.TryGetValue(marksStrKey, out string? cachedMarksStr) && !string.IsNullOrEmpty(cachedMarksStr))
@@ -622,11 +742,13 @@ public class DiaryInteractionService
                 return "⚠️ *Электронный дневник временно недоступен*\n\nШлюз Госуслуг / ФГИС «Моя Школа» проводит регламентные работы. Новые данные загрузятся автоматически после завершения работ.";
             }
 
-            var subjects = await GetSubjectGradesSummaryAsync(userId, forceRefresh);
+            var subjects = await GetSubjectGradesSummaryAsync(userId, targetQ, forceRefresh);
+            string quarterTitle = (targetQ > 0) ? $"{targetQ}-я четверть" : "Все четверти";
+
             if (subjects != null && subjects.Count > 0)
             {
                 var sb = new System.Text.StringBuilder();
-                sb.AppendLine("📊 *Ваши оценки и средний балл:*");
+                sb.AppendLine($"📊 *Ваши оценки и средний балл ({quarterTitle}):*");
                 sb.AppendLine();
 
                 int totalAllWeight = 0;
@@ -661,20 +783,21 @@ public class DiaryInteractionService
                 if (totalAllWeight > 0)
                 {
                     double overallGpa = Math.Round((double)totalAllSum / totalAllWeight, 2);
-                    sb.AppendLine($"🏆 *Общий средний балл:* `{overallGpa:F2}`");
+                    sb.AppendLine($"🏆 *Общий средний балл ({quarterTitle}):* `{overallGpa:F2}`");
                 }
 
                 string res = sb.ToString().TrimEnd();
                 _memoryCache.Set(marksStrKey, res, new MemoryCacheEntryOptions
                 {
-                    SlidingExpiration = TimeSpan.FromMinutes(5),
-                    AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(20),
+                    SlidingExpiration = TimeSpan.FromMinutes(10),
+                    AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(1),
                     Size = 1
                 });
                 return res;
             }
 
-            return "📊 Оценок в дневнике Госуслуг пока нет.";
+            string qText = (targetQ > 0) ? $"{targetQ}-ю четверть" : "выбранный период";
+            return $"📊 Оценок в дневнике Госуслуг за {qText} пока нет.";
         }
         catch (DiarySessionExpiredException ex)
         {
@@ -684,6 +807,11 @@ public class DiaryInteractionService
         {
             return $"Ошибка при получении оценок: {ex.Message}";
         }
+    }
+
+    public async Task<string> GetMarksStringAsync(string userId, bool forceRefresh)
+    {
+        return await GetMarksStringAsync(userId, quarter: null, forceRefresh);
     }
 
     public async Task<string> GetProfileStringAsync(string userId, bool forceRefresh = false)
@@ -792,15 +920,29 @@ public class DiaryInteractionService
             var students = await clientWithUser.GetStudentInfoAsync();
             if (students != null && students.Count > 0)
             {
-                var s = students[0];
-                string gender = s.StudentGender == "M" ? "👨 Мужской" : s.StudentGender == "F" ? "👩 Женский" : s.StudentGender;
-
-                profileCard += $"🎓 *Статус аккаунта*: {(s.Trusted ? "✅ Подтверждён ЕСИА" : "⚠️ Не подтверждён")}\n";
-                if (!string.IsNullOrEmpty(gender))
+                if (user?.Role == "Parent" || students.Count > 1 || !string.IsNullOrEmpty(user?.SelectedStudentId))
                 {
-                    profileCard += $"🚻 *Пол*: `{gender}`\n";
+                    var selectedChild = (!string.IsNullOrEmpty(user?.SelectedStudentId)
+                        ? students.FirstOrDefault(c => c.StudentId == user.SelectedStudentId)
+                        : null) ?? students[0];
+
+                    string childName = $"{selectedChild.StudentLastName} {selectedChild.StudentFirstName}".Trim();
+                    profileCard += "👨‍👧 *Родительский профиль*\n";
+                    profileCard += $"👶 *Выбранный ребёнок*: `{TelegramMarkdownEscaper.Escape(childName)}`\n";
+                    profileCard += $"🎓 *Статус ЕСИА*: {(selectedChild.Trusted ? "✅ Подтверждён" : "⚠️ Не подтверждён")}\n\n";
                 }
-                profileCard += "\n";
+                else
+                {
+                    var s = students[0];
+                    string gender = s.StudentGender == "M" ? "👨 Мужской" : s.StudentGender == "F" ? "👩 Женский" : s.StudentGender;
+
+                    profileCard += $"🎓 *Статус аккаунта*: {(s.Trusted ? "✅ Подтверждён ЕСИА" : "⚠️ Не подтверждён")}\n";
+                    if (!string.IsNullOrEmpty(gender))
+                    {
+                        profileCard += $"🚻 *Пол*: `{gender}`\n";
+                    }
+                    profileCard += "\n";
+                }
             }
         }
         catch (Exception ex)
@@ -815,8 +957,9 @@ public class DiaryInteractionService
         }
 
         string platformName = userId.StartsWith("max_") ? "MAX" : "Telegram";
+        string roleDisplay = user?.Role == "Parent" ? "Родитель 👨‍👧" : (user?.Role ?? "Student");
         profileCard += "⚙️ *Данные в MirageDiary:*\n";
-        profileCard += $"🎭 *Роль*: `{user?.Role ?? "Student"}`\n";
+        profileCard += $"🎭 *Роль*: `{roleDisplay}`\n";
         if (!string.IsNullOrWhiteSpace(displayOrg))
         {
             profileCard += $"🏫 *Школа*: `{displayOrg}`\n";
@@ -943,6 +1086,14 @@ public class DiaryInteractionService
             }
         }
         catch { }
+
+        // Invalidate cached views for this user
+        _memoryCache.Remove($"user_profile:{userId}");
+        _memoryCache.Remove($"user_marks:{userId}");
+        for (int q = 0; q <= 4; q++)
+        {
+            _memoryCache.Remove($"user_marks_str:{userId}:q{q}");
+        }
 
         return true;
     }

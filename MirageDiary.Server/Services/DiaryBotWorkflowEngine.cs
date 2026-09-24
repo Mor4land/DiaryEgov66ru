@@ -152,6 +152,14 @@ public class DiaryBotWorkflowEngine
             BotButton.Callback("⚙️ Настройки", "cmd_settings")
         });
 
+        if (role == "Parent" || !string.IsNullOrEmpty(user?.SelectedStudentId))
+        {
+            buttons.Add(new List<BotButton>
+            {
+                BotButton.Callback("👨‍👧 Дети", "cmd_children_menu")
+            });
+        }
+
         if (role == "Admin")
         {
             buttons.Add(new List<BotButton>
@@ -180,10 +188,22 @@ public class DiaryBotWorkflowEngine
             string safeOrg = !string.IsNullOrEmpty(user?.OrgName) ? TelegramMarkdownEscaper.Escape(user.OrgName) : "Mirage Diary";
             header = $"🏫 *Завуч* • {safeOrg}";
         }
+        else if (role == "Parent" || !string.IsNullOrEmpty(user?.SelectedStudentId))
+        {
+            string safeClass = !string.IsNullOrEmpty(user?.ClassName) ? TelegramMarkdownEscaper.Escape(user.ClassName) : "";
+            string safeOrg = !string.IsNullOrEmpty(user?.OrgName) ? TelegramMarkdownEscaper.Escape(user.OrgName) : "";
+
+            if (!string.IsNullOrEmpty(safeClass) && !string.IsNullOrEmpty(safeOrg))
+                header = $"👨‍👧 *Родитель ({safeClass})* • {safeOrg}";
+            else if (!string.IsNullOrEmpty(safeClass))
+                header = $"👨‍👧 *Родитель ({safeClass})* • Mirage Diary";
+            else
+                header = "👨‍👧 *Родитель* • Mirage Diary";
+        }
         else if (isAuthorized)
         {
-            string safeClass = !string.IsNullOrEmpty(user.ClassName) ? TelegramMarkdownEscaper.Escape(user.ClassName) : "";
-            string safeOrg = !string.IsNullOrEmpty(user.OrgName) ? TelegramMarkdownEscaper.Escape(user.OrgName) : "";
+            string safeClass = !string.IsNullOrEmpty(user?.ClassName) ? TelegramMarkdownEscaper.Escape(user.ClassName) : "";
+            string safeOrg = !string.IsNullOrEmpty(user?.OrgName) ? TelegramMarkdownEscaper.Escape(user.OrgName) : "";
 
             if (!string.IsNullOrEmpty(safeClass) && !string.IsNullOrEmpty(safeOrg))
                 header = $"🎓 *{safeClass}* • {safeOrg}";
@@ -633,15 +653,28 @@ public class DiaryBotWorkflowEngine
     }
 
     // ─── Оценки и средний балл ────────────────────────────────────────────────
-    public async Task<BotScreen> BuildMarksScreenAsync(string userId, bool forceRefresh = false)
+    public async Task<BotScreen> BuildMarksScreenAsync(string userId, int? quarter = null, bool forceRefresh = false)
     {
-        var marksText = await _diaryService.GetMarksStringAsync(userId, forceRefresh);
+        int currentQ = DiaryInteractionService.GetCurrentQuarter();
+        int activeQ = quarter ?? currentQ;
+        var marksText = await _diaryService.GetMarksStringAsync(userId, activeQ, forceRefresh);
+
+        var quarterRow = new List<BotButton>();
+        for (int q = 1; q <= 4; q++)
+        {
+            string label = (q == activeQ) ? $"• {q} четв •" : $"{q} четв";
+            quarterRow.Add(BotButton.Callback(label, $"cmd_marks_q:{q}"));
+        }
+        string allLabel = (activeQ == 0) ? "• Все •" : "Все";
+        quarterRow.Add(BotButton.Callback(allLabel, "cmd_marks_q:0"));
+
         var buttons = new List<List<BotButton>>
         {
+            quarterRow,
             new()
             {
                 BotButton.Callback("🎯 Калькулятор оценок", "cmd_calc"),
-                BotButton.Callback("🔄 Обновить", "marks_refresh")
+                BotButton.Callback("🔄 Обновить", $"cmd_marks_refresh:{activeQ}")
             },
             new()
             {
@@ -650,6 +683,11 @@ public class DiaryBotWorkflowEngine
         };
 
         return BotScreen.Create(marksText, "banner_marks.png").WithButtons(buttons);
+    }
+
+    public async Task<BotScreen> BuildMarksScreenAsync(string userId, bool forceRefresh)
+    {
+        return await BuildMarksScreenAsync(userId, quarter: null, forceRefresh);
     }
 
     // ─── Калькулятор оценок ───────────────────────────────────────────────────
@@ -856,7 +894,7 @@ public class DiaryBotWorkflowEngine
         var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId);
 
         var buttons = new List<List<BotButton>>();
-        if (user?.Role == "Parent")
+        if (user?.Role == "Parent" || !string.IsNullOrEmpty(user?.SelectedStudentId))
         {
             buttons.Add(new List<BotButton> { BotButton.Callback("👨‍👧 Выбрать ребенка", "cmd_children_menu") });
         }
@@ -922,6 +960,7 @@ public class DiaryBotWorkflowEngine
             return BotScreen.Create(text, "banner_profile.png").WithButtons(buttons);
         }
 
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId);
         var screenText = "👨‍👧 *Выберите ребенка для просмотра дневника:*";
         var screenButtons = new List<List<BotButton>>();
 
@@ -929,10 +968,16 @@ public class DiaryBotWorkflowEngine
         {
             string name = $"{c.StudentLastName} {c.StudentFirstName}".Trim();
             if (string.IsNullOrEmpty(name)) name = "Ученик";
-            screenButtons.Add(new List<BotButton> { BotButton.Callback($"👶 {name}", $"select_child_{c.StudentId}") });
+            bool isCurrent = !string.IsNullOrEmpty(user?.SelectedStudentId) && user.SelectedStudentId == c.StudentId;
+            string label = isCurrent ? $"✅ {name} (выбран)" : $"👶 {name}";
+            screenButtons.Add(new List<BotButton> { BotButton.Callback(label, $"cmd_select_child:{c.StudentId}") });
         }
 
-        screenButtons.Add(new List<BotButton> { BotButton.Callback("👤 Профиль", "cmd_profile") });
+        screenButtons.Add(new List<BotButton>
+        {
+            BotButton.Callback("👤 Профиль", "cmd_profile"),
+            BotButton.Callback("🏠 Главное меню", "cmd_back_main")
+        });
         return BotScreen.Create(screenText, "banner_profile.png").WithButtons(screenButtons);
     }
 
@@ -940,7 +985,7 @@ public class DiaryBotWorkflowEngine
     {
         bool ok = await _diaryService.SelectChildAsync(userId, studentId);
         var screen = await BuildProfileScreenAsync(userId, forceRefresh: true);
-        return BotCallbackResult.Ok(screen, ok ? "Ребенок выбран" : "Ошибка выбора");
+        return BotCallbackResult.Ok(screen, ok ? "Ребёнок успешно выбран!" : "Ошибка выбора ребёнка");
     }
 
     // ─── До звонка ────────────────────────────────────────────────────────────
@@ -1462,7 +1507,7 @@ public class DiaryBotWorkflowEngine
         string callbackId,
         string data)
     {
-        if (data != "cmd_profile_refresh" && !data.StartsWith("cmd_select_child:"))
+        if (data != "cmd_profile_refresh" && !data.StartsWith("cmd_select_child:") && !data.StartsWith("select_child_"))
         {
             await adapter.AnswerCallbackAsync(callbackId);
         }
@@ -1560,8 +1605,27 @@ public class DiaryBotWorkflowEngine
                 break;
 
             // ── Оценки и калькулятор ──
+            case { } s when s.StartsWith("cmd_marks_refresh:"):
+                var qRefStr = s["cmd_marks_refresh:".Length..];
+                int? qRef = int.TryParse(qRefStr, out int qr) ? qr : null;
+                await adapter.RenderScreenAsync(chatId, messageId, await BuildMarksScreenAsync(userId, qRef, forceRefresh: true));
+                break;
+
             case "cmd_marks_refresh":
-                await adapter.RenderScreenAsync(chatId, messageId, await BuildMarksScreenAsync(userId, forceRefresh: true));
+            case "marks_refresh":
+                await adapter.RenderScreenAsync(chatId, messageId, await BuildMarksScreenAsync(userId, quarter: null, forceRefresh: true));
+                break;
+
+            case { } s when s.StartsWith("cmd_marks_q:"):
+                var qSelStr = s["cmd_marks_q:".Length..];
+                int? qSel = int.TryParse(qSelStr, out int qs) ? qs : null;
+                await adapter.RenderScreenAsync(chatId, messageId, await BuildMarksScreenAsync(userId, qSel));
+                break;
+
+            case { } s when s.StartsWith("cmd_marks:"):
+                var qStr = s["cmd_marks:".Length..];
+                int? qVal = int.TryParse(qStr, out int qv) ? qv : null;
+                await adapter.RenderScreenAsync(chatId, messageId, await BuildMarksScreenAsync(userId, qVal));
                 break;
 
             case "cmd_marks":
@@ -1613,14 +1677,22 @@ public class DiaryBotWorkflowEngine
                 break;
 
             case "cmd_children":
+            case "cmd_children_menu":
                 await adapter.RenderScreenAsync(chatId, messageId, await BuildChildrenMenuScreenAsync(userId));
                 break;
 
             case { } s when s.StartsWith("cmd_select_child:"):
                 var childId = s["cmd_select_child:".Length..];
                 var selRes = await SelectChildAsync(userId, childId);
-                await adapter.AnswerCallbackAsync(callbackId, selRes.AlertText ?? "✅ Ребенок выбран!");
-                await adapter.RenderScreenAsync(chatId, messageId, await BuildProfileScreenAsync(userId));
+                await adapter.AnswerCallbackAsync(callbackId, selRes.AlertText ?? "✅ Ребенок выбран!", showAlert: false);
+                await adapter.RenderScreenAsync(chatId, messageId, selRes.Screen);
+                break;
+
+            case { } s when s.StartsWith("select_child_"):
+                var scId = s["select_child_".Length..];
+                var scRes = await SelectChildAsync(userId, scId);
+                await adapter.AnswerCallbackAsync(callbackId, scRes.AlertText ?? "✅ Ребенок выбран!", showAlert: false);
+                await adapter.RenderScreenAsync(chatId, messageId, scRes.Screen);
                 break;
 
             // ── Авторизация и аккаунт ──

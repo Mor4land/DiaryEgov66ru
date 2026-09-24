@@ -18,13 +18,14 @@ public class DiaryClient
 
     private const string GosuslugiBaseUrl = "https://www.gosuslugi.ru/api/myschool/";
 
-    private static readonly JsonSerializerOptions DatamartJsonOptions = CreateDatamartJsonOptions();
+    public static readonly JsonSerializerOptions DatamartJsonOptions = CreateDatamartJsonOptions();
 
     private static JsonSerializerOptions CreateDatamartJsonOptions()
     {
         var options = new JsonSerializerOptions
         {
-            PropertyNameCaseInsensitive = true
+            PropertyNameCaseInsensitive = true,
+            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
         };
         options.Converters.Add(new FlexibleBoolConverter());
         options.Converters.Add(new FlexibleStringConverter());
