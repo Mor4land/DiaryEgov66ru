@@ -169,6 +169,20 @@ public class GradeWatcherWorker : BackgroundService
                 string studentId = !string.IsNullOrEmpty(tokenData.StudentId) ? tokenData.StudentId : user.Id;
                 string dbCacheKey = $"marks_db:{studentId}";
                 var existingDb = await db.Cache.FirstOrDefaultAsync(c => c.CacheKey == dbCacheKey, stoppingToken);
+
+                List<GosuslugiMarkItem>? previousMarks = null;
+                if (existingDb != null && !string.IsNullOrEmpty(existingDb.JsonData))
+                {
+                    try
+                    {
+                        previousMarks = JsonSerializer.Deserialize<List<GosuslugiMarkItem>>(existingDb.JsonData, DiaryClient.DatamartJsonOptions);
+                    }
+                    catch (Exception pex)
+                    {
+                        _logger.LogDebug($"[GradeWatcher] Ошибка десериализации предыдущих оценок: {pex.Message}");
+                    }
+                }
+
                 string marksJson = JsonSerializer.Serialize(marks, DiaryClient.DatamartJsonOptions);
                 if (existingDb != null)
                 {
@@ -192,8 +206,8 @@ public class GradeWatcherWorker : BackgroundService
 
                 string currentHash = ComputeMarksHash(marks);
 
-                // Если это первый запуск для пользователя — сохраняем базовый хэш
-                if (string.IsNullOrEmpty(user.LastMarksHash))
+                // Если это первый запуск для пользователя (или кэш ещё не был инициализирован) — сохраняем базовый хэш без спама
+                if (string.IsNullOrEmpty(user.LastMarksHash) || previousMarks == null || previousMarks.Count == 0)
                 {
                     user.LastMarksHash = currentHash;
                     await db.SaveChangesAsync(stoppingToken);
@@ -205,70 +219,97 @@ public class GradeWatcherWorker : BackgroundService
                 {
                     _logger.LogInformation($"[GradeWatcher] 🔥 Обнаружено изменение оценок для пользователя {user.Id}!");
 
-                    // Ищем свежие оценки (выставленные за сегодня или последние добавленные)
+                    // Сравниваем оценки с предыдущим срезом по ключу
+                    var prevKeys = new HashSet<string>(previousMarks.Select(GetMarkKey));
                     var freshMarks = marks
+                        .Where(m => !prevKeys.Contains(GetMarkKey(m)))
                         .OrderByDescending(m => m.Date)
-                        .Take(3)
                         .ToList();
 
-                    var sb = new StringBuilder();
-                    sb.AppendLine("🔥 *Новая оценка в электронном журнале!*");
-                    sb.AppendLine();
-
-                    foreach (var m in freshMarks)
+                    // Если нет совершенно новых оценок, проверяем, не исправил ли учитель оценку по существующему ID
+                    if (freshMarks.Count == 0)
                     {
-                        string markDisplay = !string.IsNullOrEmpty(m.Value) ? m.Value : "—";
-                        string lessonName = !string.IsNullOrEmpty(m.SubjectName) ? TelegramMarkdownEscaper.Escape(m.SubjectName) : "Урок";
-                        
-                        string workKindStr = !string.IsNullOrEmpty(m.WorkKind) ? TelegramMarkdownEscaper.Escape(m.WorkKind) : "";
-                        string commentStr = !string.IsNullOrEmpty(m.Comment) ? TelegramMarkdownEscaper.Escape(m.Comment) : "";
-                        string reason = "";
-                        if (!string.IsNullOrEmpty(workKindStr) && !string.IsNullOrEmpty(commentStr))
-                            reason = $" ({workKindStr}, {commentStr})";
-                        else if (!string.IsNullOrEmpty(workKindStr))
-                            reason = $" ({workKindStr})";
-                        else if (!string.IsNullOrEmpty(commentStr))
-                            reason = $" ({commentStr})";
+                        var prevById = previousMarks
+                            .Where(m => !string.IsNullOrEmpty(m.Id))
+                            .GroupBy(m => m.Id!)
+                            .ToDictionary(g => g.Key, g => g.First());
 
-                        string weight = (m.Weight.HasValue && m.Weight.Value > 1) ? $" [вес: {m.Weight.Value}]" : "";
-
-                        sb.AppendLine($"📚 *{lessonName}*");
-                        sb.AppendLine($"⭐️ Оценка: *{TelegramMarkdownEscaper.Escape(markDisplay)}*{reason}{weight}");
-                        if (!string.IsNullOrEmpty(m.Date))
-                            sb.AppendLine($"📅 Дата: {TelegramMarkdownEscaper.Escape(m.Date)}");
-                        sb.AppendLine();
+                        freshMarks = marks
+                            .Where(m => !string.IsNullOrEmpty(m.Id) && prevById.TryGetValue(m.Id!, out var prev) && prev.Value != m.Value)
+                            .OrderByDescending(m => m.Date)
+                            .ToList();
                     }
 
-                    sb.AppendLine("💡 _Проверь подробности и средний балл командой /marks_");
-
-                    try
+                    // Если реальных новых или исправленных оценок нет (например, изменился только формат хэша при деплое),
+                    // ложное уведомление НЕ отправляется, а хэш тихо актуализируется в БД.
+                    if (freshMarks.Count > 0)
                     {
-                        if (user.Id.StartsWith("max_"))
+                        var marksToSend = freshMarks.Take(5).ToList();
+                        var sb = new StringBuilder();
+                        sb.AppendLine(marksToSend.Count == 1
+                            ? "🔥 *Новая оценка в электронном журнале!*"
+                            : "🔥 *Новые оценки в электронном журнале!*");
+                        sb.AppendLine();
+
+                        foreach (var m in marksToSend)
                         {
-                            if (long.TryParse(user.Id.Replace("max_", ""), out long maxUserId) && maxBotClient != null)
+                            string markDisplay = !string.IsNullOrEmpty(m.Value) ? m.Value : "—";
+                            string lessonName = !string.IsNullOrEmpty(m.SubjectName) ? TelegramMarkdownEscaper.Escape(m.SubjectName) : "Урок";
+                            
+                            string workKindStr = !string.IsNullOrEmpty(m.WorkKind) ? TelegramMarkdownEscaper.Escape(m.WorkKind) : "";
+                            string commentStr = !string.IsNullOrEmpty(m.Comment) ? TelegramMarkdownEscaper.Escape(m.Comment) : "";
+                            string reason = "";
+                            if (!string.IsNullOrEmpty(workKindStr) && !string.IsNullOrEmpty(commentStr))
+                                reason = $" ({workKindStr}, {commentStr})";
+                            else if (!string.IsNullOrEmpty(workKindStr))
+                                reason = $" ({workKindStr})";
+                            else if (!string.IsNullOrEmpty(commentStr))
+                                reason = $" ({commentStr})";
+
+                            string weight = (m.Weight.HasValue && m.Weight.Value > 1) ? $" [вес: {m.Weight.Value}]" : "";
+
+                            sb.AppendLine($"📚 *{lessonName}*");
+                            sb.AppendLine($"⭐️ Оценка: *{TelegramMarkdownEscaper.Escape(markDisplay)}*{reason}{weight}");
+                            if (!string.IsNullOrEmpty(m.Date))
+                                sb.AppendLine($"📅 Дата: {TelegramMarkdownEscaper.Escape(m.Date)}");
+                            sb.AppendLine();
+                        }
+
+                        sb.AppendLine("💡 _Проверь подробности и средний балл командой /marks_");
+
+                        try
+                        {
+                            if (user.Id.StartsWith("max_"))
                             {
-                                await maxBotClient.SendMessageAsync(new SendMessageRequest
+                                if (long.TryParse(user.Id.Replace("max_", ""), out long maxUserId) && maxBotClient != null)
                                 {
-                                    UserId = maxUserId,
-                                    Text = sb.ToString(),
-                                    Format = MessageFormat.Markdown
-                                });
-                                _logger.LogInformation($"[GradeWatcher] ✅ Пуш об оценке успешно доставлен MAX пользователю {user.Id}.");
+                                    await maxBotClient.SendMessageAsync(new SendMessageRequest
+                                    {
+                                        UserId = maxUserId,
+                                        Text = sb.ToString(),
+                                        Format = MessageFormat.Markdown
+                                    });
+                                    _logger.LogInformation($"[GradeWatcher] ✅ Пуш об оценке успешно доставлен MAX пользователю {user.Id}.");
+                                }
+                            }
+                            else if (botClient != null)
+                            {
+                                await botClient.SendMessage(
+                                    chatId: user.Id,
+                                    text: sb.ToString(),
+                                    parseMode: ParseMode.Markdown,
+                                    cancellationToken: stoppingToken);
+                                _logger.LogInformation($"[GradeWatcher] ✅ Пуш об оценке успешно доставлен TG пользователю {user.Id}.");
                             }
                         }
-                        else if (botClient != null)
+                        catch (Exception tex)
                         {
-                            await botClient.SendMessage(
-                                chatId: user.Id,
-                                text: sb.ToString(),
-                                parseMode: ParseMode.Markdown,
-                                cancellationToken: stoppingToken);
-                            _logger.LogInformation($"[GradeWatcher] ✅ Пуш об оценке успешно доставлен TG пользователю {user.Id}.");
+                            _logger.LogWarning($"[GradeWatcher] Не удалось отправить пуш пользователю {user.Id}: {tex.Message}");
                         }
                     }
-                    catch (Exception tex)
+                    else
                     {
-                        _logger.LogWarning($"[GradeWatcher] Не удалось отправить пуш пользователю {user.Id}: {tex.Message}");
+                        _logger.LogInformation($"[GradeWatcher] Хэш изменился для {user.Id}, но новых оценок в сравнении с кэшем нет. Ложное срабатывание предотвращено.");
                     }
 
                     user.LastMarksHash = currentHash;
@@ -289,7 +330,7 @@ public class GradeWatcherWorker : BackgroundService
         }
     }
 
-    private static string ComputeMarksHash(IEnumerable<GosuslugiMarkItem> marks)
+    public static string ComputeMarksHash(IEnumerable<GosuslugiMarkItem> marks)
     {
         var ordered = marks
             .OrderBy(m => m.SubjectName)
@@ -306,5 +347,12 @@ public class GradeWatcherWorker : BackgroundService
         using var sha = SHA256.Create();
         var bytes = sha.ComputeHash(Encoding.UTF8.GetBytes(sb.ToString()));
         return Convert.ToHexString(bytes);
+    }
+
+    public static string GetMarkKey(GosuslugiMarkItem m)
+    {
+        if (!string.IsNullOrEmpty(m.Id))
+            return m.Id;
+        return $"{m.SubjectName}_{m.Date}_{m.Value}_{m.Weight}_{m.WorkKind}";
     }
 }
