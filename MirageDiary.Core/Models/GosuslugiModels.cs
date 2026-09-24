@@ -127,7 +127,43 @@ public class GosuslugiLessonItem
 
     [JsonPropertyName("theme")]
     [JsonConverter(typeof(FlexibleStringConverter))]
-    public string Theme { get; set; } = string.Empty;
+    public string RawTheme { get; set; } = string.Empty;
+
+    [JsonPropertyName("lesson_theme")]
+    [JsonConverter(typeof(FlexibleStringConverter))]
+    public string LessonTheme { get; set; } = string.Empty;
+
+    [JsonPropertyName("topic")]
+    [JsonConverter(typeof(FlexibleStringConverter))]
+    public string Topic { get; set; } = string.Empty;
+
+    [JsonPropertyName("subject_theme")]
+    [JsonConverter(typeof(FlexibleStringConverter))]
+    public string SubjectTheme { get; set; } = string.Empty;
+
+    [JsonPropertyName("plan_theme")]
+    [JsonConverter(typeof(FlexibleStringConverter))]
+    public string PlanTheme { get; set; } = string.Empty;
+
+    [JsonPropertyName("theme_name")]
+    [JsonConverter(typeof(FlexibleStringConverter))]
+    public string ThemeName { get; set; } = string.Empty;
+
+    [JsonIgnore]
+    public string Theme
+    {
+        get
+        {
+            if (!string.IsNullOrWhiteSpace(RawTheme)) return RawTheme;
+            if (!string.IsNullOrWhiteSpace(LessonTheme)) return LessonTheme;
+            if (!string.IsNullOrWhiteSpace(Topic)) return Topic;
+            if (!string.IsNullOrWhiteSpace(SubjectTheme)) return SubjectTheme;
+            if (!string.IsNullOrWhiteSpace(PlanTheme)) return PlanTheme;
+            if (!string.IsNullOrWhiteSpace(ThemeName)) return ThemeName;
+            return string.Empty;
+        }
+        set => RawTheme = value;
+    }
 
     [JsonPropertyName("lesson_name")]
     [JsonConverter(typeof(FlexibleStringConverter))]
@@ -135,7 +171,36 @@ public class GosuslugiLessonItem
 
     [JsonPropertyName("lesson_type")]
     [JsonConverter(typeof(FlexibleStringConverter))]
-    public string LessonType { get; set; } = string.Empty;
+    public string RawLessonType { get; set; } = string.Empty;
+
+    [JsonPropertyName("type_value")]
+    [JsonConverter(typeof(FlexibleStringConverter))]
+    public string TypeValue { get; set; } = string.Empty;
+
+    [JsonIgnore]
+    public string LessonType
+    {
+        get
+        {
+            if (!string.IsNullOrWhiteSpace(RawLessonType)) return RawLessonType;
+            if (!string.IsNullOrWhiteSpace(TypeValue)) return TypeValue;
+            return string.Empty;
+        }
+        set => RawLessonType = value;
+    }
+
+    [JsonPropertyName("active")]
+    [JsonConverter(typeof(FlexibleBoolConverter))]
+    public bool? Active { get; set; }
+
+    [JsonIgnore]
+    public bool IsCancelled => Active.HasValue && !Active.Value;
+
+    [JsonPropertyName("old_data")]
+    public System.Text.Json.JsonElement? OldData { get; set; }
+
+    [JsonIgnore]
+    public bool IsReplacement => OldData.HasValue && OldData.Value.ValueKind != System.Text.Json.JsonValueKind.Null && OldData.Value.ValueKind != System.Text.Json.JsonValueKind.Undefined;
 
     [JsonPropertyName("room")]
     [JsonConverter(typeof(FlexibleStringConverter))]

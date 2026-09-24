@@ -461,7 +461,7 @@ public class DiaryInteractionService
         });
     }
 
-    private static string FormatSchedule(List<GosuslugiLessonItem> lessons, string displayDate)
+    public static string FormatSchedule(List<GosuslugiLessonItem> lessons, string displayDate)
     {
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"📅 *Расписание на {displayDate}:*");
@@ -480,12 +480,18 @@ public class DiaryInteractionService
 
             string room = !string.IsNullOrEmpty(l.Room) ? $" • каб. {TelegramMarkdownEscaper.Escape(l.Room)}" : "";
             string distant = l.IsDistant ? " 🌐 Дистант" : "";
+            string status = l.IsCancelled ? " ❌ *(Отменен)*" : (l.IsReplacement ? " 🔄 *(Замена)*" : "");
 
-            sb.AppendLine($"{num}. *{subject}*{time}{room}{distant}");
+            sb.AppendLine($"{num}. *{subject}*{time}{room}{distant}{status}");
+
+            if (!string.IsNullOrWhiteSpace(l.LessonType) && !l.LessonType.Equals("Урок", StringComparison.OrdinalIgnoreCase))
+            {
+                sb.AppendLine($"   🏷️ *Вид:* {TelegramMarkdownEscaper.Escape(l.LessonType.Trim())}");
+            }
 
             if (!string.IsNullOrWhiteSpace(l.Theme))
             {
-                sb.AppendLine($"   📖 _{TelegramMarkdownEscaper.Escape(l.Theme.Trim())}_");
+                sb.AppendLine($"   📖 *Тема:* _{TelegramMarkdownEscaper.Escape(l.Theme.Trim())}_");
             }
 
             if (!string.IsNullOrWhiteSpace(l.TeacherName))
