@@ -122,7 +122,7 @@ public class DiaryBotWorkflowEngine
         {
             if (platform == "telegram")
             {
-                buttons.Add(new List<BotButton> { BotButton.Link("🔐 Войти через Госуслуги", webAppUrl) });
+                buttons.Add(new List<BotButton> { BotButton.WebApp("🔐 Войти через Госуслуги", webAppUrl) });
             }
             else
             {
@@ -653,7 +653,7 @@ public class DiaryBotWorkflowEngine
     }
 
     // ─── Оценки и средний балл ────────────────────────────────────────────────
-    public async Task<BotScreen> BuildMarksScreenAsync(string userId, int? quarter = null, bool forceRefresh = false)
+    public async Task<BotScreen> BuildMarksScreenAsync(string userId, int? quarter = null, bool forceRefresh = false, string platform = "telegram")
     {
         int currentQ = DiaryInteractionService.GetCurrentQuarter();
         int activeQ = quarter ?? currentQ;
@@ -682,6 +682,18 @@ public class DiaryBotWorkflowEngine
             }
         };
 
+        if (marksText.StartsWith("🔒") || marksText.StartsWith("❌"))
+        {
+            var webAppUrl = _config["MiniAppUrl"] ?? "https://miragediary.space";
+            if (platform == "telegram")
+                buttons.Insert(0, new List<BotButton> { BotButton.WebApp("🔐 Войти через Госуслуги", webAppUrl) });
+            else
+            {
+                var maxBotApp = _config["MaxBot:Username"] ?? _config["MaxBotUsername"] ?? "se13960436_bot";
+                buttons.Insert(0, new List<BotButton> { BotButton.MaxApp("🔐 Войти через Госуслуги", maxBotApp, userId) });
+            }
+        }
+
         return BotScreen.Create(marksText, "banner_marks.png").WithButtons(buttons);
     }
 
@@ -691,13 +703,64 @@ public class DiaryBotWorkflowEngine
     }
 
     // ─── Калькулятор оценок ───────────────────────────────────────────────────
-    public async Task<BotScreen> BuildGradeCalculatorSubjectsScreenAsync(string userId, bool forceRefresh = false)
+    public async Task<BotScreen> BuildGradeCalculatorSubjectsScreenAsync(string userId, bool forceRefresh = false, string platform = "telegram")
     {
-        var subjects = await _diaryService.GetSubjectGradesSummaryAsync(userId, forceRefresh);
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId);
+        var isAuthorized = user != null && !string.IsNullOrEmpty(user.AccessToken);
+        var webAppUrl = _config["MiniAppUrl"] ?? "https://miragediary.space";
+
+        if (!isAuthorized)
+        {
+            var authButtons = new List<List<BotButton>>();
+            if (platform == "telegram")
+                authButtons.Add(new List<BotButton> { BotButton.WebApp("🔐 Войти через Госуслуги", webAppUrl) });
+            else
+            {
+                var maxBotApp = _config["MaxBot:Username"] ?? _config["MaxBotUsername"] ?? "se13960436_bot";
+                authButtons.Add(new List<BotButton> { BotButton.MaxApp("🔐 Войти через Госуслуги", maxBotApp, userId) });
+            }
+            authButtons.Add(new List<BotButton> { BotButton.Callback("🏠 Главное меню", "cmd_back_main") });
+            return BotScreen.Create("🎯 *Калькулятор оценок*\n\n🔒 Для расчета оценок необходимо войти в аккаунт Госуслуг.", "banner_marks.png").WithButtons(authButtons);
+        }
+
+        List<DiaryInteractionService.SubjectGradeSummary>? subjects = null;
+        try
+        {
+            subjects = await _diaryService.GetSubjectGradesSummaryAsync(userId, forceRefresh);
+        }
+        catch (DiarySessionExpiredException ex)
+        {
+            var expiredButtons = new List<List<BotButton>>();
+            if (platform == "telegram")
+                expiredButtons.Add(new List<BotButton> { BotButton.WebApp("🔐 Войти заново", webAppUrl) });
+            else
+            {
+                var maxBotApp = _config["MaxBot:Username"] ?? _config["MaxBotUsername"] ?? "se13960436_bot";
+                expiredButtons.Add(new List<BotButton> { BotButton.MaxApp("🔐 Войти заново", maxBotApp, userId) });
+            }
+            expiredButtons.Add(new List<BotButton> { BotButton.Callback("🏠 Главное меню", "cmd_back_main") });
+            return BotScreen.Create($"🎯 *Калькулятор оценок*\n\n🔒 {TelegramMarkdownEscaper.Escape(ex.Message)}", "banner_marks.png").WithButtons(expiredButtons);
+        }
+        catch (Exception ex)
+        {
+            var errButtons = new List<List<BotButton>>
+            {
+                new() { BotButton.Callback("🔄 Попробовать снова", "cmd_calc_refresh") },
+                new() { BotButton.Callback("🏠 Главное меню", "cmd_back_main") }
+            };
+            return BotScreen.Create($"🎯 *Калькулятор оценок*\n\n⚠️ Не удалось загрузить оценки из дневника: {TelegramMarkdownEscaper.Escape(ex.Message)}", "banner_marks.png").WithButtons(errButtons);
+        }
+
         if (subjects == null || subjects.Count == 0)
         {
-            var emptyText = "🎯 *Калькулятор оценок*\n\nВ дневнике пока нет предметов с оценками.";
-            var emptyButtons = new List<List<BotButton>> { new() { BotButton.Callback("🏠 Меню", "cmd_back_main") } };
+            var emptyText = "🎯 *Калькулятор оценок*\n\n" +
+                            "В электронном журнале пока нет выставленных оценок.\n\n" +
+                            "💡 _Как только учителя выставят первые оценки в четверти, здесь появятся ваши предметы для расчета необходимого числа пятерок и четверок._";
+            var emptyButtons = new List<List<BotButton>>
+            {
+                new() { BotButton.Callback("🔄 Обновить данные", "cmd_calc_refresh") },
+                new() { BotButton.Callback("🏠 Главное меню", "cmd_back_main") }
+            };
             return BotScreen.Create(emptyText, "banner_marks.png").WithButtons(emptyButtons);
         }
 
@@ -718,16 +781,29 @@ public class DiaryBotWorkflowEngine
             buttons.Add(row);
         }
 
-        buttons.Add(new List<BotButton> { BotButton.Callback("🏠 Меню", "cmd_back_main") });
+        buttons.Add(new List<BotButton>
+        {
+            BotButton.Callback("🔄 Обновить", "cmd_calc_refresh"),
+            BotButton.Callback("🏠 Главное меню", "cmd_back_main")
+        });
         return BotScreen.Create(text, "banner_marks.png").WithButtons(buttons);
     }
 
-    public async Task<BotScreen> BuildSubjectTargetOptionsScreenAsync(string userId, int subjectIndex)
+    public async Task<BotScreen> BuildSubjectTargetOptionsScreenAsync(string userId, int subjectIndex, string platform = "telegram")
     {
-        var subjects = await _diaryService.GetSubjectGradesSummaryAsync(userId);
+        List<DiaryInteractionService.SubjectGradeSummary>? subjects = null;
+        try
+        {
+            subjects = await _diaryService.GetSubjectGradesSummaryAsync(userId);
+        }
+        catch
+        {
+            return await BuildGradeCalculatorSubjectsScreenAsync(userId, platform: platform);
+        }
+
         if (subjects == null || subjectIndex < 0 || subjectIndex >= subjects.Count)
         {
-            return await BuildGradeCalculatorSubjectsScreenAsync(userId);
+            return await BuildGradeCalculatorSubjectsScreenAsync(userId, platform: platform);
         }
 
         var s = subjects[subjectIndex];
@@ -751,19 +827,28 @@ public class DiaryBotWorkflowEngine
             new()
             {
                 BotButton.Callback("⬅️ Выбрать другой предмет", "cmd_calc"),
-                BotButton.Callback("🏠 Меню", "cmd_back_main")
+                BotButton.Callback("🏠 Главное меню", "cmd_back_main")
             }
         };
 
         return BotScreen.Create(text, "banner_marks.png").WithButtons(buttons);
     }
 
-    public async Task<BotScreen> BuildTargetCalculationResultScreenAsync(string userId, int subjectIndex, int targetGrade)
+    public async Task<BotScreen> BuildTargetCalculationResultScreenAsync(string userId, int subjectIndex, int targetGrade, string platform = "telegram")
     {
-        var subjects = await _diaryService.GetSubjectGradesSummaryAsync(userId);
+        List<DiaryInteractionService.SubjectGradeSummary>? subjects = null;
+        try
+        {
+            subjects = await _diaryService.GetSubjectGradesSummaryAsync(userId);
+        }
+        catch
+        {
+            return await BuildGradeCalculatorSubjectsScreenAsync(userId, platform: platform);
+        }
+
         if (subjects == null || subjectIndex < 0 || subjectIndex >= subjects.Count)
         {
-            return await BuildGradeCalculatorSubjectsScreenAsync(userId);
+            return await BuildGradeCalculatorSubjectsScreenAsync(userId, platform: platform);
         }
 
         var s = subjects[subjectIndex];
@@ -1447,11 +1532,11 @@ public class DiaryBotWorkflowEngine
         }
         else if (text.StartsWith("/marks") || text.StartsWith("/grades"))
         {
-            await adapter.RenderScreenAsync(chatId, null, await BuildMarksScreenAsync(userId));
+            await adapter.RenderScreenAsync(chatId, null, await BuildMarksScreenAsync(userId, platform: adapter.Platform));
         }
         else if (text.StartsWith("/calc") || text.StartsWith("/calculator"))
         {
-            await adapter.RenderScreenAsync(chatId, null, await BuildGradeCalculatorSubjectsScreenAsync(userId));
+            await adapter.RenderScreenAsync(chatId, null, await BuildGradeCalculatorSubjectsScreenAsync(userId, platform: adapter.Platform));
         }
         else if (text.StartsWith("/children") || text.StartsWith("/kids"))
         {
@@ -1507,18 +1592,20 @@ public class DiaryBotWorkflowEngine
         string callbackId,
         string data)
     {
-        if (data != "cmd_profile_refresh" && !data.StartsWith("cmd_select_child:") && !data.StartsWith("select_child_"))
+        try
         {
-            await adapter.AnswerCallbackAsync(callbackId);
-        }
+            if (data != "cmd_profile_refresh" && !data.StartsWith("cmd_select_child:") && !data.StartsWith("select_child_"))
+            {
+                await adapter.AnswerCallbackAsync(callbackId);
+            }
 
-        if (!data.StartsWith("cmd_admin_"))
-        {
-            _stateService.ClearState(chatId);
-        }
+            if (!data.StartsWith("cmd_admin_"))
+            {
+                _stateService.ClearState(chatId);
+            }
 
-        switch (data)
-        {
+            switch (data)
+            {
             case "cmd_back_main":
             case "cmd_back_main_new":
                 await ShowMainMenuAsync(adapter, chatId, userId, messageId);
@@ -1613,38 +1700,38 @@ public class DiaryBotWorkflowEngine
 
             case "cmd_marks_refresh":
             case "marks_refresh":
-                await adapter.RenderScreenAsync(chatId, messageId, await BuildMarksScreenAsync(userId, quarter: null, forceRefresh: true));
+                await adapter.RenderScreenAsync(chatId, messageId, await BuildMarksScreenAsync(userId, quarter: null, forceRefresh: true, platform: adapter.Platform));
                 break;
 
             case { } s when s.StartsWith("cmd_marks_q:"):
                 var qSelStr = s["cmd_marks_q:".Length..];
                 int? qSel = int.TryParse(qSelStr, out int qs) ? qs : null;
-                await adapter.RenderScreenAsync(chatId, messageId, await BuildMarksScreenAsync(userId, qSel));
+                await adapter.RenderScreenAsync(chatId, messageId, await BuildMarksScreenAsync(userId, qSel, platform: adapter.Platform));
                 break;
 
             case { } s when s.StartsWith("cmd_marks:"):
                 var qStr = s["cmd_marks:".Length..];
                 int? qVal = int.TryParse(qStr, out int qv) ? qv : null;
-                await adapter.RenderScreenAsync(chatId, messageId, await BuildMarksScreenAsync(userId, qVal));
+                await adapter.RenderScreenAsync(chatId, messageId, await BuildMarksScreenAsync(userId, qVal, platform: adapter.Platform));
                 break;
 
             case "cmd_marks":
-                await adapter.RenderScreenAsync(chatId, messageId, await BuildMarksScreenAsync(userId));
+                await adapter.RenderScreenAsync(chatId, messageId, await BuildMarksScreenAsync(userId, platform: adapter.Platform));
                 break;
 
             case "cmd_calc_refresh":
-                await adapter.RenderScreenAsync(chatId, messageId, await BuildGradeCalculatorSubjectsScreenAsync(userId, forceRefresh: true));
+                await adapter.RenderScreenAsync(chatId, messageId, await BuildGradeCalculatorSubjectsScreenAsync(userId, forceRefresh: true, platform: adapter.Platform));
                 break;
 
             case "cmd_calc":
-                await adapter.RenderScreenAsync(chatId, messageId, await BuildGradeCalculatorSubjectsScreenAsync(userId));
+                await adapter.RenderScreenAsync(chatId, messageId, await BuildGradeCalculatorSubjectsScreenAsync(userId, platform: adapter.Platform));
                 break;
 
             case { } s when s.StartsWith("cmd_calc_subj:") || s.StartsWith("calc_subj_"):
                 string sIdxStr = s.StartsWith("cmd_calc_subj:") ? s["cmd_calc_subj:".Length..] : s["calc_subj_".Length..];
                 if (int.TryParse(sIdxStr, out int subjIdx))
                 {
-                    await adapter.RenderScreenAsync(chatId, messageId, await BuildSubjectTargetOptionsScreenAsync(userId, subjIdx));
+                    await adapter.RenderScreenAsync(chatId, messageId, await BuildSubjectTargetOptionsScreenAsync(userId, subjIdx, platform: adapter.Platform));
                 }
                 break;
 
@@ -1654,7 +1741,7 @@ public class DiaryBotWorkflowEngine
                 var parts = tStr.Split(delim);
                 if (parts.Length == 2 && int.TryParse(parts[0], out int sIdx) && int.TryParse(parts[1], out int targetG))
                 {
-                    await adapter.RenderScreenAsync(chatId, messageId, await BuildTargetCalculationResultScreenAsync(userId, sIdx, targetG));
+                    await adapter.RenderScreenAsync(chatId, messageId, await BuildTargetCalculationResultScreenAsync(userId, sIdx, targetG, platform: adapter.Platform));
                 }
                 break;
 
@@ -1873,6 +1960,30 @@ public class DiaryBotWorkflowEngine
                 if (await _roleService.GetUserRoleAsync(userId) == "Admin")
                     await adapter.RenderScreenAsync(chatId, messageId, await BuildStatsScreenAsync(userId));
                 break;
+        }
+        }
+        catch (DiarySessionExpiredException ex)
+        {
+            var webAppUrl = _config["MiniAppUrl"] ?? "https://miragediary.space";
+            var buttons = new List<List<BotButton>>();
+            if (adapter.Platform == "telegram")
+                buttons.Add(new List<BotButton> { BotButton.WebApp("🔐 Войти заново", webAppUrl) });
+            else
+            {
+                var maxBotApp = _config["MaxBot:Username"] ?? _config["MaxBotUsername"] ?? "se13960436_bot";
+                buttons.Add(new List<BotButton> { BotButton.MaxApp("🔐 Войти заново", maxBotApp, userId) });
+            }
+            buttons.Add(new List<BotButton> { BotButton.Callback("🏠 Главное меню", "cmd_back_main") });
+            await adapter.RenderScreenAsync(chatId, messageId, BotScreen.Create($"🔒 *Сессия Госуслуг устарела*\n\n{TelegramMarkdownEscaper.Escape(ex.Message)}", "banner_menu.png").WithButtons(buttons));
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[DiaryBotWorkflowEngine] Callback error on '{data}': {ex.Message}");
+            var buttons = new List<List<BotButton>>
+            {
+                new() { BotButton.Callback("🏠 Главное меню", "cmd_back_main") }
+            };
+            await adapter.RenderScreenAsync(chatId, messageId, BotScreen.Create("⚠️ *Произошла ошибка при выполнении команды*\n\nПожалуйста, попробуйте повторить действие через несколько секунд.", "banner_menu.png").WithButtons(buttons));
         }
     }
 

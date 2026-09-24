@@ -529,7 +529,48 @@ public class DiaryInteractionService
     public static int GetMarkQuarter(string? dateStr)
     {
         if (string.IsNullOrWhiteSpace(dateStr)) return 0;
-        if (DateTime.TryParse(dateStr.Trim(), out var dt))
+        string trimmed = dateStr.Trim();
+
+        // 1. Unix timestamp (seconds or milliseconds)
+        if (long.TryParse(trimmed, out long ts) && ts > 1_000_000_000L)
+        {
+            try
+            {
+                var dtTs = (ts > 10_000_000_000L)
+                    ? DateTimeOffset.FromUnixTimeMilliseconds(ts).DateTime
+                    : DateTimeOffset.FromUnixTimeSeconds(ts).DateTime;
+                int m = dtTs.Month;
+                if (m is 9 or 10) return 1;
+                if (m is 11 or 12) return 2;
+                if (m is 1 or 2 or 3) return 3;
+                if (m is 4 or 5 or 6) return 4;
+            }
+            catch { }
+        }
+
+        // 2. Direct string extraction (YYYY-MM-DD)
+        if (trimmed.Length >= 10 && trimmed[4] == '-' && trimmed[7] == '-')
+        {
+            if (int.TryParse(trimmed.Substring(5, 2), out int month))
+            {
+                if (month is 9 or 10) return 1;
+                if (month is 11 or 12) return 2;
+                if (month is 1 or 2 or 3) return 3;
+                if (month is 4 or 5 or 6) return 4;
+            }
+        }
+
+        // 3. DateTimeOffset / DateTime parsing
+        if (DateTimeOffset.TryParse(trimmed, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var dto))
+        {
+            int m = dto.Month;
+            if (m is 9 or 10) return 1;
+            if (m is 11 or 12) return 2;
+            if (m is 1 or 2 or 3) return 3;
+            if (m is 4 or 5 or 6) return 4;
+        }
+
+        if (DateTime.TryParse(trimmed, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var dt))
         {
             int m = dt.Month;
             if (m is 9 or 10) return 1;
@@ -537,6 +578,7 @@ public class DiaryInteractionService
             if (m is 1 or 2 or 3) return 3;
             if (m is 4 or 5 or 6) return 4;
         }
+
         return 0;
     }
 
@@ -645,7 +687,11 @@ public class DiaryInteractionService
             }
             catch (DiarySessionExpiredException)
             {
-                throw;
+                // Если есть сохраненные оценки в кэше БД — продолжаем работу на их основе, не выбрасывая ошибку
+                if (allMarks == null || allMarks.Count == 0)
+                {
+                    throw;
+                }
             }
             catch (Exception ex)
             {
@@ -659,6 +705,12 @@ public class DiaryInteractionService
         var marksForQuarter = (targetQ > 0)
             ? allMarks.Where(m => GetMarkQuarter(m.Date) == targetQ).ToList()
             : allMarks;
+
+        // Если в текущей четверти еще нет оценок, но в журнале есть оценки за другие периоды или без точной даты — используем allMarks
+        if (marksForQuarter.Count == 0 && allMarks.Count > 0)
+        {
+            marksForQuarter = allMarks;
+        }
 
         if (marksForQuarter.Count == 0)
         {

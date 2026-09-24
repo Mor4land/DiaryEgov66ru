@@ -309,4 +309,69 @@ public class DiaryBotWorkflowEngineTests : IDisposable
         Assert.StartsWith("cmd_schedule_refresh:", screen.Buttons[1][0].CallbackData);
         Assert.Equal("cmd_back_main", screen.Buttons[1][1].CallbackData);
     }
+
+    [Fact]
+    public async Task MainMenu_UnauthorizedUser_HasWebAppButton_NotExternalLink()
+    {
+        string userId = "unauth_test_user";
+        var user = new UserEntity
+        {
+            Id = userId,
+            HasAcceptedPrivacyPolicy = true,
+            AccessToken = string.Empty // Unauthorized
+        };
+        _db.Users.Add(user);
+        await _db.SaveChangesAsync();
+
+        var screen = await _engine.BuildMainMenuScreenAsync(userId, "telegram");
+
+        // First row must contain the WebApp authorization button, NOT a normal external link
+        Assert.NotNull(screen.Buttons);
+        Assert.NotEmpty(screen.Buttons);
+        var authBtn = screen.Buttons[0][0];
+        Assert.Contains("Войти через Госуслуги", authBtn.Text);
+        Assert.NotNull(authBtn.WebAppUrl);
+        Assert.Null(authBtn.Url); // Crucial: must NOT be external browser Link
+    }
+
+    [Fact]
+    public async Task Calculator_UnauthorizedUser_PromptsAuthorization_WithWebApp()
+    {
+        string userId = "calc_unauth_user";
+        var user = new UserEntity
+        {
+            Id = userId,
+            HasAcceptedPrivacyPolicy = true,
+            AccessToken = string.Empty // Unauthorized
+        };
+        _db.Users.Add(user);
+        await _db.SaveChangesAsync();
+
+        var screen = await _engine.BuildGradeCalculatorSubjectsScreenAsync(userId, false, "telegram");
+
+        Assert.Contains("необходимо войти в аккаунт Госуслуг", screen.Text);
+        Assert.NotNull(screen.Buttons);
+        Assert.NotEmpty(screen.Buttons);
+        var authBtn = screen.Buttons[0][0];
+        Assert.Contains("Войти через Госуслуги", authBtn.Text);
+        Assert.NotNull(authBtn.WebAppUrl);
+        Assert.Null(authBtn.Url);
+    }
+
+    [Theory]
+    [InlineData("2026-09-15", 1)]
+    [InlineData("2026-10-30", 1)]
+    [InlineData("2026-11-05", 2)]
+    [InlineData("2026-12-25", 2)]
+    [InlineData("2026-01-15", 3)]
+    [InlineData("2026-03-20", 3)]
+    [InlineData("2026-04-10", 4)]
+    [InlineData("2026-05-25", 4)]
+    [InlineData("1727170000", 1)] // Sep 24, 2026 Unix timestamp
+    [InlineData("2026-09-24T14:30:00Z", 1)]
+    public void GetMarkQuarter_HandlesMultipleFormats_Correctly(string dateStr, int expectedQ)
+    {
+        int q = DiaryInteractionService.GetMarkQuarter(dateStr);
+        Assert.Equal(expectedQ, q);
+    }
 }
