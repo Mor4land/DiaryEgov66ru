@@ -132,24 +132,26 @@ if (-not $OnlyRemote) {
         Report-Warn "MiniApp Repo" "Directory not found at $miniAppDir"
     }
 
-    # ── 5. OBFUSCATION CONFIG & PIPELINE CHECK ──
-    Write-Host "`n[5/6] Checking Obfuscation Pipeline & Obfuscar..." -ForegroundColor White
-    $obfuscarTool = "C:\Users\mlowers\.nuget\packages\obfuscar\2.2.50\tools\Obfuscar.Console.exe"
-    if (Test-Path $obfuscarTool) {
-        Report-Pass "Obfuscar tool binary present" "Version 2.2.50"
+    # ── 5. SECRET MANAGEMENT & CONFIG PIPELINE CHECK ──
+    Write-Host "`n[5/6] Checking Secret Management & Configuration Pipeline..." -ForegroundColor White
+    if (-not (Test-Path "MirageDiary.Server/Security/SecureSecretVault.cs")) {
+        Report-Pass "Legacy Obfuscation Removed" "SecureSecretVault.cs eliminated in favor of standard secret management"
     } else {
-        Report-Warn "Obfuscar tool" "Executable not found at standard NuGet path"
+        Report-Fail "Obfuscation Removal" "SecureSecretVault.cs should be deleted"
     }
 
-    if (Test-Path "deploy.ps1") {
-        $deployContent = Get-Content "deploy.ps1" -Raw
-        if ($deployContent -match "Obfuscar.Console.exe" -and $deployContent -match "<Obfuscator>") {
-            Report-Pass "Obfuscation pipeline configured" "Automated XML generation in deploy.ps1"
-        } else {
-            Report-Fail "Obfuscation pipeline" "deploy.ps1 does not define Obfuscator XML"
-        }
+    $tokenServiceContent = Get-Content "MirageDiary.Server/Services/TokenEncryptionService.cs" -Raw
+    if ($tokenServiceContent -match "MIRAGE_MASTER_KEY" -and $tokenServiceContent -notmatch "SecureSecretVault") {
+        Report-Pass "Secret Management" "Master key configured via environment variable / appsettings"
     } else {
-        Report-Fail "deploy.ps1" "deploy.ps1 missing"
+        Report-Fail "Secret Management" "TokenEncryptionService must resolve key from MIRAGE_MASTER_KEY"
+    }
+
+    $programContent = Get-Content "MirageDiary.Server/Program.cs" -Raw
+    if ($programContent -match "UseNpgsql" -and $programContent -match "UseSqlite") {
+        Report-Pass "Database Dual-Provider" "PostgreSQL and SQLite supported dynamically"
+    } else {
+        Report-Fail "Database Dual-Provider" "Program.cs must support both PostgreSQL and SQLite"
     }
 }
 

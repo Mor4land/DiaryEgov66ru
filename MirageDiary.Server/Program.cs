@@ -44,9 +44,29 @@ builder.Services.AddCors(options =>
     });
 });
 
-// 4. Database Context (Protected connection string via SecureSecretVault)
+// 4. Database Context (Dual-provider: PostgreSQL or SQLite via standard connection string / env)
+var defaultConnStr = Environment.GetEnvironmentVariable("ConnectionStrings__DefaultConnection")
+    ?? Environment.GetEnvironmentVariable("DATABASE_URL")
+    ?? builder.Configuration.GetConnectionString("DefaultConnection")
+    ?? "Data Source=miragediary.db";
+
+var dbProvider = builder.Configuration["DatabaseProvider"]?.ToLowerInvariant()
+    ?? (defaultConnStr.StartsWith("Host=", StringComparison.OrdinalIgnoreCase) ||
+        defaultConnStr.StartsWith("Server=", StringComparison.OrdinalIgnoreCase) ||
+        defaultConnStr.StartsWith("postgres://", StringComparison.OrdinalIgnoreCase) ||
+        defaultConnStr.StartsWith("postgresql://", StringComparison.OrdinalIgnoreCase) ? "npgsql" : "sqlite");
+
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseSqlite(MirageDiary.Server.Security.SecureSecretVault.ResolveSqliteConnectionString(builder.Configuration)));
+{
+    if (dbProvider is "npgsql" or "postgres" or "postgresql")
+    {
+        options.UseNpgsql(defaultConnStr);
+    }
+    else
+    {
+        options.UseSqlite(defaultConnStr);
+    }
+});
 
 // 5. Mirage Services, RateLimiting, Telegram Bot, and Scoped TLS Validation
 builder.Services.AddMirageServices(builder.Configuration);

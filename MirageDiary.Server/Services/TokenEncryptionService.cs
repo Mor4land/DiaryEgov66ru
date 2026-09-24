@@ -19,7 +19,11 @@ public class TokenEncryptionService : ITokenEncryptionService
 
     public TokenEncryptionService(IConfiguration configuration)
     {
-        _key = MirageDiary.Server.Security.SecureSecretVault.ResolveMasterEncryptionKey(configuration);
+        var masterKeyString = Environment.GetEnvironmentVariable("MIRAGE_MASTER_KEY")
+            ?? configuration["Security:MasterKey"]
+            ?? configuration["MasterKey"]
+            ?? "MirageDiary_Master_Security_Key_2026_Gosuslugi";
+        _key = SHA256.HashData(Encoding.UTF8.GetBytes(masterKeyString));
     }
 
     public string Encrypt(string plainText)

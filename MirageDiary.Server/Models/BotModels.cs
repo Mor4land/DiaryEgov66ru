@@ -30,6 +30,8 @@ public class BotScreen
     public string Text { get; set; } = string.Empty;
     public string? BannerName { get; set; }
     public string? BannerFileName { get => BannerName; set => BannerName = value; }
+    public string? FileId { get; set; }
+    public string? FileType { get; set; }
     public List<List<BotButton>> Buttons { get; set; } = new();
     public bool ParseAsMarkdown { get; set; } = true;
     public string? AlertNotification { get; set; }

@@ -15,10 +15,7 @@
     </PackageReference>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.9" />
     <PackageReference Include="Microsoft.Playwright" Version="1.61.0" />
-    <PackageReference Include="Obfuscar" Version="2.2.50">
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-      <PrivateAssets>all</PrivateAssets>
-    </PackageReference>
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
     <PackageReference Include="SaaSoft.MAX.Bot" Version="1.2.1" />
     <PackageReference Include="Telegram.Bot" Version="22.10.1" />
   </ItemGroup>

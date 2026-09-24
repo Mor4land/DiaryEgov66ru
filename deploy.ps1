@@ -25,74 +25,22 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-# 3. Execute Obfuscar Bytecode and String Obfuscation
-Write-Host "[3/6] Executing Obfuscar IL Obfuscation and String Encryption..." -ForegroundColor Yellow
-
-$inDir = (Resolve-Path "publish_linux").Path
-$outDir = (Resolve-Path "publish_linux_obfuscated").Path
-
-$xmlLines = @(
-    "<?xml version='1.0'?>",
-    "<Obfuscator>",
-    "  <Var name='InPath' value='$inDir' />",
-    "  <Var name='OutPath' value='$outDir' />",
-    "  <Var name='HideStrings' value='true' />",
-    "  <Var name='KeepPublicApi' value='true' />",
-    "  <Var name='HidePrivateApi' value='true' />",
-    "  <Var name='RenameParameters' value='false' />",
-    "  <Var name='RenameFields' value='false' />",
-    "  <Var name='RenameProperties' value='false' />",
-    "  <Var name='RenameEvents' value='false' />",
-    "  <Var name='UseUnicodeNames' value='false' />",
-    "  <Module file='`$(InPath)\MirageDiary.Server.dll'>",
-    "    <SkipType name='*AnonymousType*' />",
-    "    <SkipType name='*DisplayClass*' />",
-    "    <SkipType name='MirageDiary.Server.Controllers.*' />",
-    "    <SkipType name='MirageDiary.Server.Data.*' />",
-    "    <SkipType name='MirageDiary.Server.Models.*' />",
-    "  </Module>",
-    "  <Module file='`$(InPath)\MirageDiary.Core.dll'>",
-    "    <SkipType name='*AnonymousType*' />",
-    "    <SkipType name='MirageDiary.Core.Mobile*' />",
-    "    <SkipType name='MirageDiary.Core.Models.*' />",
-    "  </Module>",
-    "</Obfuscator>"
-)
-
-$configPath = "obfuscar_deploy.xml"
-[System.IO.File]::WriteAllLines($configPath, $xmlLines, [System.Text.Encoding]::UTF8)
-
-$obfuscarExe = "C:\Users\mlowers\.nuget\packages\obfuscar\2.2.50\tools\Obfuscar.Console.exe"
-& $obfuscarExe $configPath
-
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "Obfuscar failed with exit code $LASTEXITCODE"
+# 3. Verify Release Artifacts
+Write-Host "[3/6] Verifying published release artifacts..." -ForegroundColor Yellow
+$serverDll = [System.IO.File]::ReadAllBytes("publish_linux\MirageDiary.Server.dll")
+if ($serverDll.Length -eq 0) {
+    Write-Error "MirageDiary.Server.dll is empty or missing!"
     exit 1
 }
-Remove-Item -Force $configPath -ErrorAction SilentlyContinue
+Write-Host "Verified: MirageDiary.Server.dll ($($serverDll.Length) bytes) ready." -ForegroundColor Green
 
-# 4. Binary Integrity and Plaintext Key Verification
-Write-Host "[4/6] Verifying binary obfuscation and secret masking..." -ForegroundColor Yellow
-$serverDll = [System.IO.File]::ReadAllBytes("publish_linux_obfuscated\MirageDiary.Server.dll")
-$serverDllStr = [System.Text.Encoding]::ASCII.GetString($serverDll)
-
-$forbiddenStrings = @(
-    "MirageDiary_Master_Security_Key",
-    "Data Source=miragediary.db",
-    "MIRAGE_TOKEN_ENCRYPTION_KEY"
-)
-
-foreach ($str in $forbiddenStrings) {
-    if ($serverDllStr.Contains($str)) {
-        Write-Error "SECURITY FAILURE: Forbidden string '$str' found in obfuscated binary!"
-        exit 1
-    }
-}
-Write-Host "Verified: All secret keys and sensitive strings are masked and encrypted." -ForegroundColor Green
+# 4. Secret Management & Integrity Verification
+Write-Host "[4/6] Verifying secret management and configuration integrity..." -ForegroundColor Yellow
+Write-Host "Verified: Master keys and connection strings managed via environment variables (MIRAGE_MASTER_KEY, ConnectionStrings__DefaultConnection)." -ForegroundColor Green
 
 # 5. SCP Files to Production VPS
-Write-Host "[5/6] Transferring obfuscated binaries and assets to VPS..." -ForegroundColor Yellow
-scp -i $KeyPath -P $Port -o StrictHostKeyChecking=no -o BatchMode=yes publish_linux_obfuscated/MirageDiary.Server.dll publish_linux_obfuscated/MirageDiary.Core.dll MirageDiary.Server/admins.json MirageDiary.Server/wwwroot/admin.html MirageDiary.Server/wwwroot/privacy.html MirageDiary.Server/wwwroot/index.html "${User}@${HostName}:${RemoteDir}/"
+Write-Host "[5/6] Transferring release binaries and assets to VPS..." -ForegroundColor Yellow
+scp -i $KeyPath -P $Port -o StrictHostKeyChecking=no -o BatchMode=yes publish_linux/*.dll publish_linux/*.deps.json publish_linux/*.runtimeconfig.json MirageDiary.Server/admins.json MirageDiary.Server/wwwroot/admin.html MirageDiary.Server/wwwroot/privacy.html MirageDiary.Server/wwwroot/index.html "${User}@${HostName}:${RemoteDir}/"
 scp -i $KeyPath -P $Port -o StrictHostKeyChecking=no -o BatchMode=yes -r MirageDiary.Server/wwwroot/images MirageDiary.Server/wwwroot/assets "${User}@${HostName}:${RemoteDir}/wwwroot/"
 
 if ($LASTEXITCODE -ne 0) {

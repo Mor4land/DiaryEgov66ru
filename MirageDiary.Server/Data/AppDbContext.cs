@@ -13,6 +13,7 @@ public class AppDbContext : DbContext
     public DbSet<UserEntity> Users { get; set; }
     public DbSet<CachedData> Cache { get; set; }
     public DbSet<ScheduleEntity> Schedules { get; set; }
+    public DbSet<SchoolBellScheduleEntity> BellSchedules { get; set; }
 
     public AppDbContext(DbContextOptions<AppDbContext> options, ITokenEncryptionService? encryption = null) : base(options)
     {
@@ -24,6 +25,7 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<UserEntity>().HasKey(u => u.Id);
         modelBuilder.Entity<CachedData>().HasKey(c => c.CacheKey);
         modelBuilder.Entity<ScheduleEntity>().HasKey(s => s.OrgName);
+        modelBuilder.Entity<SchoolBellScheduleEntity>().HasKey(b => b.OrgName);
 
         // Fallback encryption service in case context created without DI (e.g. CLI tools)
         var encryption = _encryption ?? new TokenEncryptionService(new ConfigurationBuilder().Build());

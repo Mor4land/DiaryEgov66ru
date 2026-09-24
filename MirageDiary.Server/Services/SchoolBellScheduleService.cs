@@ -1,6 +1,14 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json;
+using System.Threading.Tasks;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using MirageDiary.Server.Data;
+using MirageDiary.Server.Models;
 
 namespace MirageDiary.Server.Services;
 
@@ -18,12 +26,20 @@ public class BellStatusInfo
     public string StatusMessage { get; set; } = "";
 }
 
+public class SchoolShiftSchedule
+{
+    public List<LessonBell> Shift1 { get; set; } = new();
+    public List<LessonBell> Shift2 { get; set; } = new();
+}
+
 /// <summary>
-/// Расписание звонков МАОУ СОШ № 113 на 2026/2027 учебный год.
+/// Параметризованный сервис расписания звонков школ.
+/// Поддерживает индивидуальное расписание для каждой школы (OrgName),
+/// сохранение в БД/конфигурации и стандартный fallback.
 /// </summary>
 public class SchoolBellScheduleService
 {
-    public static readonly IReadOnlyList<LessonBell> FirstShift = new List<LessonBell>
+    public static readonly IReadOnlyList<LessonBell> DefaultFirstShift = new List<LessonBell>
     {
         new(1, 1, new TimeSpan(8, 0, 0),  new TimeSpan(8, 40, 0)),
         new(1, 2, new TimeSpan(8, 55, 0), new TimeSpan(9, 35, 0)),
@@ -34,7 +50,7 @@ public class SchoolBellScheduleService
         new(1, 7, new TimeSpan(13, 10, 0), new TimeSpan(13, 50, 0)),
     };
 
-    public static readonly IReadOnlyList<LessonBell> SecondShift = new List<LessonBell>
+    public static readonly IReadOnlyList<LessonBell> DefaultSecondShift = new List<LessonBell>
     {
         new(2, 1, new TimeSpan(13, 10, 0), new TimeSpan(13, 50, 0)),
         new(2, 2, new TimeSpan(14, 5, 0),  new TimeSpan(14, 45, 0)),
@@ -45,7 +61,19 @@ public class SchoolBellScheduleService
         new(2, 7, new TimeSpan(18, 20, 0), new TimeSpan(19, 0, 0)),
     };
 
-    private static readonly IReadOnlyList<LessonBell> AllLessons = FirstShift.Concat(SecondShift).ToList();
+    // Backward-compatible static references
+    public static IReadOnlyList<LessonBell> FirstShift => DefaultFirstShift;
+    public static IReadOnlyList<LessonBell> SecondShift => DefaultSecondShift;
+
+    private readonly IConfiguration? _config;
+    private readonly IServiceScopeFactory? _scopeFactory;
+    private readonly ConcurrentDictionary<string, SchoolShiftSchedule> _cache = new(StringComparer.OrdinalIgnoreCase);
+
+    public SchoolBellScheduleService(IConfiguration? config = null, IServiceScopeFactory? scopeFactory = null)
+    {
+        _config = config;
+        _scopeFactory = scopeFactory;
+    }
 
     /// <summary>
     /// Проверяет, является ли текущий день учебным (Пн - Сб).
@@ -56,18 +84,34 @@ public class SchoolBellScheduleService
     }
 
     /// <summary>
+    /// Получает расписание звонков для указанной школы и смены.
+    /// </summary>
+    public IReadOnlyList<LessonBell> GetShiftBells(string? orgName, int shift = 1)
+    {
+        var schedule = GetOrgSchedule(orgName);
+        var bells = shift == 2 ? schedule.Shift2 : schedule.Shift1;
+        return bells.Count > 0 ? bells : (shift == 2 ? DefaultSecondShift : DefaultFirstShift);
+    }
+
+    /// <summary>
     /// Возвращает true, если сейчас окно звонка (за 2 минуты до конца урока или в первые 6 минут перемены).
     /// В это время учителя выставляют оценки за прошедший урок.
     /// </summary>
-    public bool IsLessonEndingOrBreakWindow(DateTime localTime)
+    public bool IsLessonEndingOrBreakWindow(DateTime localTime, string? orgName = null)
     {
         if (!IsSchoolDay(localTime)) return false;
 
+        var schedule = GetOrgSchedule(orgName);
+        var allLessons = schedule.Shift1.Concat(schedule.Shift2).ToList();
+        if (allLessons.Count == 0)
+        {
+            allLessons = DefaultFirstShift.Concat(DefaultSecondShift).ToList();
+        }
+
         var timeOfDay = localTime.TimeOfDay;
 
-        foreach (var lesson in AllLessons)
+        foreach (var lesson in allLessons)
         {
-            // Окно: [End - 2 min, End + 6 min]
             var windowStart = lesson.End.Subtract(TimeSpan.FromMinutes(2));
             var windowEnd = lesson.End.Add(TimeSpan.FromMinutes(6));
 
@@ -83,9 +127,11 @@ public class SchoolBellScheduleService
     /// <summary>
     /// Возвращает детальный статус по текущему уроку или перемене (для команды /now).
     /// </summary>
-    public BellStatusInfo GetCurrentStatus(DateTime localTime, int shift = 1)
+    public BellStatusInfo GetCurrentStatus(DateTime localTime, int shift = 1) => GetCurrentStatus(localTime, null, shift);
+
+    public BellStatusInfo GetCurrentStatus(DateTime localTime, string? orgName, int shift = 1)
     {
-        var schedule = shift == 2 ? SecondShift : FirstShift;
+        var schedule = GetShiftBells(orgName, shift);
         var info = new BellStatusInfo
         {
             IsSchoolDay = IsSchoolDay(localTime),
@@ -156,4 +202,76 @@ public class SchoolBellScheduleService
         info.StatusMessage = "Учебный день завершен.";
         return info;
     }
+
+    /// <summary>
+    /// Сохраняет кастомное расписание звонков для школы.
+    /// </summary>
+    public async Task SaveScheduleAsync(string orgName, SchoolShiftSchedule shiftSchedule)
+    {
+        if (string.IsNullOrWhiteSpace(orgName)) return;
+
+        _cache[orgName] = shiftSchedule;
+
+        if (_scopeFactory != null)
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var entity = await db.BellSchedules.FirstOrDefaultAsync(b => b.OrgName == orgName);
+            if (entity == null)
+            {
+                entity = new SchoolBellScheduleEntity { OrgName = orgName };
+                db.BellSchedules.Add(entity);
+            }
+            entity.ScheduleJson = JsonSerializer.Serialize(shiftSchedule);
+            entity.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+        }
+    }
+
+    private SchoolShiftSchedule GetOrgSchedule(string? orgName)
+    {
+        if (string.IsNullOrWhiteSpace(orgName))
+        {
+            return GetDefaultSchedule();
+        }
+
+        if (_cache.TryGetValue(orgName, out var cached))
+        {
+            return cached;
+        }
+
+        // Try load from DB
+        if (_scopeFactory != null)
+        {
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                var entity = db.BellSchedules.AsNoTracking().FirstOrDefault(b => b.OrgName == orgName);
+                if (entity != null && !string.IsNullOrWhiteSpace(entity.ScheduleJson))
+                {
+                    var parsed = JsonSerializer.Deserialize<SchoolShiftSchedule>(entity.ScheduleJson);
+                    if (parsed != null && (parsed.Shift1.Count > 0 || parsed.Shift2.Count > 0))
+                    {
+                        _cache[orgName] = parsed;
+                        return parsed;
+                    }
+                }
+            }
+            catch
+            {
+                // Fallback gracefully on DB error
+            }
+        }
+
+        var def = GetDefaultSchedule();
+        _cache[orgName] = def;
+        return def;
+    }
+
+    private static SchoolShiftSchedule GetDefaultSchedule() => new()
+    {
+        Shift1 = DefaultFirstShift.ToList(),
+        Shift2 = DefaultSecondShift.ToList()
+    };
 }

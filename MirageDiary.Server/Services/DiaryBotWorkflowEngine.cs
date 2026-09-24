@@ -26,6 +26,8 @@ public class DiaryBotWorkflowEngine
     private readonly UserSyncService _userSyncService;
     private readonly IConfiguration _config;
     private readonly ITokenStore _tokenStore;
+    private readonly BotStateService _stateService;
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTime> _profileRefreshCooldown = new();
 
     public static readonly string[] TriggerWords =
     {
@@ -41,7 +43,8 @@ public class DiaryBotWorkflowEngine
         MaintenanceModeService maintenanceService,
         UserSyncService userSyncService,
         IConfiguration config,
-        ITokenStore tokenStore)
+        ITokenStore tokenStore,
+        BotStateService? stateService = null)
     {
         _db = db;
         _diaryService = diaryService;
@@ -51,6 +54,7 @@ public class DiaryBotWorkflowEngine
         _userSyncService = userSyncService;
         _config = config;
         _tokenStore = tokenStore;
+        _stateService = stateService ?? new BotStateService();
     }
 
     public async Task<UserEntity> EnsureUserExistsAsync(string userId, string? username = null, string? firstName = null, string? lastName = null, string platform = "telegram")
@@ -515,6 +519,32 @@ public class DiaryBotWorkflowEngine
     // ─── Расписание уроков ────────────────────────────────────────────────────
     public async Task<BotScreen> BuildScheduleScreenAsync(string userId, string? dateArg = null, bool forceRefresh = false)
     {
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId);
+        if ((user == null || string.IsNullOrEmpty(user.AccessToken)) && !string.IsNullOrEmpty(user?.OrgName))
+        {
+            var uploadedSchedule = await _db.Schedules.FirstOrDefaultAsync(s => s.OrgName == user.OrgName);
+            if (uploadedSchedule != null && !string.IsNullOrEmpty(uploadedSchedule.FileId))
+            {
+                string safeOrg = TelegramMarkdownEscaper.Escape(user.OrgName);
+                string scheduleCaption = $"📅 Расписание — *{safeOrg}*\n_(загружено администрацией школы)_";
+                var uploadedNavButtons = new List<List<BotButton>>
+                {
+                    new()
+                    {
+                        BotButton.Callback("🔄 Обновить", "cmd_schedule_refresh"),
+                        BotButton.Callback("🏠 Главное меню", "cmd_back_main")
+                    }
+                };
+                return new BotScreen
+                {
+                    Text = scheduleCaption,
+                    FileId = uploadedSchedule.FileId,
+                    FileType = uploadedSchedule.FileType,
+                    Buttons = uploadedNavButtons
+                };
+            }
+        }
+
         var scheduleText = await _diaryService.GetScheduleStringAsync(userId, dateArg, forceRefresh);
 
         var localNow = DateTime.UtcNow.AddHours(5).Date;
@@ -920,7 +950,7 @@ public class DiaryBotWorkflowEngine
         int shift = user?.Shift ?? 1;
         var localTime = DateTime.UtcNow.AddHours(user?.UtcOffsetHours ?? 5);
 
-        var status = _bellSchedule.GetCurrentStatus(localTime, shift);
+        var status = _bellSchedule.GetCurrentStatus(localTime, user?.OrgName, shift);
         string schoolName = !string.IsNullOrWhiteSpace(user?.OrgName) ? user.OrgName : "МАОУ СОШ № 113";
 
         string text = $"🔔 *Расписание звонков ({schoolName})*\n\n" +
@@ -1087,9 +1117,884 @@ public class DiaryBotWorkflowEngine
         return BotScreen.Create(text, "banner_settings.png").WithButtons(buttons);
     }
 
+    // ─── Админ-панель и управление ───────────────────────────────────────────
+    public async Task<BotScreen> BuildAdminPanelScreenAsync(string userId, string platform = "telegram")
+    {
+        var isMaintenance = _maintenanceService.IsMaintenanceModeActive();
+        var userCount = await _db.Users.CountAsync();
+        var htCount = await _db.Users.CountAsync(u => u.Role == "HeadTeacher");
+        var adminKey = Environment.GetEnvironmentVariable("ADMIN_KEY") ?? _config["Security:AdminKey"] ?? "";
+        var baseUrl = (_config["MiniAppUrl"] ?? "https://miragediary.space").TrimEnd('/');
+        var adminWebUrl = $"{baseUrl}/admin?key={Uri.EscapeDataString(adminKey)}";
+
+        var text = $"🛡 *Админ-панель*\n\n" +
+                   $"👥 Пользователей в базе: *{userCount}*\n" +
+                   $"🏫 Завучей: *{htCount}*\n" +
+                   $"🔧 Тех. работы: *{(isMaintenance ? "Включены" : "Выключены")}*\n\n" +
+                   $"🔑 *Ключ администратора:*\n`{adminKey}`\n\n" +
+                   $"_Нажмите кнопку ниже для входа в веб-консоль:_";
+
+        var buttons = new List<List<BotButton>>
+        {
+            new() { BotButton.Link("🌐 Войти в админку на сайте", adminWebUrl) },
+            new() { BotButton.Callback("🏫 Управление завучами", "cmd_admin_headteachers") },
+            new() { BotButton.Callback(isMaintenance ? "🟢 Выключить тех. работы" : "🔧 Включить тех. работы", "cmd_admin_maintenance") },
+            new()
+            {
+                BotButton.Callback("📢 Рассылка", "cmd_admin_broadcast"),
+                BotButton.Callback("📊 Статистика", "cmd_admin_stats")
+            },
+            new() { BotButton.Callback("🏠 Главное меню", "cmd_back_main") }
+        };
+
+        return BotScreen.Create(text, "banner_admin.png").WithButtons(buttons);
+    }
+
+    public async Task<BotScreen> BuildHeadTeachersMenuScreenAsync(string userId)
+    {
+        var headTeachers = await _db.Users
+            .Where(u => u.Role == "HeadTeacher")
+            .ToListAsync();
+
+        var text = "🏫 *Управление завучами*\n\n";
+        if (headTeachers.Count == 0)
+            text += "Завучей пока нет.";
+        else
+            text += string.Join("\n", headTeachers.Select(ht =>
+                $"• `{ht.Id}` — {(string.IsNullOrEmpty(ht.OrgName) ? "_без школы_" : ht.OrgName)}"));
+
+        var buttons = new List<List<BotButton>>
+        {
+            new() { BotButton.Callback("➕ Добавить завуча", "cmd_admin_add_ht") }
+        };
+
+        foreach (var ht in headTeachers)
+        {
+            var shortId = ht.Id.Length > 8 ? ht.Id[..8] + "…" : ht.Id;
+            buttons.Add(new()
+            {
+                BotButton.Callback($"🗑 Удалить {shortId} ({ht.OrgName})", $"cmd_admin_remove_ht:{ht.Id}")
+            });
+        }
+
+        buttons.Add(new() { BotButton.Callback("⬅️ Назад", "cmd_back_admin") });
+
+        return BotScreen.Create(text, "banner_admin.png").WithButtons(buttons);
+    }
+
+    public async Task AddHeadTeacherAsync(IBotPlatformAdapter adapter, long adminChatId, string targetInput, string orgName)
+    {
+        var role = await _roleService.GetUserRoleAsync(adminChatId.ToString());
+        if (role != "Admin") return;
+
+        var user = await _userSyncService.FindUserByIdOrUsernameAsync(targetInput);
+        string effectiveId = user?.Id ?? targetInput.Trim();
+
+        if (user == null)
+        {
+            user = new UserEntity
+            {
+                Id = effectiveId,
+                Role = "HeadTeacher",
+                OrgName = orgName,
+                AccessToken = "",
+                RefreshToken = "",
+                StudentId = "",
+                ClassName = ""
+            };
+            if (targetInput.StartsWith("@"))
+                user.Username = targetInput.TrimStart('@');
+
+            _db.Users.Add(user);
+        }
+        else
+        {
+            user.Role = "HeadTeacher";
+            user.OrgName = orgName;
+        }
+
+        user.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+
+        await _userSyncService.SyncUserAcrossPlatformsAsync(user);
+
+        string displayTarget = !string.IsNullOrEmpty(user.Username) ? $"@{TelegramMarkdownEscaper.Escape(user.Username)} (`{user.Id}`)" : $"`{user.Id}`";
+        string safeOrg = TelegramMarkdownEscaper.Escape(orgName);
+        await adapter.SendTextMessageAsync(adminChatId,
+            $"✅ Пользователь {displayTarget} назначен завучем школы *{safeOrg}*.\n\nВозвращайтесь в меню: /menu");
+    }
+
+    public async Task RemoveHeadTeacherAsync(IBotPlatformAdapter adapter, long chatId, string? messageId, string adminUserId, string htId)
+    {
+        var role = await _roleService.GetUserRoleAsync(adminUserId);
+        if (role != "Admin") return;
+
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == htId);
+        if (user != null)
+        {
+            user.Role = "Student";
+            user.OrgName = "";
+            await _db.SaveChangesAsync();
+        }
+
+        await adapter.RenderScreenAsync(chatId, messageId, await BuildHeadTeachersMenuScreenAsync(adminUserId));
+    }
+
+    public BotScreen BuildMaintenanceMenuScreenAsync(string userId)
+    {
+        var isMaintenance = _maintenanceService.IsMaintenanceModeActive();
+        var text = $"🔧 *Технические работы*\n\n" +
+                   $"Текущий статус: *{(isMaintenance ? "Включены 🔴" : "Выключены 🟢")}*\n\n" +
+                   "При включении пользователи будут получать сообщение о тех. работах вместо ответа бота.";
+
+        var buttons = new List<List<BotButton>>
+        {
+            new()
+            {
+                BotButton.Callback("🟢 Выключить", "cmd_admin_maintenance_off"),
+                BotButton.Callback("🔴 Включить (30 мин)", "cmd_admin_maintenance_on")
+            },
+            new() { BotButton.Callback("⬅️ Назад", "cmd_back_admin") }
+        };
+
+        return BotScreen.Create(text, "banner_admin.png").WithButtons(buttons);
+    }
+
+    public async Task ToggleMaintenanceAsync(IBotPlatformAdapter adapter, long chatId, string? messageId, string adminUserId, bool enable)
+    {
+        var role = await _roleService.GetUserRoleAsync(adminUserId);
+        if (role != "Admin") return;
+
+        if (enable)
+            _maintenanceService.ActivateMaintenanceMode(30);
+        else
+            _maintenanceService.DeactivateMaintenanceMode();
+
+        await adapter.RenderScreenAsync(chatId, messageId, await BuildAdminPanelScreenAsync(adminUserId, adapter.Platform));
+    }
+
+    public async Task<BotScreen> BuildStatsScreenAsync(string userId)
+    {
+        var total = await _db.Users.CountAsync();
+        var auth = await _db.Users.CountAsync(u => u.AccessToken != "");
+        var hts = await _db.Users.CountAsync(u => u.Role == "HeadTeacher");
+        var alarmOn = await _db.Users.CountAsync(u => u.IsAlarmEnabled);
+        var scheds = await _db.Schedules.CountAsync();
+
+        var text = $"📊 *Статистика*\n\n" +
+                   $"👥 Всего пользователей: *{total}*\n" +
+                   $"✅ Авторизованных: *{auth}*\n" +
+                   $"🏫 Завучей: *{hts}*\n" +
+                   $"🔔 С будильником: *{alarmOn}*\n" +
+                   $"📅 Расписаний загружено: *{scheds}*";
+
+        var buttons = new List<List<BotButton>>
+        {
+            new() { BotButton.Callback("⬅️ Назад", "cmd_back_admin") }
+        };
+
+        return BotScreen.Create(text, "banner_admin.png").WithButtons(buttons);
+    }
+
+    public async Task DoBroadcastAsync(IBotPlatformAdapter adapter, long adminChatId, string broadcastText)
+    {
+        var role = await _roleService.GetUserRoleAsync(adminChatId.ToString());
+        if (role != "Admin") return;
+
+        var users = await _db.Users.Where(u => u.AccessToken != "").ToListAsync();
+        int sent = 0, failed = 0;
+
+        await adapter.SendTextMessageAsync(adminChatId,
+            $"📢 Начинаю рассылку для *{users.Count}* пользователей...");
+
+        foreach (var user in users)
+        {
+            string idStr = user.Id.StartsWith("max_") ? user.Id["max_".Length..] : user.Id;
+            if (!long.TryParse(idStr, out long targetChatId)) continue;
+
+            try
+            {
+                await adapter.SendTextMessageAsync(targetChatId,
+                    $"📢 *Сообщение от администратора:*\n\n{broadcastText}");
+                sent++;
+                await Task.Delay(50);
+            }
+            catch { failed++; }
+        }
+
+        await adapter.SendTextMessageAsync(adminChatId,
+            $"✅ Рассылка завершена.\n📬 Доставлено: *{sent}*\n⚠️ Ошибок: *{failed}*\n\nМеню: /menu");
+    }
+
+    // ─── Главный оркестратор сообщений ────────────────────────────────────────
+    public async Task ProcessMessageOrCommandAsync(
+        IBotPlatformAdapter adapter,
+        long chatId,
+        string userId,
+        string text,
+        string? username = null,
+        string? firstName = null,
+        string? lastName = null)
+    {
+        await EnsureUserExistsAsync(userId, username, firstName, lastName, adapter.Platform);
+
+        if (text.StartsWith("/start") || text.StartsWith("/menu") || IsCancelCommand(text))
+        {
+            _stateService.ClearState(chatId);
+            await ShowMainMenuAsync(adapter, chatId, userId);
+            return;
+        }
+
+        if (text.StartsWith("/delete_account"))
+        {
+            _stateService.ClearState(chatId);
+            await adapter.RenderScreenAsync(chatId, null, BuildDeleteAccountConfirmationScreen());
+            return;
+        }
+
+        if (text.StartsWith("/logout") || text.StartsWith("/exit") || text.StartsWith("/выйти"))
+        {
+            _stateService.ClearState(chatId);
+            await adapter.RenderScreenAsync(chatId, null, BuildLogoutConfirmationScreen());
+            return;
+        }
+
+        var session = _stateService.GetSession(chatId);
+        if (session.State != UserState.Normal)
+        {
+            await HandleStateInputAsync(adapter, chatId, userId, text, session);
+            return;
+        }
+
+        if (text.StartsWith("/now") || text.StartsWith("/bell") || text.StartsWith("/звонок"))
+        {
+            await adapter.RenderScreenAsync(chatId, null, await BuildNowScreenAsync(userId));
+        }
+        else if (text.StartsWith("/premium") || text.StartsWith("/sub") || text.StartsWith("/подписка"))
+        {
+            await adapter.SendTextMessageAsync(chatId,
+                "⭐ *MirageDiary*\n\n" +
+                "Раздел платной подписки закрыт — все функции бота (расписание, оценки, калькулятор, домашка и уведомления) полностью бесплатны! 🚀");
+        }
+        else if (text.StartsWith("/link") || text.StartsWith("/sync") || text.StartsWith("/связать"))
+        {
+            await HandleLinkCommandAsync(adapter, chatId, userId, text);
+        }
+        else if (text.StartsWith("/alarm"))
+        {
+            await adapter.RenderScreenAsync(chatId, null, await BuildAlarmCheckScreenAsync(userId));
+        }
+        else if (text.StartsWith("/profile") || text.StartsWith("/me"))
+        {
+            await adapter.RenderScreenAsync(chatId, null, await BuildProfileScreenAsync(userId));
+        }
+        else if (text.StartsWith("/homework"))
+        {
+            var parts = text.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+            string dateArg = parts.Length > 1 ? parts[1].Trim() : "";
+            await adapter.RenderScreenAsync(chatId, null, await BuildHomeworkScreenAsync(userId, dateArg));
+        }
+        else if (text.StartsWith("/schedule"))
+        {
+            var parts = text.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+            string dateArg = parts.Length > 1 ? parts[1].Trim() : "";
+            await adapter.RenderScreenAsync(chatId, null, await BuildScheduleScreenAsync(userId, dateArg));
+        }
+        else if (text.StartsWith("/marks") || text.StartsWith("/grades"))
+        {
+            await adapter.RenderScreenAsync(chatId, null, await BuildMarksScreenAsync(userId));
+        }
+        else if (text.StartsWith("/calc") || text.StartsWith("/calculator"))
+        {
+            await adapter.RenderScreenAsync(chatId, null, await BuildGradeCalculatorSubjectsScreenAsync(userId));
+        }
+        else if (text.StartsWith("/children") || text.StartsWith("/kids"))
+        {
+            await adapter.RenderScreenAsync(chatId, null, await BuildChildrenMenuScreenAsync(userId));
+        }
+        else if (text.StartsWith("/settings") || text.StartsWith("/настройки"))
+        {
+            await adapter.RenderScreenAsync(chatId, null, await BuildSettingsMenuScreenAsync(userId, adapter.Platform));
+        }
+        else if (text == "/" || text.StartsWith("/help") || text.StartsWith("/помощь") || text.StartsWith("/команды"))
+        {
+            await adapter.RenderScreenAsync(chatId, null, BuildHelpScreen());
+        }
+        else if (text.StartsWith("/admin"))
+        {
+            var role = await _roleService.GetUserRoleAsync(userId);
+            if (role == "Admin")
+            {
+                await adapter.RenderScreenAsync(chatId, null, await BuildAdminPanelScreenAsync(userId, adapter.Platform));
+            }
+        }
+        else
+        {
+            await ShowMainMenuAsync(adapter, chatId, userId);
+        }
+    }
+
+    public async Task ShowMainMenuAsync(IBotPlatformAdapter adapter, long chatId, string userId, string? messageId = null)
+    {
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId);
+        if (user == null || !user.HasAcceptedPrivacyPolicy)
+        {
+            var onboardingScreen = await BuildMainMenuScreenAsync(userId, adapter.Platform);
+            await adapter.RenderScreenAsync(chatId, messageId, onboardingScreen);
+            return;
+        }
+
+        if (!await adapter.EnsureChannelSubscribedAsync(chatId, userId))
+        {
+            return;
+        }
+
+        var screen = await BuildMainMenuScreenAsync(userId, adapter.Platform);
+        await adapter.RenderScreenAsync(chatId, messageId, screen);
+    }
+
+    // ─── Главный оркестратор обратных вызовов (Callbacks) ─────────────────────
+    public async Task ProcessCallbackAsync(
+        IBotPlatformAdapter adapter,
+        long chatId,
+        string? messageId,
+        string userId,
+        string callbackId,
+        string data)
+    {
+        if (data != "cmd_profile_refresh" && !data.StartsWith("cmd_select_child:"))
+        {
+            await adapter.AnswerCallbackAsync(callbackId);
+        }
+
+        if (!data.StartsWith("cmd_admin_"))
+        {
+            _stateService.ClearState(chatId);
+        }
+
+        switch (data)
+        {
+            case "cmd_back_main":
+            case "cmd_back_main_new":
+                await ShowMainMenuAsync(adapter, chatId, userId, messageId);
+                break;
+
+            case "cmd_now":
+                await adapter.RenderScreenAsync(chatId, messageId, await BuildNowScreenAsync(userId));
+                break;
+
+            case "cmd_subscription":
+                await ShowMainMenuAsync(adapter, chatId, userId, messageId);
+                break;
+
+            case "cmd_accept_privacy":
+                await AcceptPrivacyPolicyAsync(userId);
+                await ShowMainMenuAsync(adapter, chatId, userId, messageId);
+                break;
+
+            case "cmd_check_channel_sub":
+                bool isSubbed = await adapter.EnsureChannelSubscribedAsync(chatId, userId);
+                if (isSubbed)
+                {
+                    await adapter.AnswerCallbackAsync(callbackId, "✅ Подписка подтверждена!", false);
+                    await ShowMainMenuAsync(adapter, chatId, userId, messageId);
+                }
+                else
+                {
+                    await adapter.AnswerCallbackAsync(callbackId, "❌ Вы ещё не подписались на канал. Пожалуйста, подпишитесь и повторите проверку!", true);
+                }
+                break;
+
+            case "cmd_sub_activate_beta":
+                var betaRes = await ActivateBetaSubscriptionAsync(userId);
+                if (betaRes.AlertText != null)
+                    await adapter.AnswerCallbackAsync(callbackId, betaRes.AlertText, betaRes.ShowAlert);
+                if (betaRes.Screen != null)
+                    await adapter.RenderScreenAsync(chatId, messageId, betaRes.Screen);
+                break;
+
+            case { } s when s.StartsWith("cmd_set_shift:"):
+                if (int.TryParse(s["cmd_set_shift:".Length..], out int newShift))
+                {
+                    await SetShiftAsync(userId, newShift);
+                    await adapter.RenderScreenAsync(chatId, messageId, await BuildNowScreenAsync(userId));
+                }
+                break;
+
+            // ── Домашнее задание ──
+            case "cmd_homework_refresh":
+                await adapter.RenderScreenAsync(chatId, messageId, await BuildHomeworkScreenAsync(userId, null, forceRefresh: true));
+                break;
+
+            case { } s when s.StartsWith("cmd_homework_refresh:"):
+                var hwRefDate = s["cmd_homework_refresh:".Length..];
+                await adapter.RenderScreenAsync(chatId, messageId, await BuildHomeworkScreenAsync(userId, hwRefDate, forceRefresh: true));
+                break;
+
+            case { } s when s.StartsWith("cmd_homework:"):
+                var dateParam = s["cmd_homework:".Length..];
+                await adapter.RenderScreenAsync(chatId, messageId, await BuildHomeworkScreenAsync(userId, dateParam));
+                break;
+
+            case "cmd_homework":
+                await adapter.RenderScreenAsync(chatId, messageId, await BuildHomeworkScreenAsync(userId));
+                break;
+
+            // ── Расписание ──
+            case "cmd_schedule_refresh":
+                await adapter.RenderScreenAsync(chatId, messageId, await BuildScheduleScreenAsync(userId, null, forceRefresh: true));
+                break;
+
+            case { } s when s.StartsWith("cmd_schedule_refresh:"):
+                var schedRefDate = s["cmd_schedule_refresh:".Length..];
+                await adapter.RenderScreenAsync(chatId, messageId, await BuildScheduleScreenAsync(userId, schedRefDate, forceRefresh: true));
+                break;
+
+            case { } s when s.StartsWith("cmd_schedule:"):
+                var schedDate = s["cmd_schedule:".Length..];
+                await adapter.RenderScreenAsync(chatId, messageId, await BuildScheduleScreenAsync(userId, schedDate));
+                break;
+
+            case "cmd_schedule":
+                await adapter.RenderScreenAsync(chatId, messageId, await BuildScheduleScreenAsync(userId));
+                break;
+
+            // ── Оценки и калькулятор ──
+            case "cmd_marks_refresh":
+                await adapter.RenderScreenAsync(chatId, messageId, await BuildMarksScreenAsync(userId, forceRefresh: true));
+                break;
+
+            case "cmd_marks":
+                await adapter.RenderScreenAsync(chatId, messageId, await BuildMarksScreenAsync(userId));
+                break;
+
+            case "cmd_calc_refresh":
+                await adapter.RenderScreenAsync(chatId, messageId, await BuildGradeCalculatorSubjectsScreenAsync(userId, forceRefresh: true));
+                break;
+
+            case "cmd_calc":
+                await adapter.RenderScreenAsync(chatId, messageId, await BuildGradeCalculatorSubjectsScreenAsync(userId));
+                break;
+
+            case { } s when s.StartsWith("cmd_calc_subj:"):
+                if (int.TryParse(s["cmd_calc_subj:".Length..], out int subjIdx))
+                {
+                    await adapter.RenderScreenAsync(chatId, messageId, await BuildSubjectTargetOptionsScreenAsync(userId, subjIdx));
+                }
+                break;
+
+            case { } s when s.StartsWith("cmd_calc_target:"):
+                var parts = s["cmd_calc_target:".Length..].Split(':');
+                if (parts.Length == 2 && int.TryParse(parts[0], out int sIdx) && int.TryParse(parts[1], out int targetG))
+                {
+                    await adapter.RenderScreenAsync(chatId, messageId, await BuildTargetCalculationResultScreenAsync(userId, sIdx, targetG));
+                }
+                break;
+
+            // ── Профиль и переключение детей ──
+            case "cmd_profile_refresh":
+                if (_profileRefreshCooldown.TryGetValue(userId, out var lastRefreshTime))
+                {
+                    var elapsed = DateTime.UtcNow - lastRefreshTime;
+                    var remaining = TimeSpan.FromSeconds(20) - elapsed;
+                    if (remaining > TimeSpan.Zero)
+                    {
+                        await adapter.AnswerCallbackAsync(callbackId, $"⏳ Подождите {Math.Ceiling(remaining.TotalSeconds)} сек. перед следующим обновлением!", showAlert: true);
+                        break;
+                    }
+                }
+                _profileRefreshCooldown[userId] = DateTime.UtcNow;
+                await adapter.AnswerCallbackAsync(callbackId, "🔄 Обновляем данные профиля...", showAlert: false);
+                await adapter.RenderScreenAsync(chatId, messageId, await BuildProfileScreenAsync(userId, forceRefresh: true));
+                break;
+
+            case "cmd_profile":
+                await adapter.RenderScreenAsync(chatId, messageId, await BuildProfileScreenAsync(userId));
+                break;
+
+            case "cmd_children":
+                await adapter.RenderScreenAsync(chatId, messageId, await BuildChildrenMenuScreenAsync(userId));
+                break;
+
+            case { } s when s.StartsWith("cmd_select_child:"):
+                var childId = s["cmd_select_child:".Length..];
+                var selRes = await SelectChildAsync(userId, childId);
+                await adapter.AnswerCallbackAsync(callbackId, selRes.AlertText ?? "✅ Ребенок выбран!");
+                await adapter.RenderScreenAsync(chatId, messageId, await BuildProfileScreenAsync(userId));
+                break;
+
+            // ── Авторизация и аккаунт ──
+            case "cmd_logout":
+                await adapter.RenderScreenAsync(chatId, messageId, BuildLogoutConfirmationScreen());
+                break;
+
+            case "cmd_confirm_logout":
+                await adapter.RenderScreenAsync(chatId, messageId, await PerformLogoutAsync(userId));
+                break;
+
+            case "cmd_help":
+                await adapter.RenderScreenAsync(chatId, messageId, BuildHelpScreen());
+                break;
+
+            case "cmd_settings":
+                await adapter.RenderScreenAsync(chatId, messageId, await BuildSettingsMenuScreenAsync(userId, adapter.Platform));
+                break;
+
+            case "cmd_alarm":
+            case "cmd_alarm_menu":
+                await adapter.RenderScreenAsync(chatId, messageId, await BuildAlarmMenuScreenAsync(userId));
+                break;
+
+            case "cmd_alarm_toggle_master":
+                var masterRes = await ToggleMasterAlarmAsync(userId);
+                if (masterRes.Screen != null)
+                    await adapter.RenderScreenAsync(chatId, messageId, masterRes.Screen);
+                else
+                    await adapter.RenderScreenAsync(chatId, messageId, await BuildAlarmMenuScreenAsync(userId));
+                break;
+
+            case "cmd_alarm_check":
+            case "cmd_alarm_check_now":
+                await adapter.RenderScreenAsync(chatId, null, await BuildAlarmCheckScreenAsync(userId));
+                break;
+
+            case "cmd_delete_account":
+                await adapter.RenderScreenAsync(chatId, messageId, BuildDeleteAccountConfirmationScreen());
+                break;
+
+            case "cmd_delete_account_confirm":
+                await adapter.RenderScreenAsync(chatId, messageId, await ExecuteDeleteAccountAsync(userId));
+                break;
+
+            case "cmd_link_account":
+                await adapter.RenderScreenAsync(chatId, messageId, await BuildLinkAccountScreenAsync(userId));
+                break;
+
+            // ── Напоминания ──
+            case "cmd_alarm_sched":
+                await adapter.RenderScreenAsync(chatId, messageId, await BuildScheduleReminderMenuScreenAsync(userId));
+                break;
+
+            case "cmd_alarm_sched_toggle":
+                var schedToggle = await ToggleScheduleReminderAsync(userId);
+                if (schedToggle.Screen != null)
+                    await adapter.RenderScreenAsync(chatId, messageId, schedToggle.Screen);
+                break;
+
+            case { } s when s.StartsWith("cmd_alarm_sched_time:"):
+                var sTime = s["cmd_alarm_sched_time:".Length..];
+                var sRes = await SetScheduleReminderTimeAsync(userId, sTime);
+                if (sRes.Screen != null)
+                    await adapter.RenderScreenAsync(chatId, messageId, sRes.Screen);
+                break;
+
+            case "cmd_alarm_sched_custom":
+                _stateService.UpdateState(chatId, UserState.WaitingForScheduleReminderTime);
+                var schedPrompt = BotScreen.Create(
+                    "📅 *Напоминание о расписании*\n\nВведите время отправки в формате *ЧЧ:ММ* (например, `07:15` или `08:00`):\n_(или напишите «Отмена»)_")
+                    .WithButtons(new List<List<BotButton>> { new() { BotButton.Callback("❌ Отмена", "cmd_alarm_sched") } });
+                await adapter.RenderScreenAsync(chatId, messageId, schedPrompt);
+                break;
+
+            case "cmd_alarm_hw":
+                await adapter.RenderScreenAsync(chatId, messageId, await BuildHomeworkReminderMenuScreenAsync(userId));
+                break;
+
+            case "cmd_alarm_hw_toggle":
+                var hwToggle = await ToggleHomeworkReminderAsync(userId);
+                if (hwToggle.Screen != null)
+                    await adapter.RenderScreenAsync(chatId, messageId, hwToggle.Screen);
+                break;
+
+            case { } s when s.StartsWith("cmd_alarm_hw_time:"):
+                var hTime = s["cmd_alarm_hw_time:".Length..];
+                var hRes = await SetHomeworkReminderTimeAsync(userId, hTime);
+                if (hRes.Screen != null)
+                    await adapter.RenderScreenAsync(chatId, messageId, hRes.Screen);
+                break;
+
+            case "cmd_alarm_hw_custom":
+                _stateService.UpdateState(chatId, UserState.WaitingForHomeworkReminderTime);
+                var hwPrompt = BotScreen.Create(
+                    "📚 *Напоминание о домашнем задании*\n\nВведите время отправки в формате *ЧЧ:ММ* (например, `16:30` или `18:00`):\n_(или напишите «Отмена»)_")
+                    .WithButtons(new List<List<BotButton>> { new() { BotButton.Callback("❌ Отмена", "cmd_alarm_hw") } });
+                await adapter.RenderScreenAsync(chatId, messageId, hwPrompt);
+                break;
+
+            case "cmd_alarm_equip":
+                await adapter.RenderScreenAsync(chatId, messageId, await BuildEquipmentReminderMenuScreenAsync(userId));
+                break;
+
+            case "cmd_alarm_equip_toggle":
+                var eqToggle = await ToggleEquipmentReminderAsync(userId);
+                if (eqToggle.Screen != null)
+                    await adapter.RenderScreenAsync(chatId, messageId, eqToggle.Screen);
+                break;
+
+            case { } s when s.StartsWith("cmd_alarm_equip_time:"):
+                var eTime = s["cmd_alarm_equip_time:".Length..];
+                var eRes = await SetEquipmentReminderTimeAsync(userId, eTime);
+                if (eRes.Screen != null)
+                    await adapter.RenderScreenAsync(chatId, messageId, eRes.Screen);
+                break;
+
+            case "cmd_alarm_equip_custom":
+                _stateService.UpdateState(chatId, UserState.WaitingForEquipmentReminderTime);
+                var eqPrompt = BotScreen.Create(
+                    "🎒 *Умный будильник (сбор рюкзака)*\n\nВведите время напоминания в формате *ЧЧ:ММ* (например, `20:15` или `21:00`):\n_(или напишите «Отмена»)_")
+                    .WithButtons(new List<List<BotButton>> { new() { BotButton.Callback("❌ Отмена", "cmd_alarm_equip") } });
+                await adapter.RenderScreenAsync(chatId, messageId, eqPrompt);
+                break;
+
+            // ── Админка ──
+            case "cmd_admin_panel":
+            case "cmd_back_admin":
+                if (await _roleService.GetUserRoleAsync(userId) == "Admin")
+                    await adapter.RenderScreenAsync(chatId, messageId, await BuildAdminPanelScreenAsync(userId, adapter.Platform));
+                break;
+
+            case "cmd_admin_headteachers":
+                if (await _roleService.GetUserRoleAsync(userId) == "Admin")
+                    await adapter.RenderScreenAsync(chatId, messageId, await BuildHeadTeachersMenuScreenAsync(userId));
+                break;
+
+            case "cmd_admin_add_ht":
+                _stateService.UpdateState(chatId, UserState.WaitingForHeadTeacherId);
+                var addHtPrompt = BotScreen.Create(
+                    "👤 *Добавление завуча*\n\nВведите ID, @username или имя пользователя:\n_(или напишите «Отмена»)_", "banner_admin.png")
+                    .WithButtons(new List<List<BotButton>> { new() { BotButton.Callback("❌ Отмена", "cmd_admin_headteachers") } });
+                await adapter.RenderScreenAsync(chatId, messageId, addHtPrompt);
+                break;
+
+            case { } s when s.StartsWith("cmd_admin_remove_ht:"):
+                var removeHtId = s["cmd_admin_remove_ht:".Length..];
+                await RemoveHeadTeacherAsync(adapter, chatId, messageId, userId, removeHtId);
+                break;
+
+            case "cmd_admin_maintenance":
+                await adapter.RenderScreenAsync(chatId, messageId, BuildMaintenanceMenuScreenAsync(userId));
+                break;
+
+            case "cmd_admin_maintenance_on":
+                await ToggleMaintenanceAsync(adapter, chatId, messageId, userId, true);
+                break;
+
+            case "cmd_admin_maintenance_off":
+                await ToggleMaintenanceAsync(adapter, chatId, messageId, userId, false);
+                break;
+
+            case "cmd_admin_broadcast":
+                if (await _roleService.GetUserRoleAsync(userId) == "Admin")
+                {
+                    _stateService.UpdateState(chatId, UserState.WaitingForBroadcastText);
+                    var bcPrompt = BotScreen.Create(
+                        "📢 *Рассылка*\n\nВведите текст сообщения для всех пользователей бота:\n_(или напишите «Отмена»)_", "banner_admin.png")
+                        .WithButtons(new List<List<BotButton>> { new() { BotButton.Callback("❌ Отмена", "cmd_admin_panel") } });
+                    await adapter.RenderScreenAsync(chatId, messageId, bcPrompt);
+                }
+                break;
+
+            case "cmd_admin_stats":
+                if (await _roleService.GetUserRoleAsync(userId) == "Admin")
+                    await adapter.RenderScreenAsync(chatId, messageId, await BuildStatsScreenAsync(userId));
+                break;
+        }
+    }
+
+    // ─── Загрузка файлов (расписания) ─────────────────────────────────────────
+    public async Task HandleFileUploadAsync(IBotPlatformAdapter adapter, long chatId, string userId, string fileId, string fileType)
+    {
+        var role = await _roleService.GetUserRoleAsync(userId);
+        if (role != "HeadTeacher" && role != "Admin")
+        {
+            await adapter.SendTextMessageAsync(chatId, "❌ Только завучи могут загружать расписание.");
+            return;
+        }
+
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId);
+        if (user == null || string.IsNullOrEmpty(user.OrgName))
+        {
+            await adapter.SendTextMessageAsync(chatId, "❌ Вы не привязаны ни к какой школе.");
+            return;
+        }
+
+        var schedule = await _db.Schedules.FirstOrDefaultAsync(s => s.OrgName == user.OrgName);
+        if (schedule == null)
+        {
+            schedule = new ScheduleEntity { OrgName = user.OrgName };
+            _db.Schedules.Add(schedule);
+        }
+        schedule.FileId = fileId;
+        schedule.FileType = fileType;
+        schedule.UploadedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+
+        string safeOrg = TelegramMarkdownEscaper.Escape(user.OrgName);
+        await adapter.SendTextMessageAsync(chatId,
+            $"✅ Расписание для школы *{safeOrg}* успешно сохранено!\n\n" +
+            $"Теперь ученики смогут получить его через кнопку «📅 Расписание».");
+    }
+
+    // ─── Обработка текстового ввода в состояниях ──────────────────────────────
+    public async Task HandleStateInputAsync(IBotPlatformAdapter adapter, long chatId, string userId, string text, UserSession session)
+    {
+        switch (session.State)
+        {
+            case UserState.WaitingForHeadTeacherId:
+                if (IsCancelCommand(text))
+                {
+                    _stateService.ClearState(chatId);
+                    await adapter.SendTextMessageAsync(chatId, "❌ Назначение завуча отменено.");
+                    return;
+                }
+                _stateService.UpdateState(chatId, UserState.WaitingForHeadTeacherOrg, text);
+                await adapter.SendTextMessageAsync(chatId,
+                    "🏫 Теперь введите название школы, к которой привязать этого завуча:\n_(или напишите «Отмена»)_");
+                break;
+
+            case UserState.WaitingForHeadTeacherOrg:
+                if (IsCancelCommand(text))
+                {
+                    _stateService.ClearState(chatId);
+                    await adapter.SendTextMessageAsync(chatId, "❌ Назначение завуча отменено.");
+                    return;
+                }
+                await AddHeadTeacherAsync(adapter, chatId, session.TempData ?? "", text);
+                _stateService.ClearState(chatId);
+                break;
+
+            case UserState.WaitingForBroadcastText:
+                if (IsCancelCommand(text))
+                {
+                    _stateService.ClearState(chatId);
+                    await adapter.SendTextMessageAsync(chatId, "❌ Рассылка отменена.");
+                    return;
+                }
+                await DoBroadcastAsync(adapter, chatId, text);
+                _stateService.ClearState(chatId);
+                break;
+
+            case UserState.WaitingForScheduleReminderTime:
+                if (IsCancelCommand(text))
+                {
+                    _stateService.ClearState(chatId);
+                    await adapter.SendTextMessageAsync(chatId, "❌ Ввод времени отменён.");
+                    return;
+                }
+                if (TryParseTime(text, out var schedTime))
+                {
+                    var user = await EnsureUserExistsAsync(userId);
+                    user.ScheduleReminderTime = schedTime;
+                    user.IsScheduleReminderEnabled = true;
+                    await _db.SaveChangesAsync();
+                    _stateService.ClearState(chatId);
+                    await adapter.SendTextMessageAsync(chatId, $"✅ Время напоминания о расписании установлено на *{schedTime}*!\n\nКаждое утро в это время вы будете получать список уроков.");
+                }
+                else
+                {
+                    await adapter.SendTextMessageAsync(chatId, "❌ Неверный формат времени. Введите время в формате *ЧЧ:ММ* (например: `07:30` или `8:00`) или напишите «Отмена»:");
+                }
+                break;
+
+            case UserState.WaitingForHomeworkReminderTime:
+                if (IsCancelCommand(text))
+                {
+                    _stateService.ClearState(chatId);
+                    await adapter.SendTextMessageAsync(chatId, "❌ Ввод времени отменён.");
+                    return;
+                }
+                if (TryParseTime(text, out var hwTime))
+                {
+                    var user = await EnsureUserExistsAsync(userId);
+                    user.HomeworkReminderTime = hwTime;
+                    user.IsHomeworkReminderEnabled = true;
+                    await _db.SaveChangesAsync();
+                    _stateService.ClearState(chatId);
+                    await adapter.SendTextMessageAsync(chatId, $"✅ Время напоминания о домашке установлено на *{hwTime}*!\n\nКаждый день в это время бот пришлет список заданий на завтра.");
+                }
+                else
+                {
+                    await adapter.SendTextMessageAsync(chatId, "❌ Неверный формат времени. Введите время в формате *ЧЧ:ММ* (например: `17:00` или `18:30`) или напишите «Отмена»:");
+                }
+                break;
+
+            case UserState.WaitingForEquipmentReminderTime:
+                if (IsCancelCommand(text))
+                {
+                    _stateService.ClearState(chatId);
+                    await adapter.SendTextMessageAsync(chatId, "❌ Ввод времени отменён.");
+                    return;
+                }
+                if (TryParseTime(text, out var equipTime))
+                {
+                    var user = await EnsureUserExistsAsync(userId);
+                    user.EquipmentReminderTime = equipTime;
+                    user.IsEquipmentReminderEnabled = true;
+                    await _db.SaveChangesAsync();
+                    _stateService.ClearState(chatId);
+                    await adapter.SendTextMessageAsync(chatId, $"✅ Время сбора рюкзака установлено на *{equipTime}*!\n\nВечером бот напомнит, какие вещи и инструменты положить в рюкзак.");
+                }
+                else
+                {
+                    await adapter.SendTextMessageAsync(chatId, "❌ Неверный формат времени. Введите время в формате *ЧЧ:ММ* (например: `20:30` или `21:00`) или напишите «Отмена»:");
+                }
+                break;
+        }
+    }
+
+    // ─── Обработка команды связки аккаунтов ───────────────────────────────────
+    public async Task HandleLinkCommandAsync(IBotPlatformAdapter adapter, long chatId, string userId, string text)
+    {
+        var parts = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length < 2)
+        {
+            await adapter.RenderScreenAsync(chatId, null, await BuildLinkAccountScreenAsync(userId));
+            return;
+        }
+
+        string code = parts[1].Trim();
+        var (success, message, peer) = await _userSyncService.TryLinkAccountsByCodeAsync(userId, code);
+        if (success)
+        {
+            string peerInfo = peer != null && !string.IsNullOrEmpty(peer.FirstName) ? $" ({TelegramMarkdownEscaper.Escape(peer.FirstName)})" : "";
+            await adapter.SendTextMessageAsync(chatId,
+                $"✅ *Аккаунты успешно связаны!*{peerInfo}\n\n" +
+                $"Все токены, класс, расписание и настройки синхронизированы с вашим аккаунтом на другой платформе.");
+        }
+        else
+        {
+            string safeMsg = TelegramMarkdownEscaper.Escape(message);
+            await adapter.SendTextMessageAsync(chatId, $"❌ *Ошибка связки:* {safeMsg}");
+        }
+    }
+
+    private static bool IsCancelCommand(string text)
+    {
+        var t = text.Trim().ToLowerInvariant();
+        return t == "отмена" || t == "cancel" || t == "/cancel" || t == "назад" || t == "стоп";
+    }
+
+    public static bool TryParseTime(string text, out string formatted)
+    {
+        formatted = "";
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        var parts = text.Trim().Split(':');
+        if (parts.Length != 2) return false;
+        if (int.TryParse(parts[0], out int h) && int.TryParse(parts[1], out int m))
+        {
+            if (h is >= 0 and <= 23 && m is >= 0 and <= 59)
+            {
+                formatted = $"{h:D2}:{m:D2}";
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static string Truncate(string str, int maxLength)
     {
         if (string.IsNullOrEmpty(str)) return string.Empty;
         return str.Length <= maxLength ? str : str[..maxLength] + "…";
     }
 }
+
