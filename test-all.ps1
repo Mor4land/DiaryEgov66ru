@@ -84,7 +84,7 @@ if (-not $OnlyRemote) {
     }
 
     # ── 2. BACKEND COMPILATION ──
-    Write-Host "`n[2/5] Compiling .NET 10 Solution (Release)..." -ForegroundColor White
+    Write-Host "`n[2/6] Compiling .NET 10 Solution (Release)..." -ForegroundColor White
     $buildOut = dotnet build MirageDiary.Server/MirageDiary.Server.csproj -c Release 2>&1
     if ($LASTEXITCODE -eq 0) {
         Report-Pass "C# .NET 10 compilation successful" "Core & Server built cleanly"
@@ -93,8 +93,20 @@ if (-not $OnlyRemote) {
         Report-Fail "C# .NET 10 compilation failed" $errLines
     }
 
-    # ── 3. FRONTEND MINIAPP BUILD ──
-    Write-Host "`n[3/5] Building MiniApp Frontend (TypeScript & Vite)..." -ForegroundColor White
+    # ── 3. UNIT TESTS (xUnit) ──
+    Write-Host "`n[3/6] Running xUnit Unit Test Suite..." -ForegroundColor White
+    $testOut = dotnet test MirageDiary.Tests/MirageDiary.Tests.csproj -c Release --nologo 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $passedMatch = [regex]::Match(($testOut -join "`n"), "(?:пройдено\s+|Passed:\s+)(\d+)")
+        $passedCount = if ($passedMatch.Success) { $passedMatch.Groups[1].Value } else { "all" }
+        Report-Pass "xUnit test suite passed" "$passedCount tests passed (Tokens, Caching, Workflow)"
+    } else {
+        $failLines = ($testOut | Select-String "FAIL|Не пройден" | Select-Object -First 5) -join "`n"
+        Report-Fail "xUnit test suite failed" $failLines
+    }
+
+    # ── 4. FRONTEND MINIAPP BUILD ──
+    Write-Host "`n[4/6] Building MiniApp Frontend (TypeScript & Vite)..." -ForegroundColor White
     $miniAppDir = "C:\Users\mlowers\source\repos\MirageDiary-Miniapp"
     if (Test-Path $miniAppDir) {
         Push-Location $miniAppDir
@@ -120,8 +132,8 @@ if (-not $OnlyRemote) {
         Report-Warn "MiniApp Repo" "Directory not found at $miniAppDir"
     }
 
-    # ── 4. OBFUSCATION CONFIG & PIPELINE CHECK ──
-    Write-Host "`n[4/5] Checking Obfuscation Pipeline & Obfuscar..." -ForegroundColor White
+    # ── 5. OBFUSCATION CONFIG & PIPELINE CHECK ──
+    Write-Host "`n[5/6] Checking Obfuscation Pipeline & Obfuscar..." -ForegroundColor White
     $obfuscarTool = "C:\Users\mlowers\.nuget\packages\obfuscar\2.2.50\tools\Obfuscar.Console.exe"
     if (Test-Path $obfuscarTool) {
         Report-Pass "Obfuscar tool binary present" "Version 2.2.50"
@@ -141,9 +153,9 @@ if (-not $OnlyRemote) {
     }
 }
 
-# ── 5. REMOTE / PRODUCTION / ENDPOINT HEALTH CHECKS ──
+# ── 6. REMOTE / PRODUCTION / ENDPOINT HEALTH CHECKS ──
 if ($Remote -or $OnlyRemote) {
-    Write-Host "`n[5/5] Testing Live Production Endpoints ($TargetUrl)..." -ForegroundColor White
+    Write-Host "`n[6/6] Testing Live Production Endpoints ($TargetUrl)..." -ForegroundColor White
 
     # 5.1 Website & MiniApp HTML
     try {

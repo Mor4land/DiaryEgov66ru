@@ -623,6 +623,7 @@ public class BotCommandService
                 await ShowSettingsMenuAsync(chatId.Value, msgId, chatIdStr);
                 break;
 
+            case "cmd_alarm":
             case "cmd_alarm_menu":
                 await ShowAlarmMenuAsync(chatId.Value, msgId, chatIdStr);
                 break;
@@ -631,6 +632,7 @@ public class BotCommandService
                 await ToggleMasterAlarmAsync(chatId.Value, msgId, chatIdStr);
                 break;
 
+            case "cmd_alarm_check":
             case "cmd_alarm_check_now":
                 await ExecuteAlarmCheckAsync(chatId.Value, chatIdStr);
                 break;
@@ -795,7 +797,7 @@ public class BotCommandService
     // ─── Settings & Account ───────────────────────────────────────────
     private async Task ShowSettingsMenuAsync(long chatId, int? msgId, string chatIdStr)
     {
-        var screen = await _engine.BuildSettingsMenuScreenAsync(chatIdStr);
+        var screen = await _engine.BuildSettingsMenuScreenAsync(chatIdStr, "telegram");
         await RenderScreenAsync(chatId, msgId, screen);
     }
 
@@ -828,19 +830,8 @@ public class BotCommandService
 
     private async Task ShowDeleteAccountConfirmationAsync(long chatId, string chatIdStr, int? msgId)
     {
-        string text = "⚠️ *Удаление аккаунта*\n\n" +
-                      "Вы действительно хотите безвозвратно удалить свой аккаунт и все данные из MirageDiary?\n\n" +
-                      "• Все сохранённые сессии и токены Госуслуг будут немедленно стёрты с сервера.\n" +
-                      "• Все персональные настройки, напоминания и расписания будут удалены.\n" +
-                      "• Это действие необратимо.";
-
-        var markup = new InlineKeyboardMarkup(new[]
-        {
-            new[] { InlineKeyboardButton.WithCallbackData("🗑 Да, удалить всё", "cmd_delete_account_confirm") },
-            new[] { InlineKeyboardButton.WithCallbackData("❌ Отмена", "cmd_settings") }
-        });
-
-        await SafeEditTextOrCaptionAsync(chatId, msgId, text, markup);
+        var screen = _engine.BuildDeleteAccountConfirmationScreen();
+        await RenderScreenAsync(chatId, msgId, screen);
     }
 
     private async Task ExecuteDeleteAccountAsync(long chatId, string chatIdStr, int? msgId)

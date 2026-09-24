@@ -626,10 +626,12 @@ public class MaxCommandService
                 await ShowAlarmMenuAsync(chatId, maxUserId, messageId);
                 break;
 
+            case "cmd_alarm_check":
             case "cmd_alarm_check_now":
                 await ExecuteAlarmCheckAsync(chatId, maxUserId);
                 break;
 
+            case "cmd_alarm_toggle_master":
             case "cmd_toggle_alarm":
                 await ToggleAlarmAsync(chatId, maxUserId, messageId);
                 break;
@@ -932,7 +934,7 @@ public class MaxCommandService
 
     private async Task ShowSettingsMenuAsync(long chatId, string maxUserId, string? messageId = null)
     {
-        var screen = await _engine.BuildSettingsMenuScreenAsync(maxUserId);
+        var screen = await _engine.BuildSettingsMenuScreenAsync(maxUserId, "max");
         await RenderScreenAsync(chatId, messageId, screen);
     }
 

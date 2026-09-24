@@ -203,17 +203,50 @@ public class DiaryBotWorkflowEngine
     }
 
     // ─── Настройки ────────────────────────────────────────────────────────────
-    public async Task<BotScreen> BuildSettingsMenuScreenAsync(string userId)
+    public async Task<BotScreen> BuildSettingsMenuScreenAsync(string userId, string platform = "telegram")
     {
-        var text = "⚙️ *Настройки*\n\nВыберите раздел для настройки уведомлений или управления аккаунтом:";
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId);
+        var alarmOn = user?.IsAlarmEnabled ?? true;
+        var webAppUrl = _config["MiniAppUrl"] ?? "https://t.me";
+        var maxBotApp = _config["MaxBot:Username"] ?? _config["MaxBotUsername"] ?? "se13960436_bot";
+
         var buttons = new List<List<BotButton>>
         {
-            new() { BotButton.Callback("⏰ Умный будильник", "cmd_alarm") },
-            new() { BotButton.Callback("🔗 Связать аккаунт", "cmd_link_account") },
-            new() { BotButton.Callback("⭐ Подписка", "cmd_subscription") },
-            new() { BotButton.Callback("🗑 Удалить аккаунт", "cmd_delete_account") },
-            new() { BotButton.Callback("🏠 Главное меню", "cmd_back_main") }
+            new() { BotButton.Callback($"⏰ Будильник: {(alarmOn ? "🟢 Вкл" : "🔴 Выкл")}", "cmd_alarm_menu") }
         };
+
+        if (platform.Equals("max", StringComparison.OrdinalIgnoreCase))
+        {
+            buttons.Add(new List<BotButton>
+            {
+                BotButton.MaxApp("🔄 Госуслуги", maxBotApp, userId),
+                BotButton.Callback("🔗 Связать с Telegram", "cmd_link_account")
+            });
+        }
+        else
+        {
+            buttons.Add(new List<BotButton>
+            {
+                BotButton.WebApp("🔄 Госуслуги", webAppUrl),
+                BotButton.Callback("🔗 Связать с MAX", "cmd_link_account")
+            });
+        }
+
+        buttons.Add(new List<BotButton>
+        {
+            BotButton.Callback("ℹ️ Справка", "cmd_help"),
+            BotButton.Callback("🗑 Удалить аккаунт", "cmd_delete_account")
+        });
+
+        buttons.Add(new List<BotButton>
+        {
+            BotButton.Callback("🏠 Главное меню", "cmd_back_main")
+        });
+
+        string text = "⚙️ *Настройки*\n\n" +
+                      $"• ⏰ Будильник: {(alarmOn ? "`🟢 Включен`" : "`🔴 Выключен`")}\n" +
+                      $"• 👤 ID: `{userId}`";
+
         return BotScreen.Create(text, "banner_settings.png").WithButtons(buttons);
     }
 
@@ -250,20 +283,29 @@ public class DiaryBotWorkflowEngine
         string equipTime = user?.EquipmentReminderTime ?? "20:30";
 
         var text = "⏰ *Умный будильник*\n\n" +
-                   $"Общий переключатель: {(master ? "🟢 *ВКЛЮЧЕН*" : "🔴 *ВЫКЛЮЧЕН*")}\n\n" +
-                   $"• 📅 Расписание утром: {(sched ? $"🟢 в `{schedTime}`" : "🔴 выкл")}\n" +
-                   $"• 📚 Домашка днем: {(hw ? $"🟢 в `{hwTime}`" : "🔴 выкл")}\n" +
-                   $"• 🎒 Сбор рюкзака вечером: {(equip ? $"🟢 в `{equipTime}`" : "🔴 выкл")}\n\n" +
-                   "Нажмите на нужный пункт для изменения времени или статуса:";
+                   $"• 🔔 Статус: {(master ? "`🟢 Активен`" : "`🔴 Выключен`")}\n" +
+                   $"• 📅 Расписание: {(sched ? $"`{schedTime}`" : "`Выкл`")}\n" +
+                   $"• 📚 Домашка: {(hw ? $"`{hwTime}`" : "`Выкл`")}\n" +
+                   $"• 🎒 Вещи и рюкзак: {(equip ? $"`{equipTime}`" : "`Выкл`")}";
 
         var buttons = new List<List<BotButton>>
         {
-            new() { BotButton.Callback(master ? "🔴 Выключить все напоминания" : "🟢 Включить все напоминания", "alarm_toggle_master") },
-            new() { BotButton.Callback($"📅 Утреннее расписание ({schedTime})", "alarm_menu_sched") },
-            new() { BotButton.Callback($"📚 Напоминание ДЗ ({hwTime})", "alarm_menu_hw") },
-            new() { BotButton.Callback($"🎒 Сбор рюкзака ({equipTime})", "alarm_menu_equip") },
-            new() { BotButton.Callback("🎒 Проверить рюкзак сейчас", "cmd_alarm_check") },
-            new() { BotButton.Callback("⚙️ Назад в настройки", "cmd_settings") }
+            new() { BotButton.Callback(master ? "🔔 Будильник: 🟢 ВКЛЮЧЁН" : "🔕 Будильник: 🔴 ВЫКЛЮЧЕН", "cmd_alarm_toggle_master") },
+            new()
+            {
+                BotButton.Callback($"📅 Расписание: {(sched ? schedTime : "ВЫКЛ")}", "cmd_alarm_sched"),
+                BotButton.Callback($"📚 Домашка: {(hw ? hwTime : "ВЫКЛ")}", "cmd_alarm_hw")
+            },
+            new()
+            {
+                BotButton.Callback($"🎒 Вещи: {(equip ? equipTime : "ВЫКЛ")}", "cmd_alarm_equip"),
+                BotButton.Callback("⚡ Проверить вещи", "cmd_alarm_check_now")
+            },
+            new()
+            {
+                BotButton.Callback("⬅️ Настройки", "cmd_settings"),
+                BotButton.Callback("🏠 Главное меню", "cmd_back_main")
+            }
         };
 
         return BotScreen.Create(text, "banner_alarm.png").WithButtons(buttons);
@@ -298,14 +340,20 @@ public class DiaryBotWorkflowEngine
 
         var buttons = new List<List<BotButton>>
         {
-            new() { BotButton.Callback(enabled ? "🔴 Отключить" : "🟢 Включить", "alarm_toggle_sched") },
+            new() { BotButton.Callback(enabled ? "🔕 Выключить расписание" : "🔔 Включить расписание", "cmd_alarm_sched_toggle") },
             new()
             {
-                BotButton.Callback("07:00" == time ? "✅ 07:00" : "07:00", "alarm_set_sched_07:00"),
-                BotButton.Callback("07:30" == time ? "✅ 07:30" : "07:30", "alarm_set_sched_07:30"),
-                BotButton.Callback("08:00" == time ? "✅ 08:00" : "08:00", "alarm_set_sched_08:00")
+                BotButton.Callback("07:00" == time ? "✅ 07:00" : "07:00", "cmd_alarm_sched_time:07:00"),
+                BotButton.Callback("07:30" == time ? "✅ 07:30" : "07:30", "cmd_alarm_sched_time:07:30"),
+                BotButton.Callback("08:00" == time ? "✅ 08:00" : "08:00", "cmd_alarm_sched_time:08:00"),
+                BotButton.Callback("20:00" == time ? "✅ 20:00" : "20:00", "cmd_alarm_sched_time:20:00")
             },
-            new() { BotButton.Callback("⏰ Назад в меню будильника", "cmd_alarm") }
+            new() { BotButton.Callback("✏️ Ввести другое время", "cmd_alarm_sched_custom") },
+            new()
+            {
+                BotButton.Callback("⬅️ К будильнику", "cmd_alarm_menu"),
+                BotButton.Callback("🏠 Главное меню", "cmd_back_main")
+            }
         };
 
         return BotScreen.Create(text, "banner_alarm.png").WithButtons(buttons);
@@ -353,14 +401,21 @@ public class DiaryBotWorkflowEngine
 
         var buttons = new List<List<BotButton>>
         {
-            new() { BotButton.Callback(enabled ? "🔴 Отключить" : "🟢 Включить", "alarm_toggle_hw") },
+            new() { BotButton.Callback(enabled ? "🔕 Выключить домашку" : "🔔 Включить домашку", "cmd_alarm_hw_toggle") },
             new()
             {
-                BotButton.Callback("15:00" == time ? "✅ 15:00" : "15:00", "alarm_set_hw_15:00"),
-                BotButton.Callback("17:00" == time ? "✅ 17:00" : "17:00", "alarm_set_hw_17:00"),
-                BotButton.Callback("19:00" == time ? "✅ 19:00" : "19:00", "alarm_set_hw_19:00")
+                BotButton.Callback("15:00" == time ? "✅ 15:00" : "15:00", "cmd_alarm_hw_time:15:00"),
+                BotButton.Callback("16:00" == time ? "✅ 16:00" : "16:00", "cmd_alarm_hw_time:16:00"),
+                BotButton.Callback("17:00" == time ? "✅ 17:00" : "17:00", "cmd_alarm_hw_time:17:00"),
+                BotButton.Callback("18:00" == time ? "✅ 18:00" : "18:00", "cmd_alarm_hw_time:18:00"),
+                BotButton.Callback("19:00" == time ? "✅ 19:00" : "19:00", "cmd_alarm_hw_time:19:00")
             },
-            new() { BotButton.Callback("⏰ Назад в меню будильника", "cmd_alarm") }
+            new() { BotButton.Callback("✏️ Ввести другое время", "cmd_alarm_hw_custom") },
+            new()
+            {
+                BotButton.Callback("⬅️ К будильнику", "cmd_alarm_menu"),
+                BotButton.Callback("🏠 Главное меню", "cmd_back_main")
+            }
         };
 
         return BotScreen.Create(text, "banner_alarm.png").WithButtons(buttons);
@@ -408,14 +463,21 @@ public class DiaryBotWorkflowEngine
 
         var buttons = new List<List<BotButton>>
         {
-            new() { BotButton.Callback(enabled ? "🔴 Отключить" : "🟢 Включить", "alarm_toggle_equip") },
+            new() { BotButton.Callback(enabled ? "🔕 Выключить напоминание" : "🔔 Включить напоминание", "cmd_alarm_equip_toggle") },
             new()
             {
-                BotButton.Callback("19:00" == time ? "✅ 19:00" : "19:00", "alarm_set_equip_19:00"),
-                BotButton.Callback("20:30" == time ? "✅ 20:30" : "20:30", "alarm_set_equip_20:30"),
-                BotButton.Callback("21:30" == time ? "✅ 21:30" : "21:30", "alarm_set_equip_21:30")
+                BotButton.Callback("19:00" == time ? "✅ 19:00" : "19:00", "cmd_alarm_equip_time:19:00"),
+                BotButton.Callback("20:00" == time ? "✅ 20:00" : "20:00", "cmd_alarm_equip_time:20:00"),
+                BotButton.Callback("20:30" == time ? "✅ 20:30" : "20:30", "cmd_alarm_equip_time:20:30"),
+                BotButton.Callback("21:00" == time ? "✅ 21:00" : "21:00", "cmd_alarm_equip_time:21:00"),
+                BotButton.Callback("21:30" == time ? "✅ 21:30" : "21:30", "cmd_alarm_equip_time:21:30")
             },
-            new() { BotButton.Callback("⏰ Назад в меню будильника", "cmd_alarm") }
+            new() { BotButton.Callback("✏️ Ввести другое время", "cmd_alarm_equip_custom") },
+            new()
+            {
+                BotButton.Callback("⬅️ К будильнику", "cmd_alarm_menu"),
+                BotButton.Callback("🏠 Главное меню", "cmd_back_main")
+            }
         };
 
         return BotScreen.Create(text, "banner_alarm.png").WithButtons(buttons);
@@ -454,18 +516,41 @@ public class DiaryBotWorkflowEngine
     public async Task<BotScreen> BuildScheduleScreenAsync(string userId, string? dateArg = null, bool forceRefresh = false)
     {
         var scheduleText = await _diaryService.GetScheduleStringAsync(userId, dateArg, forceRefresh);
+
+        var localNow = DateTime.UtcNow.AddHours(5).Date;
+        DateTime currentBaseDate = localNow;
+        if (!string.IsNullOrWhiteSpace(dateArg))
+        {
+            string clean = dateArg.Trim().ToLowerInvariant();
+            if (clean == "завтра" || clean == "tomorrow") currentBaseDate = localNow.AddDays(1);
+            else if (clean == "вчера" || clean == "yesterday") currentBaseDate = localNow.AddDays(-1);
+            else if (DateTime.TryParseExact(clean, new[] { "yyyy-MM-dd", "dd.MM.yyyy", "dd.MM", "d.M.yyyy", "d.M" }, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var parsed))
+            {
+                if (clean.Length <= 5) parsed = new DateTime(localNow.Year, parsed.Month, parsed.Day);
+                currentBaseDate = parsed;
+            }
+        }
+
+        string prevDate = currentBaseDate.AddDays(-1).ToString("yyyy-MM-dd");
+        string nextDate = currentBaseDate.AddDays(1).ToString("yyyy-MM-dd");
+        string todayStr = localNow.ToString("yyyy-MM-dd");
+        string curDateStr = currentBaseDate.ToString("yyyy-MM-dd");
+
+        bool isToday = (curDateStr == todayStr);
+        string todayLabel = isToday ? "• Сегодня •" : "Сегодня";
+
         var buttons = new List<List<BotButton>>
         {
             new()
             {
-                BotButton.Callback("⬅️ Вчера", "sched_date_yesterday"),
-                BotButton.Callback("Сегодня", "sched_date_today"),
-                BotButton.Callback("Завтра ➡️", "sched_date_tomorrow")
+                BotButton.Callback("⬅️ Вчера", $"cmd_schedule:{prevDate}"),
+                BotButton.Callback(todayLabel, $"cmd_schedule:{todayStr}"),
+                BotButton.Callback("Завтра ➡️", $"cmd_schedule:{nextDate}")
             },
             new()
             {
-                BotButton.Callback("🔄 Обновить", $"sched_refresh_{dateArg ?? "today"}"),
-                BotButton.Callback("🏠 Меню", "cmd_back_main")
+                BotButton.Callback("🔄 Обновить", $"cmd_schedule_refresh:{curDateStr}"),
+                BotButton.Callback("🏠 Главное меню", "cmd_back_main")
             }
         };
 
@@ -476,17 +561,41 @@ public class DiaryBotWorkflowEngine
     public async Task<BotScreen> BuildHomeworkScreenAsync(string userId, string? dateArg = null, bool forceRefresh = false)
     {
         var hwText = await _diaryService.GetHomeworkStringAsync(userId, dateArg, forceRefresh);
+
+        var localNow = DateTime.UtcNow.AddHours(5).Date;
+        DateTime currentBaseDate = localNow;
+        if (!string.IsNullOrWhiteSpace(dateArg))
+        {
+            string clean = dateArg.Trim().ToLowerInvariant();
+            if (clean == "завтра" || clean == "tomorrow") currentBaseDate = localNow.AddDays(1);
+            else if (clean == "вчера" || clean == "yesterday") currentBaseDate = localNow.AddDays(-1);
+            else if (DateTime.TryParseExact(clean, new[] { "yyyy-MM-dd", "dd.MM.yyyy", "dd.MM", "d.M.yyyy", "d.M" }, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var parsed))
+            {
+                if (clean.Length <= 5) parsed = new DateTime(localNow.Year, parsed.Month, parsed.Day);
+                currentBaseDate = parsed;
+            }
+        }
+
+        string prevDate = currentBaseDate.AddDays(-1).ToString("yyyy-MM-dd");
+        string nextDate = currentBaseDate.AddDays(1).ToString("yyyy-MM-dd");
+        string todayStr = localNow.ToString("yyyy-MM-dd");
+        string curDateStr = currentBaseDate.ToString("yyyy-MM-dd");
+
+        bool isToday = (curDateStr == todayStr);
+        string todayLabel = isToday ? "• Сегодня •" : "Сегодня";
+
         var buttons = new List<List<BotButton>>
         {
             new()
             {
-                BotButton.Callback("Сегодня", "hw_date_today"),
-                BotButton.Callback("На завтра ➡️", "hw_date_tomorrow")
+                BotButton.Callback("⬅️ Вчера", $"cmd_homework:{prevDate}"),
+                BotButton.Callback(todayLabel, $"cmd_homework:{todayStr}"),
+                BotButton.Callback("Завтра ➡️", $"cmd_homework:{nextDate}")
             },
             new()
             {
-                BotButton.Callback("🔄 Обновить", $"hw_refresh_{dateArg ?? "today"}"),
-                BotButton.Callback("🏠 Меню", "cmd_back_main")
+                BotButton.Callback("🔄 Обновить", $"cmd_homework_refresh:{curDateStr}"),
+                BotButton.Callback("🏠 Главное меню", "cmd_back_main")
             }
         };
 
@@ -702,7 +811,7 @@ public class DiaryBotWorkflowEngine
         {
             new()
             {
-                BotButton.Callback("⏰ Настройки будильника", "cmd_alarm"),
+                BotButton.Callback("⏰ Меню будильника", "cmd_alarm_menu"),
                 BotButton.Callback("🏠 Главное меню", "cmd_back_main")
             }
         };
@@ -932,7 +1041,7 @@ public class DiaryBotWorkflowEngine
             new()
             {
                 BotButton.Callback("🗑 Да, удалить всё", "cmd_delete_account_confirm"),
-                BotButton.Callback("Отмена", "cmd_settings")
+                BotButton.Callback("❌ Отмена", "cmd_settings")
             }
         };
 

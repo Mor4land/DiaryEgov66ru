@@ -106,7 +106,7 @@ ssh -i $KeyPath -p $Port -o StrictHostKeyChecking=no -o BatchMode=yes "${User}@$
 
 # 6. Restart Server Supervisor and Healthcheck
 Write-Host "[6/6] Restarting server supervisor and waiting for socket binding..." -ForegroundColor Yellow
-$probeCmd = '/home/mlowers/miragediary/start.sh && for i in $(seq 1 25); do if curl -s -I http://127.0.0.1:5000/privacy | grep -q "302\|200"; then echo "Application socket is LIVE"; exit 0; fi; sleep 0.5; done; echo "Timeout waiting for service"; exit 1'
+$probeCmd = "/home/mlowers/miragediary/start.sh && for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do if curl -s -I http://127.0.0.1:5000/privacy | grep -q '200'; then echo 'Application socket is LIVE'; exit 0; fi; sleep 1; done; echo 'Timeout waiting for service'; exit 1"
 ssh -i $KeyPath -p $Port -o StrictHostKeyChecking=no -o BatchMode=yes "${User}@${HostName}" "$probeCmd"
 
 Write-Host "==========================================================" -ForegroundColor Cyan
