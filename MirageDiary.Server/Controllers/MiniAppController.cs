@@ -467,8 +467,6 @@ public class MiniAppController : ControllerBase
                     user.Oid = session.Oid;
                     user.DeviceId = session.DeviceId;
                     user.SessionId = session.MobileSessionId;
-                    user.AccessToken = session.AccessToken;
-                    user.RefreshToken = session.RefreshToken ?? "";
                     user.UpdatedAt = DateTime.UtcNow;
                     await _context.SaveChangesAsync();
                     Console.WriteLine($"[MiniApp] Профиль пользователя обновлён!");

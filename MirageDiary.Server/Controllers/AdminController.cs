@@ -19,6 +19,7 @@ using Telegram.Bot;
 using Telegram.Bot.Types.Enums;
 using MAX.Bot.Interfaces;
 using MAX.Bot.Interfaces.Models.Request.Message;
+using MirageDiary.Core;
 
 namespace MirageDiary.Server.Controllers;
 

@@ -37,5 +37,7 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<UserEntity>().Property(u => u.LastName).HasConversion(piiConverter);
         modelBuilder.Entity<UserEntity>().Property(u => u.OrgName).HasConversion(piiConverter);
         modelBuilder.Entity<UserEntity>().Property(u => u.ClassName).HasConversion(piiConverter);
+        modelBuilder.Entity<UserEntity>().Property(u => u.AccessToken).HasConversion(piiConverter);
+        modelBuilder.Entity<UserEntity>().Property(u => u.RefreshToken).HasConversion(piiConverter);
     }
 }

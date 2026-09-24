@@ -18,6 +18,20 @@ public class DiaryClient
 
     private const string GosuslugiBaseUrl = "https://www.gosuslugi.ru/api/myschool/";
 
+    private static readonly JsonSerializerOptions DatamartJsonOptions = CreateDatamartJsonOptions();
+
+    private static JsonSerializerOptions CreateDatamartJsonOptions()
+    {
+        var options = new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true
+        };
+        options.Converters.Add(new FlexibleBoolConverter());
+        options.Converters.Add(new FlexibleStringConverter());
+        options.Converters.Add(new FlexibleIntConverter());
+        return options;
+    }
+
     public DiaryClient(HttpClient client, ITokenStore tokenStore, string userId)
     {
         _client = client;
@@ -399,6 +413,11 @@ public class DiaryClient
                 }
                 else
                 {
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        var errBody = await response.Content.ReadAsStringAsync();
+                        Console.WriteLine($"[DiaryClient] ❌ Datamart HTTP {(int)response.StatusCode}: {errBody} | Request: {jsonBody}");
+                    }
                     CheckResponseStatus(response);
                     jsonResponse = await response.Content.ReadAsStringAsync();
                 }
@@ -409,13 +428,14 @@ public class DiaryClient
                 }) ?? new List<DatamartResponseItem>();
 
                 bool hasData = parsed.Any(p => p.Data != null && p.Data.Count > 0);
-                bool isPending = parsed.Any(p =>
-                    string.Equals(p.DataStatus, "pending", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(p.DataStatus, "processing", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(p.DataStatus, "in_progress", StringComparison.OrdinalIgnoreCase));
+                bool isPending = response.StatusCode == HttpStatusCode.Accepted ||
+                    jsonResponse.Trim() == "[]" ||
+                    parsed.Any(p =>
+                        string.Equals(p.DataStatus, "pending", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(p.DataStatus, "processing", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(p.DataStatus, "in_progress", StringComparison.OrdinalIgnoreCase));
 
                 // If we have data or if the status is not pending (e.g. ready/snapshot or empty dataset), return immediately.
-                // Do NOT waste 15 seconds looping 4 times on non-pending empty responses.
                 if (hasData || !isPending)
                 {
                     return parsed;
@@ -423,7 +443,7 @@ public class DiaryClient
 
                 if (retry < 3)
                 {
-                    await Task.Delay(1000);
+                    await Task.Delay(1500);
                 }
                 else
                 {
@@ -513,7 +533,7 @@ public class DiaryClient
                         {
                             try
                             {
-                                var hw = JsonSerializer.Deserialize<GosuslugiHomeworkItem>(elem.GetRawText(), new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                                var hw = JsonSerializer.Deserialize<GosuslugiHomeworkItem>(elem.GetRawText(), DatamartJsonOptions);
                                 if (hw != null)
                                 {
                                     string title = !string.IsNullOrWhiteSpace(hw.SubjectName) ? hw.SubjectName :
@@ -627,7 +647,7 @@ public class DiaryClient
                     {
                         try
                         {
-                            var hw = JsonSerializer.Deserialize<GosuslugiHomeworkItem>(elem.GetRawText(), new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                            var hw = JsonSerializer.Deserialize<GosuslugiHomeworkItem>(elem.GetRawText(), DatamartJsonOptions);
                             if (hw != null)
                             {
                                 string title = !string.IsNullOrWhiteSpace(hw.SubjectName) ? hw.SubjectName :
@@ -672,7 +692,7 @@ public class DiaryClient
         try
         {
             var (studentId, mdmId) = await ResolveStudentIdsAsync();
-            string intervalId = CalculateIntervalId(date);
+            var intervals = GetIntervalsForDate(date);
 
             List<string> idsToTry = new List<string>();
             if (!string.IsNullOrEmpty(studentId)) idsToTry.Add(studentId);
@@ -682,7 +702,7 @@ public class DiaryClient
 
             foreach (var sid in idsToTry)
             {
-                var datamart = await GetDatamartAsync(sid, intervalId, new List<string> { "student_lessons" });
+                var datamart = await GetDatamartBatchAsync(sid, intervals, new List<string> { "student_lessons" });
                 foreach (var item in datamart)
                 {
                     if (item.ObjType == "student_lessons" && item.Data != null)
@@ -691,19 +711,37 @@ public class DiaryClient
                         {
                             try
                             {
-                                var lesson = JsonSerializer.Deserialize<GosuslugiLessonItem>(elem.GetRawText(), new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-                                if (lesson != null && (string.IsNullOrEmpty(lesson.Date) || lesson.Date.StartsWith(date)))
+                                var lesson = JsonSerializer.Deserialize<GosuslugiLessonItem>(elem.GetRawText(), DatamartJsonOptions);
+                                if (lesson != null)
                                 {
-                                    lessons.Add(lesson);
+                                    bool matchesDate = (!string.IsNullOrEmpty(lesson.Date) && lesson.Date.Equals(date, StringComparison.OrdinalIgnoreCase))
+                                        || (!string.IsNullOrEmpty(lesson.StartDatetime) && lesson.StartDatetime.StartsWith(date, StringComparison.OrdinalIgnoreCase));
+
+                                    if (matchesDate)
+                                    {
+                                        lessons.Add(lesson);
+                                    }
                                 }
                             }
-                            catch { }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"[DiaryClient] Deserializing lesson error: {ex.Message} | Raw: {elem.GetRawText()}");
+                            }
                         }
                     }
                 }
                 if (lessons.Count > 0) break;
             }
-            return lessons;
+
+            // Deduplicate by LessonId (or SubjectName + StartTime) and sort chronologically
+            var distinctLessons = lessons
+                .GroupBy(l => !string.IsNullOrEmpty(l.Id) ? l.Id : $"{l.SubjectName}_{l.StartTime}_{l.Theme}")
+                .Select(g => g.First())
+                .OrderBy(l => l.StartTime)
+                .ThenBy(l => l.SubjectName)
+                .ToList();
+
+            return distinctLessons;
         }
         catch (DiarySessionExpiredException)
         {
@@ -723,7 +761,9 @@ public class DiaryClient
         try
         {
             var (studentId, mdmId) = await ResolveStudentIdsAsync();
-            string currentYear = DateTime.UtcNow.Year.ToString();
+
+            // Query recent week intervals covering the academic quarter (next week + current + previous 10 weeks)
+            var intervals = GetRecentWeekIntervals(12);
 
             List<string> idsToTry = new List<string>();
             if (!string.IsNullOrEmpty(studentId)) idsToTry.Add(studentId);
@@ -733,28 +773,39 @@ public class DiaryClient
 
             foreach (var sid in idsToTry)
             {
-                var datamart = await GetDatamartAsync(sid, currentYear, new List<string> { "student_marks", "student_final_marks" });
+                var datamart = await GetDatamartBatchAsync(sid, intervals, new List<string> { "student_marks" });
                 foreach (var item in datamart)
                 {
-                    if (item.Data != null)
+                    if (item.ObjType == "student_marks" && item.Data != null)
                     {
                         foreach (var elem in item.Data)
                         {
                             try
                             {
-                                var mark = JsonSerializer.Deserialize<GosuslugiMarkItem>(elem.GetRawText(), new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-                                if (mark != null)
+                                var mark = JsonSerializer.Deserialize<GosuslugiMarkItem>(elem.GetRawText(), DatamartJsonOptions);
+                                if (mark != null && (!string.IsNullOrEmpty(mark.Value) || !string.IsNullOrEmpty(mark.MarkValue1)))
                                 {
                                     marks.Add(mark);
                                 }
                             }
-                            catch { }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"[DiaryClient] Deserializing mark error: {ex.Message}");
+                            }
                         }
                     }
                 }
                 if (marks.Count > 0) break;
             }
-            return marks;
+
+            // Deduplicate marks by Id (or SubjectName + Date + Value + WorkKind)
+            var distinctMarks = marks
+                .GroupBy(m => !string.IsNullOrEmpty(m.Id) ? m.Id : $"{m.SubjectName}_{m.Date}_{m.Value}_{m.WorkKind}")
+                .Select(g => g.First())
+                .OrderByDescending(m => m.Date)
+                .ToList();
+
+            return distinctMarks;
         }
         catch (DiarySessionExpiredException)
         {
@@ -858,6 +909,27 @@ public class DiaryClient
         {
             throw new DiarySessionExpiredException($"Не удалось обновить сессию Госуслуг: {ex.Message}");
         }
+    }
+
+    public static List<string> GetRecentWeekIntervals(int count = 12)
+    {
+        var list = new List<string>();
+        var now = DateTime.UtcNow;
+        var nextWeek = now.AddDays(7);
+        int nwNum = System.Globalization.ISOWeek.GetWeekOfYear(nextWeek);
+        list.Add($"{nwNum:D2}{nextWeek.Year}");
+
+        for (int i = 0; i < count; i++)
+        {
+            var dt = now.AddDays(-7 * i);
+            int weekNum = System.Globalization.ISOWeek.GetWeekOfYear(dt);
+            string interval = $"{weekNum:D2}{dt.Year}";
+            if (!list.Contains(interval))
+            {
+                list.Add(interval);
+            }
+        }
+        return list;
     }
 
     public static List<string> GetIntervalsForDate(string dateStr)

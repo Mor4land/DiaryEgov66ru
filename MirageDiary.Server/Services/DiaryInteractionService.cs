@@ -1,10 +1,14 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
-using MirageDiary.Core;
-using MirageDiary.Server.Data;
-using MirageDiary.Core.Models;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
+using MirageDiary.Core;
+using MirageDiary.Core.Models;
+using MirageDiary.Server.Data;
 using MirageDiary.Server.Security;
 
 namespace MirageDiary.Server.Services;
@@ -12,16 +16,13 @@ namespace MirageDiary.Server.Services;
 public class DiaryInteractionService
 {
     private readonly IServiceProvider _serviceProvider;
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime ExpireAt, List<SubjectGradeSummary> Data)> _marksCache = new();
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime ExpireAt, string Data)> _scheduleCache = new();
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime ExpireAt, string Data)> _homeworkCache = new();
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime ExpireAt, string Data)> _profileCache = new();
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime ExpireAt, List<GosuslugiStudentInfo> Data)> _childrenCache = new();
+    private readonly IMemoryCache _memoryCache;
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Task<string>> _inFlightRequests = new();
 
-    public DiaryInteractionService(IServiceProvider serviceProvider)
+    public DiaryInteractionService(IServiceProvider serviceProvider, IMemoryCache memoryCache)
     {
         _serviceProvider = serviceProvider;
+        _memoryCache = memoryCache;
     }
 
     private const string DiaryHealthKey = "diary";
@@ -99,13 +100,6 @@ public class DiaryInteractionService
 
     public async Task<string> GetHomeworkStringAsync(string userId, string? requestedDateStr = null, bool forceRefresh = false)
     {
-        string memCacheKey = $"{userId}_{requestedDateStr ?? "today"}";
-        if (!forceRefresh && _homeworkCache.TryGetValue(memCacheKey, out var cached) && cached.ExpireAt > DateTime.UtcNow)
-        {
-            _serviceProvider.GetService<ServerMetricsService>()?.RecordCacheHit();
-            return cached.Data;
-        }
-
         using var scope = _serviceProvider.CreateScope();
         var tokenStore = scope.ServiceProvider.GetRequiredService<ITokenStore>();
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -121,6 +115,7 @@ public class DiaryInteractionService
         var user = await dbContext.Users.FindAsync(userId);
         string orgName = user?.OrgName ?? "Unknown";
         string className = user?.ClassName ?? "Unknown";
+        bool hasClassroom = !string.IsNullOrEmpty(orgName) && orgName != "Unknown" && !string.IsNullOrEmpty(className) && className != "Unknown";
         var localTime = DateTime.UtcNow.AddHours(5);
 
         DateTime targetDate = localTime.Date;
@@ -158,17 +153,24 @@ public class DiaryInteractionService
         string targetDateStr = targetDate.ToString("yyyy-MM-dd");
         string displayDate = targetDate.ToString("dd.MM.yyyy");
 
-        string cacheKey = p2pCache.GenerateKey(orgName, className, targetDateStr);
+        string classCacheKey = hasClassroom ? p2pCache.GenerateKey(orgName, className, targetDateStr) : $"user_{userId}_{targetDateStr}";
+        string memCacheKey = hasClassroom ? $"class_hw:{classCacheKey}" : $"user_hw:{userId}_{targetDateStr}";
+
+        if (!forceRefresh && _memoryCache.TryGetValue(memCacheKey, out string? memCachedHw) && !string.IsNullOrEmpty(memCachedHw))
+        {
+            _serviceProvider.GetService<ServerMetricsService>()?.RecordCacheHit();
+            return memCachedHw;
+        }
 
         if (maintenanceMode.IsMaintenanceModeActive())
         {
-            return await GetFromCacheFallback(p2pCache, cacheKey, $"🔧 _Портал на техработах, загружено из кэша класса на {displayDate}:_\n\n");
+            return await GetFromCacheFallback(p2pCache, classCacheKey, $"🔧 _Портал на техработах, загружено из кэша класса на {displayDate}:_\n\n");
         }
 
         // ── P2P CACHE FIRST (30 min TTL) ──
-        if (!string.IsNullOrEmpty(orgName) && orgName != "Unknown" && !string.IsNullOrEmpty(className) && className != "Unknown")
+        if (hasClassroom)
         {
-            var cachedJson = await p2pCache.GetCachedDataAsync(cacheKey, TimeSpan.FromMinutes(30));
+            var cachedJson = await p2pCache.GetCachedDataAsync(classCacheKey, TimeSpan.FromMinutes(30));
             if (!string.IsNullOrEmpty(cachedJson))
             {
                 try
@@ -184,6 +186,12 @@ public class DiaryInteractionService
                             string desc = TelegramMarkdownEscaper.Escape(string.IsNullOrWhiteSpace(item.Description) ? "Нет описания" : item.Description);
                             response += $"• *{title}*: {desc}\n";
                         }
+                        _memoryCache.Set(memCacheKey, response, new MemoryCacheEntryOptions
+                        {
+                            SlidingExpiration = TimeSpan.FromMinutes(10),
+                            AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(1),
+                            Size = 1
+                        });
                         return response;
                     }
                 }
@@ -196,7 +204,7 @@ public class DiaryInteractionService
             return "⚠️ *Электронный дневник временно недоступен*\n\nШлюз Госуслуг / ФГИС «Моя Школа» проводит регламентные работы. Новые данные загрузятся автоматически после завершения работ.";
         }
 
-        string flightKey = $"hw_{cacheKey}";
+        string flightKey = $"hw_{classCacheKey}";
         return await ExecuteSingleFlightAsync(flightKey, async ct =>
         {
             var httpClientFactory = scope.ServiceProvider.GetRequiredService<System.Net.Http.IHttpClientFactory>();
@@ -209,10 +217,10 @@ public class DiaryInteractionService
                 var hw = await clientWithUser.GetHomeworkAsync(targetDateStr);
                 ReportDiaryOk();
                 // Save to P2P cache for other students in the class
-                if (hw != null && hw.Count > 0 && !string.IsNullOrEmpty(orgName) && orgName != "Unknown")
+                if (hw != null && hw.Count > 0 && hasClassroom)
                 {
                     var jsonToCache = JsonSerializer.Serialize(hw);
-                    await p2pCache.SaveCachedDataAsync(cacheKey, jsonToCache);
+                    await p2pCache.SaveCachedDataAsync(classCacheKey, jsonToCache);
                 }
 
                 if (hw != null && hw.Count > 0)
@@ -224,12 +232,20 @@ public class DiaryInteractionService
                         string desc = TelegramMarkdownEscaper.Escape(string.IsNullOrWhiteSpace(item.Description) ? "Нет описания" : item.Description);
                         response += $"• *{title}*: {desc}\n";
                     }
+                    _memoryCache.Set(memCacheKey, response, new MemoryCacheEntryOptions
+                    {
+                        SlidingExpiration = TimeSpan.FromMinutes(10),
+                        AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(1),
+                        Size = 1
+                    });
                     return response;
                 }
 
                 if (specificDateRequested)
                 {
-                    return $"Домашнего задания на {displayDate} нет.";
+                    string noHwSpecific = $"Домашнего задания на {displayDate} нет.";
+                    _memoryCache.Set(memCacheKey, noHwSpecific, new MemoryCacheEntryOptions { SlidingExpiration = TimeSpan.FromMinutes(5), Size = 1 });
+                    return noHwSpecific;
                 }
 
                 // Fallback to tomorrow if today's homework is empty and no specific date was asked
@@ -247,29 +263,37 @@ public class DiaryInteractionService
                         string desc = TelegramMarkdownEscaper.Escape(string.IsNullOrWhiteSpace(item.Description) ? "Нет описания" : item.Description);
                         response += $"• *{title}*: {desc}\n";
                     }
-                    _homeworkCache[memCacheKey] = (DateTime.UtcNow.AddMinutes(3), response);
+                    _memoryCache.Set(memCacheKey, response, new MemoryCacheEntryOptions
+                    {
+                        SlidingExpiration = TimeSpan.FromMinutes(5),
+                        Size = 1
+                    });
                     return response;
                 }
 
                 string noHw = $"Домашнего задания на {displayDate} и {displayTomorrow} нет.";
-                _homeworkCache[memCacheKey] = (DateTime.UtcNow.AddMinutes(3), noHw);
+                _memoryCache.Set(memCacheKey, noHw, new MemoryCacheEntryOptions
+                {
+                    SlidingExpiration = TimeSpan.FromMinutes(5),
+                    Size = 1
+                });
                 return noHw;
             }
             catch (OperationCanceledException)
             {
                 ReportDiaryFailure("таймаут 12 с");
-                return await GetFromCacheFallback(p2pCache, cacheKey, $"⏱️ Сервера Госуслуг не ответили за 12 сек (таймаут сети).\nВывожу последние сохраненные данные на {displayDate}:\n\n");
+                return await GetFromCacheFallback(p2pCache, classCacheKey, $"⏱️ Сервера Госуслуг не ответили за 12 сек (таймаут сети).\nВывожу последние сохраненные данные на {displayDate}:\n\n");
             }
             catch (TimeoutException)
             {
                 ReportDiaryFailure("таймаут 12 с");
-                return await GetFromCacheFallback(p2pCache, cacheKey, $"⏱️ Сервера Госуслуг не ответили за 12 сек (таймаут сети).\nВывожу последние сохраненные данные на {displayDate}:\n\n");
+                return await GetFromCacheFallback(p2pCache, classCacheKey, $"⏱️ Сервера Госуслуг не ответили за 12 сек (таймаут сети).\nВывожу последние сохраненные данные на {displayDate}:\n\n");
             }
             catch (DiaryMaintenanceException)
             {
                 ReportDiaryFailure("портал на техработах");
                 maintenanceMode.ActivateMaintenanceMode(15);
-                return await GetFromCacheFallback(p2pCache, cacheKey, "⚠️ Обнаружены неполадки Дневника. Включен резервный режим на 15 мин.\nВывожу последние закэшированные данные:\n\n");
+                return await GetFromCacheFallback(p2pCache, classCacheKey, "⚠️ Обнаружены неполадки Дневника. Включен резервный режим на 15 мин.\nВывожу последние закэшированные данные:\n\n");
             }
             catch (DiarySessionExpiredException ex)
             {
@@ -285,15 +309,10 @@ public class DiaryInteractionService
 
     public async Task<string> GetScheduleStringAsync(string userId, string? requestedDateStr = null, bool forceRefresh = false)
     {
-        string cacheKey = $"{userId}_{requestedDateStr ?? "today"}";
-        if (!forceRefresh && _scheduleCache.TryGetValue(cacheKey, out var cached) && cached.ExpireAt > DateTime.UtcNow)
-        {
-            _serviceProvider.GetService<ServerMetricsService>()?.RecordCacheHit();
-            return cached.Data;
-        }
-
         using var scope = _serviceProvider.CreateScope();
         var tokenStore = scope.ServiceProvider.GetRequiredService<ITokenStore>();
+        var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var p2pCache = scope.ServiceProvider.GetRequiredService<SharedClassroomCacheService>();
         
         var tokenData = await tokenStore.GetTokensAsync(userId);
         if (tokenData == null || string.IsNullOrEmpty(tokenData.AccessToken))
@@ -324,7 +343,47 @@ public class DiaryInteractionService
             return "⚠️ *Электронный дневник временно недоступен*\n\nШлюз Госуслуг / ФГИС «Моя Школа» проводит регламентные работы. Новые данные загрузятся автоматически после завершения работ.";
         }
 
-        string flightKey = $"sched_{cacheKey}";
+        var user = await dbContext.Users.FindAsync(userId);
+        string orgName = user?.OrgName ?? "";
+        string className = user?.ClassName ?? "";
+        bool hasClassroom = !string.IsNullOrWhiteSpace(orgName) && orgName != "Unknown" && !string.IsNullOrWhiteSpace(className) && className != "Unknown";
+        string classCacheKey = hasClassroom ? p2pCache.GenerateKey(orgName, className, targetDateStr) : $"user_{userId}_{targetDateStr}";
+        string memCacheKey = hasClassroom ? $"class_sched:{classCacheKey}" : $"user_sched:{userId}_{targetDateStr}";
+
+        // 1. In-memory check
+        if (!forceRefresh && _memoryCache.TryGetValue(memCacheKey, out string? cachedSchedule) && !string.IsNullOrEmpty(cachedSchedule))
+        {
+            _serviceProvider.GetService<ServerMetricsService>()?.RecordCacheHit();
+            return cachedSchedule;
+        }
+
+        // 2. Shared Classroom SQLite cache check (when available)
+        if (!forceRefresh && hasClassroom)
+        {
+            var cachedJson = await p2pCache.GetCachedDataAsync(classCacheKey, TimeSpan.FromMinutes(45));
+            if (!string.IsNullOrEmpty(cachedJson))
+            {
+                try
+                {
+                    var cachedLessons = JsonSerializer.Deserialize<List<GosuslugiLessonItem>>(cachedJson);
+                    if (cachedLessons != null && cachedLessons.Count > 0)
+                    {
+                        _serviceProvider.GetService<ServerMetricsService>()?.RecordCacheHit();
+                        string formatted = FormatSchedule(cachedLessons, displayDate);
+                        _memoryCache.Set(memCacheKey, formatted, new MemoryCacheEntryOptions
+                        {
+                            SlidingExpiration = TimeSpan.FromMinutes(15),
+                            AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(2),
+                            Size = 1
+                        });
+                        return formatted;
+                    }
+                }
+                catch { }
+            }
+        }
+
+        string flightKey = $"sched_{classCacheKey}";
         return await ExecuteSingleFlightAsync(flightKey, async ct =>
         {
             var httpClientFactory = scope.ServiceProvider.GetRequiredService<System.Net.Http.IHttpClientFactory>();
@@ -338,33 +397,55 @@ public class DiaryInteractionService
                 ReportDiaryOk();
                 if (lessons != null && lessons.Count > 0)
                 {
-                    string res = $"📅 *Расписание на {displayDate}:*\n\n";
-                    int num = 1;
-                    foreach (var l in lessons)
+                    string res = FormatSchedule(lessons, displayDate);
+                    _memoryCache.Set(memCacheKey, res, new MemoryCacheEntryOptions
                     {
-                        string rawSubject = !string.IsNullOrEmpty(l.SubjectName) ? l.SubjectName : l.LessonName;
-                        string subject = TelegramMarkdownEscaper.Escape(rawSubject);
-                        string time = !string.IsNullOrEmpty(l.StartTime) ? $" ({TelegramMarkdownEscaper.Escape(l.StartTime)}-{TelegramMarkdownEscaper.Escape(l.EndTime)})" : "";
-                        string room = !string.IsNullOrEmpty(l.Room) ? $" (Каб. {TelegramMarkdownEscaper.Escape(l.Room)})" : "";
-                        res += $"{num}. *{subject}*{time}{room}\n";
-                        num++;
+                        SlidingExpiration = TimeSpan.FromMinutes(15),
+                        AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(2),
+                        Size = 1
+                    });
+                    if (hasClassroom)
+                    {
+                        _ = p2pCache.SaveCachedDataAsync(classCacheKey, JsonSerializer.Serialize(lessons));
                     }
-                    _scheduleCache[cacheKey] = (DateTime.UtcNow.AddMinutes(3), res);
                     return res;
                 }
                 string noLessons = $"📅 Расписание уроков на {displayDate} отсутствует или не загружено.";
-                _scheduleCache[cacheKey] = (DateTime.UtcNow.AddMinutes(3), noLessons);
+                _memoryCache.Set(memCacheKey, noLessons, new MemoryCacheEntryOptions
+                {
+                    SlidingExpiration = TimeSpan.FromMinutes(5),
+                    Size = 1
+                });
                 return noLessons;
             }
             catch (OperationCanceledException)
             {
                 ReportDiaryFailure("таймаут 12 с");
+                if (hasClassroom)
+                {
+                    return await GetFromCacheFallback(p2pCache, classCacheKey, $"⏱️ Сервера Госуслуг не ответили за 12 сек (таймаут сети).\nВывожу последние сохраненные данные на {displayDate}:\n\n");
+                }
                 return $"⏱️ Сервера Госуслуг не ответили за 12 сек (таймаут сети). Попробуйте обновить чуть позже.";
             }
             catch (TimeoutException)
             {
                 ReportDiaryFailure("таймаут 12 с");
+                if (hasClassroom)
+                {
+                    return await GetFromCacheFallback(p2pCache, classCacheKey, $"⏱️ Сервера Госуслуг не ответили за 12 сек (таймаут сети).\nВывожу последние сохраненные данные на {displayDate}:\n\n");
+                }
                 return $"⏱️ Сервера Госуслуг не ответили за 12 сек (таймаут сети). Попробуйте обновить чуть позже.";
+            }
+            catch (DiaryMaintenanceException)
+            {
+                ReportDiaryFailure("портал на техработах");
+                var maintenanceMode = scope.ServiceProvider.GetRequiredService<MaintenanceModeService>();
+                maintenanceMode.ActivateMaintenanceMode(15);
+                if (hasClassroom)
+                {
+                    return await GetFromCacheFallback(p2pCache, classCacheKey, "⚠️ Обнаружены неполадки Дневника. Включен резервный режим на 15 мин.\nВывожу последние закэшированные данные:\n\n");
+                }
+                return "⚠️ Дневник временно недоступен (техработы).";
             }
             catch (DiarySessionExpiredException ex)
             {
@@ -376,6 +457,43 @@ public class DiaryInteractionService
                 return $"Ошибка при получении расписания: {ex.Message}";
             }
         });
+    }
+
+    private static string FormatSchedule(List<GosuslugiLessonItem> lessons, string displayDate)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"📅 *Расписание на {displayDate}:*");
+        sb.AppendLine();
+        int num = 1;
+        foreach (var l in lessons)
+        {
+            string rawSubject = !string.IsNullOrEmpty(l.SubjectName) ? l.SubjectName : (!string.IsNullOrEmpty(l.LessonName) ? l.LessonName : "Урок");
+            string subject = TelegramMarkdownEscaper.Escape(rawSubject);
+
+            string time = "";
+            if (!string.IsNullOrEmpty(l.StartTime) && !string.IsNullOrEmpty(l.EndTime))
+                time = $" `[{TelegramMarkdownEscaper.Escape(l.StartTime)}–{TelegramMarkdownEscaper.Escape(l.EndTime)}]`";
+            else if (!string.IsNullOrEmpty(l.StartTime))
+                time = $" `[{TelegramMarkdownEscaper.Escape(l.StartTime)}]`";
+
+            string room = !string.IsNullOrEmpty(l.Room) ? $" • каб. {TelegramMarkdownEscaper.Escape(l.Room)}" : "";
+            string distant = l.IsDistant ? " 🌐 Дистант" : "";
+
+            sb.AppendLine($"{num}. *{subject}*{time}{room}{distant}");
+
+            if (!string.IsNullOrWhiteSpace(l.Theme))
+            {
+                sb.AppendLine($"   📖 _{TelegramMarkdownEscaper.Escape(l.Theme.Trim())}_");
+            }
+
+            if (!string.IsNullOrWhiteSpace(l.TeacherName))
+            {
+                sb.AppendLine($"   👤 {TelegramMarkdownEscaper.Escape(l.TeacherName.Trim())}");
+            }
+
+            num++;
+        }
+        return sb.ToString().TrimEnd();
     }
 
     public class SubjectGradeSummary
@@ -391,9 +509,11 @@ public class DiaryInteractionService
 
     public async Task<List<SubjectGradeSummary>> GetSubjectGradesSummaryAsync(string userId, bool forceRefresh = false)
     {
-        if (!forceRefresh && _marksCache.TryGetValue(userId, out var cached) && cached.ExpireAt > DateTime.UtcNow)
+        string marksKey = $"user_marks:{userId}";
+        if (!forceRefresh && _memoryCache.TryGetValue(marksKey, out List<SubjectGradeSummary>? cachedMarks) && cachedMarks != null)
         {
-            return cached.Data;
+            _serviceProvider.GetService<ServerMetricsService>()?.RecordCacheHit();
+            return cachedMarks;
         }
 
         if (IsDiaryMaintenanceActive())
@@ -418,7 +538,7 @@ public class DiaryInteractionService
         if (marks == null || marks.Count == 0)
         {
             var emptyList = new List<SubjectGradeSummary>();
-            _marksCache[userId] = (DateTime.UtcNow.AddMinutes(2), emptyList);
+            _memoryCache.Set(marksKey, emptyList, new MemoryCacheEntryOptions { SlidingExpiration = TimeSpan.FromMinutes(2), Size = 1 });
             return emptyList;
         }
 
@@ -442,11 +562,17 @@ public class DiaryInteractionService
 
             foreach (var m in summary.Marks)
             {
-                if (int.TryParse(m.Value, out int gradeVal) && gradeVal >= 1 && gradeVal <= 5)
+                if (string.IsNullOrWhiteSpace(m.Value)) continue;
+
+                var parts = m.Value.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries);
+                foreach (var part in parts)
                 {
-                    int w = (m.Weight.HasValue && m.Weight.Value > 0) ? m.Weight.Value : 1;
-                    wSum += gradeVal * w;
-                    totalW += w;
+                    if (int.TryParse(part.Trim(), out int gradeVal) && gradeVal >= 1 && gradeVal <= 5)
+                    {
+                        int w = (m.Weight.HasValue && m.Weight.Value > 0) ? m.Weight.Value : 1;
+                        wSum += gradeVal * w;
+                        totalW += w;
+                    }
                 }
             }
 
@@ -472,19 +598,26 @@ public class DiaryInteractionService
             result.Add(summary);
         }
 
-        _marksCache[userId] = (DateTime.UtcNow.AddMinutes(3), result);
+        _memoryCache.Set(marksKey, result, new MemoryCacheEntryOptions
+        {
+            SlidingExpiration = TimeSpan.FromMinutes(5),
+            AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(20),
+            Size = 1
+        });
         return result;
     }
 
     public async Task<string> GetMarksStringAsync(string userId, bool forceRefresh = false)
     {
+        string marksStrKey = $"user_marks_str:{userId}";
         try
         {
-            if (!forceRefresh && _marksCache.TryGetValue(userId, out var memCached) && memCached.ExpireAt > DateTime.UtcNow && memCached.Data.Count > 0)
+            if (!forceRefresh && _memoryCache.TryGetValue(marksStrKey, out string? cachedMarksStr) && !string.IsNullOrEmpty(cachedMarksStr))
             {
-                // Format from cache
+                _serviceProvider.GetService<ServerMetricsService>()?.RecordCacheHit();
+                return cachedMarksStr;
             }
-            else if (IsDiaryMaintenanceActive())
+            if (IsDiaryMaintenanceActive())
             {
                 return "⚠️ *Электронный дневник временно недоступен*\n\nШлюз Госуслуг / ФГИС «Моя Школа» проводит регламентные работы. Новые данные загрузятся автоматически после завершения работ.";
             }
@@ -508,12 +641,15 @@ public class DiaryInteractionService
                     sb.AppendLine($"{s.StatusEmoji} *{safeSubject}* — `{gpaStr}`{forecastStr}");
 
                     // List marks
-                    var markStrings = s.Marks.Select(m =>
-                    {
-                        int w = (m.Weight.HasValue && m.Weight.Value > 1) ? m.Weight.Value : 1;
-                        string wSuffix = w > 1 ? $"×{w}" : "";
-                        return $"{m.Value}{wSuffix}";
-                    });
+                    var markStrings = s.Marks
+                        .Where(m => !string.IsNullOrEmpty(m.Value))
+                        .Select(m =>
+                        {
+                            int w = (m.Weight.HasValue && m.Weight.Value > 1) ? m.Weight.Value : 1;
+                            string wSuffix = w > 1 ? $"×{w}" : "";
+                            string val = TelegramMarkdownEscaper.Escape(m.Value);
+                            return $"{val}{wSuffix}";
+                        });
 
                     sb.AppendLine($"  └ _{string.Join("  ", markStrings)}_");
                     sb.AppendLine();
@@ -528,7 +664,14 @@ public class DiaryInteractionService
                     sb.AppendLine($"🏆 *Общий средний балл:* `{overallGpa:F2}`");
                 }
 
-                return sb.ToString().TrimEnd();
+                string res = sb.ToString().TrimEnd();
+                _memoryCache.Set(marksStrKey, res, new MemoryCacheEntryOptions
+                {
+                    SlidingExpiration = TimeSpan.FromMinutes(5),
+                    AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(20),
+                    Size = 1
+                });
+                return res;
             }
 
             return "📊 Оценок в дневнике Госуслуг пока нет.";
@@ -545,9 +688,11 @@ public class DiaryInteractionService
 
     public async Task<string> GetProfileStringAsync(string userId, bool forceRefresh = false)
     {
-        if (!forceRefresh && _profileCache.TryGetValue(userId, out var cached) && cached.ExpireAt > DateTime.UtcNow)
+        string profileKey = $"user_profile:{userId}";
+        if (!forceRefresh && _memoryCache.TryGetValue(profileKey, out string? cachedProfile) && !string.IsNullOrEmpty(cachedProfile))
         {
-            return cached.Data;
+            _serviceProvider.GetService<ServerMetricsService>()?.RecordCacheHit();
+            return cachedProfile;
         }
 
         using var scope = _serviceProvider.CreateScope();
@@ -589,6 +734,7 @@ public class DiaryInteractionService
                                 {
                                     foreach (var elem in item.Data)
                                     {
+                                        Console.WriteLine($"[DiaryInteractionService] 🔍 student_classes raw: {elem.GetRawText()}");
                                         var classInfo = JsonSerializer.Deserialize<GosuslugiClassInfo>(elem.GetRawText(), new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
                                         if (classInfo != null && (!string.IsNullOrEmpty(classInfo.ShortName) || !string.IsNullOrEmpty(classInfo.ClassNum)))
                                         {
@@ -626,7 +772,10 @@ public class DiaryInteractionService
                     if (!string.IsNullOrEmpty(user.ClassName)) break;
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[DiaryInteractionService] ❌ Ошибка auto-resolve student_classes: {ex.Message}");
+            }
         }
 
         // Clean up legacy corrupted OrgName where school was set to the class name
@@ -668,20 +817,30 @@ public class DiaryInteractionService
         string platformName = userId.StartsWith("max_") ? "MAX" : "Telegram";
         profileCard += "⚙️ *Данные в MirageDiary:*\n";
         profileCard += $"🎭 *Роль*: `{user?.Role ?? "Student"}`\n";
-        profileCard += $"🏫 *Школа*: `{(string.IsNullOrWhiteSpace(displayOrg) ? "Не указана" : displayOrg)}`\n";
+        if (!string.IsNullOrWhiteSpace(displayOrg))
+        {
+            profileCard += $"🏫 *Школа*: `{displayOrg}`\n";
+        }
         profileCard += $"📚 *Класс*: `{(string.IsNullOrWhiteSpace(user?.ClassName) ? "Не указан" : user.ClassName)}`\n";
         profileCard += $"🔔 *Будильник*: {(user?.IsAlarmEnabled ?? true ? "🟢 Включен" : "🔴 Выключен")}\n" +
                        $"📱 *Платформа*: `{platformName}`\n";
 
-        _profileCache[userId] = (DateTime.UtcNow.AddMinutes(5), profileCard);
+        _memoryCache.Set(profileKey, profileCard, new MemoryCacheEntryOptions
+        {
+            SlidingExpiration = TimeSpan.FromMinutes(5),
+            AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(30),
+            Size = 1
+        });
         return profileCard;
     }
 
     public async Task<List<GosuslugiStudentInfo>> GetChildrenListAsync(string userId, bool forceRefresh = false)
     {
-        if (!forceRefresh && _childrenCache.TryGetValue(userId, out var cached) && cached.ExpireAt > DateTime.UtcNow)
+        string childrenKey = $"user_children:{userId}";
+        if (!forceRefresh && _memoryCache.TryGetValue(childrenKey, out List<GosuslugiStudentInfo>? cached) && cached != null)
         {
-            return cached.Data;
+            _serviceProvider.GetService<ServerMetricsService>()?.RecordCacheHit();
+            return cached;
         }
 
         using var scope = _serviceProvider.CreateScope();
@@ -694,7 +853,15 @@ public class DiaryInteractionService
         try
         {
             var res = await clientWithUser.GetStudentInfoAsync();
-            if (res != null) _childrenCache[userId] = (DateTime.UtcNow.AddMinutes(5), res);
+            if (res != null)
+            {
+                _memoryCache.Set(childrenKey, res, new MemoryCacheEntryOptions
+                {
+                    SlidingExpiration = TimeSpan.FromMinutes(5),
+                    AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(30),
+                    Size = 1
+                });
+            }
             return res ?? new List<GosuslugiStudentInfo>();
         }
         catch

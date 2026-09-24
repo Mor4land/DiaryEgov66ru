@@ -13,6 +13,7 @@ using Microsoft.Extensions.Logging;
 using MirageDiary.Core;
 using MirageDiary.Core.Models;
 using MirageDiary.Server.Data;
+using MirageDiary.Server.Security;
 using Telegram.Bot;
 using Telegram.Bot.Types.Enums;
 using MAX.Bot.Interfaces;
@@ -157,14 +158,24 @@ public class GradeWatcherWorker : BackgroundService
                     foreach (var m in freshMarks)
                     {
                         string markDisplay = !string.IsNullOrEmpty(m.Value) ? m.Value : "—";
-                        string lessonName = !string.IsNullOrEmpty(m.SubjectName) ? m.SubjectName : "Урок";
-                        string reason = !string.IsNullOrEmpty(m.Comment) ? $" ({m.Comment})" : "";
+                        string lessonName = !string.IsNullOrEmpty(m.SubjectName) ? TelegramMarkdownEscaper.Escape(m.SubjectName) : "Урок";
+                        
+                        string workKindStr = !string.IsNullOrEmpty(m.WorkKind) ? TelegramMarkdownEscaper.Escape(m.WorkKind) : "";
+                        string commentStr = !string.IsNullOrEmpty(m.Comment) ? TelegramMarkdownEscaper.Escape(m.Comment) : "";
+                        string reason = "";
+                        if (!string.IsNullOrEmpty(workKindStr) && !string.IsNullOrEmpty(commentStr))
+                            reason = $" ({workKindStr}, {commentStr})";
+                        else if (!string.IsNullOrEmpty(workKindStr))
+                            reason = $" ({workKindStr})";
+                        else if (!string.IsNullOrEmpty(commentStr))
+                            reason = $" ({commentStr})";
+
                         string weight = (m.Weight.HasValue && m.Weight.Value > 1) ? $" [вес: {m.Weight.Value}]" : "";
 
                         sb.AppendLine($"📚 *{lessonName}*");
-                        sb.AppendLine($"⭐️ Оценка: *{markDisplay}*{reason}{weight}");
+                        sb.AppendLine($"⭐️ Оценка: *{TelegramMarkdownEscaper.Escape(markDisplay)}*{reason}{weight}");
                         if (!string.IsNullOrEmpty(m.Date))
-                            sb.AppendLine($"📅 Дата: {m.Date}");
+                            sb.AppendLine($"📅 Дата: {TelegramMarkdownEscaper.Escape(m.Date)}");
                         sb.AppendLine();
                     }
 
@@ -223,12 +234,13 @@ public class GradeWatcherWorker : BackgroundService
         var ordered = marks
             .OrderBy(m => m.SubjectName)
             .ThenBy(m => m.Date)
-            .ThenBy(m => m.Value);
+            .ThenBy(m => m.Value)
+            .ThenBy(m => m.WorkKind);
 
         var sb = new StringBuilder();
         foreach (var m in ordered)
         {
-            sb.Append($"{m.SubjectName}|{m.Date}|{m.Value}|{m.Weight};");
+            sb.Append($"{m.SubjectName}|{m.Date}|{m.Value}|{m.Weight}|{m.WorkKind};");
         }
 
         using var sha = SHA256.Create();

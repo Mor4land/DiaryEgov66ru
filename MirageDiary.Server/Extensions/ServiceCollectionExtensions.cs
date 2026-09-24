@@ -19,6 +19,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddMirageServices(this IServiceCollection services, IConfiguration configuration)
     {
         // 1. Core Security & Token Services
+        services.AddMemoryCache(options => { options.SizeLimit = 10000; });
         services.AddSingleton<ITokenEncryptionService, TokenEncryptionService>();
         services.AddSingleton<ITelegramInitDataValidator, TelegramInitDataValidator>();
         services.AddScoped<ITokenStore, DbTokenStore>();
@@ -27,6 +28,7 @@ public static class ServiceCollectionExtensions
         // 2. Business Services
         services.AddScoped<RoleService>();
         services.AddScoped<UserSyncService>();
+        services.AddScoped<DiaryBotWorkflowEngine>();
         services.AddScoped<DiaryInteractionService>();
         services.AddScoped<BotCommandService>();
         services.AddSingleton<BookmarkletAuthService>();
