@@ -27,6 +27,7 @@ public class DiaryBotWorkflowEngine
     private readonly IConfiguration _config;
     private readonly ITokenStore _tokenStore;
     private readonly BotStateService _stateService;
+    private readonly BotCaptchaService _captchaService;
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTime> _profileRefreshCooldown = new();
 
     public static readonly string[] TriggerWords =
@@ -44,7 +45,8 @@ public class DiaryBotWorkflowEngine
         UserSyncService userSyncService,
         IConfiguration config,
         ITokenStore tokenStore,
-        BotStateService? stateService = null)
+        BotStateService? stateService = null,
+        BotCaptchaService? captchaService = null)
     {
         _db = db;
         _diaryService = diaryService;
@@ -55,6 +57,13 @@ public class DiaryBotWorkflowEngine
         _config = config;
         _tokenStore = tokenStore;
         _stateService = stateService ?? new BotStateService();
+        _captchaService = captchaService ?? new BotCaptchaService();
+    }
+
+    public static bool IsUserVerified(UserEntity? user)
+    {
+        if (user == null) return false;
+        return user.HasPassedCaptcha || user.HasAcceptedPrivacyPolicy || !string.IsNullOrEmpty(user.AccessToken);
     }
 
     public string BuildMiniAppUrl(string userId, string? firstName = null, bool force = false)
@@ -1190,6 +1199,127 @@ public class DiaryBotWorkflowEngine
             user.HasAcceptedPrivacyPolicy = true;
             user.PrivacyPolicyAcceptedAtUtc = DateTime.UtcNow;
             await _db.SaveChangesAsync();
+            await _userSyncService.SyncUserAcrossPlatformsAsync(user);
+        }
+    }
+
+    // ─── Онбординг: опрос про смену и умный будильник ──────────────────────────
+    public BotScreen BuildOnboardingShiftScreen(string userId)
+    {
+        var text = "🏫 *Настройка бота: Смена обучения (1/2)*\n\n" +
+                   "В какую смену вы обычно учитесь?\n" +
+                   "Это необходимо для своевременной отправки утреннего расписания и напоминаний:\n\n" +
+                   "• ☀️ *1-я смена* — уроки с утра (обычно 08:00 – 14:00)\n" +
+                   "• 🌙 *2-я смена* — уроки днем (обычно 13:00 – 19:00)\n\n" +
+                   "_Вы сможете изменить смену в любой момент в настройках будильника._";
+
+        var buttons = new List<List<BotButton>>
+        {
+            new()
+            {
+                BotButton.Callback("☀️ 1-я смена", "cmd_onboard_shift:1"),
+                BotButton.Callback("🌙 2-я смена", "cmd_onboard_shift:2")
+            },
+            new()
+            {
+                BotButton.Callback("⏭ Пропустить", "cmd_onboard_shift:skip")
+            }
+        };
+
+        return BotScreen.Create(text, "banner_alarm.png").WithButtons(buttons);
+    }
+
+    public BotScreen BuildOnboardingAlarmScreen(string userId, int shift)
+    {
+        string schedTime = shift == 2 ? "12:00" : "07:30";
+        string hwTime    = shift == 2 ? "19:00" : "17:00";
+        string equipTime = shift == 2 ? "21:00" : "20:30";
+
+        var text = "⏰ *Настройка бота: Умный будильник (2/2)*\n\n" +
+                   "Mirage Diary может автоматически помогать вам в течение учебного дня:\n\n" +
+                   $"• 🔔 *Утреннее расписание ({schedTime}):* список уроков, кабинеты и время звонков перед выходом в школу.\n" +
+                   $"• 📚 *Домашнее задание ({hwTime}):* свежие задания на завтрашний день.\n" +
+                   $"• 🎒 *Сбор рюкзака ({equipTime}):* чекер предметов и экипировки (форма, тетради, циркуль).\n\n" +
+                   "Выберите подходящий режим работы:";
+
+        var buttons = new List<List<BotButton>>
+        {
+            new() { BotButton.Callback("⚡ Включить всё (рекомендуется)", "cmd_onboard_alarm:all") },
+            new() { BotButton.Callback("🔔 Только расписание и домашка", "cmd_onboard_alarm:essential") },
+            new() { BotButton.Callback("🔕 Отключить напоминания", "cmd_onboard_alarm:off") }
+        };
+
+        return BotScreen.Create(text, "banner_alarm.png").WithButtons(buttons);
+    }
+
+    public async Task<BotScreen> BuildOnboardingFinishScreenAsync(string userId, string platform)
+    {
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId);
+        var text = "🎉 *Настройка успешно завершена!*\n\n" +
+                   "Ваш умный будильник и параметры бота сконфигурированы.\n\n" +
+                   "Остался последний шаг — войдите через Госуслуги, чтобы бот получил доступ к вашему электронному дневнику и оценкам.";
+
+        var buttons = new List<List<BotButton>>();
+
+        if (platform.Equals("max", StringComparison.OrdinalIgnoreCase))
+        {
+            var maxBotApp = _config["MaxBot:Username"] ?? _config["MaxBotUsername"] ?? "se13960436_bot";
+            buttons.Add(new List<BotButton> { BotButton.MaxApp("🔐 Войти через Госуслуги", maxBotApp, userId) });
+        }
+        else
+        {
+            buttons.Add(new List<BotButton> { BotButton.WebApp("🔐 Войти через Госуслуги", BuildMiniAppUrl(userId, user?.FirstName)) });
+        }
+
+        buttons.Add(new List<BotButton> { BotButton.Callback("🏠 Перейти в Главное меню", "cmd_back_main") });
+
+        return BotScreen.Create(text, "banner_menu.png").WithButtons(buttons);
+    }
+
+    public static void ApplyOnboardingAlarmPreset(UserEntity user, string preset)
+    {
+        if (preset == "all")
+        {
+            user.IsAlarmEnabled = true;
+            user.IsScheduleReminderEnabled = true;
+            user.IsHomeworkReminderEnabled = true;
+            user.IsEquipmentReminderEnabled = true;
+            if (user.Shift == 2)
+            {
+                user.ScheduleReminderTime = "12:00";
+                user.HomeworkReminderTime = "19:00";
+                user.EquipmentReminderTime = "21:00";
+            }
+            else
+            {
+                user.ScheduleReminderTime = "07:30";
+                user.HomeworkReminderTime = "17:00";
+                user.EquipmentReminderTime = "20:30";
+            }
+        }
+        else if (preset == "essential")
+        {
+            user.IsAlarmEnabled = true;
+            user.IsScheduleReminderEnabled = true;
+            user.IsHomeworkReminderEnabled = true;
+            user.IsEquipmentReminderEnabled = false;
+            if (user.Shift == 2)
+            {
+                user.ScheduleReminderTime = "12:00";
+                user.HomeworkReminderTime = "19:00";
+            }
+            else
+            {
+                user.ScheduleReminderTime = "07:30";
+                user.HomeworkReminderTime = "17:00";
+            }
+        }
+        else // "off"
+        {
+            user.IsAlarmEnabled = false;
+            user.IsScheduleReminderEnabled = false;
+            user.IsHomeworkReminderEnabled = false;
+            user.IsEquipmentReminderEnabled = false;
         }
     }
 
@@ -1472,7 +1602,36 @@ public class DiaryBotWorkflowEngine
         string? firstName = null,
         string? lastName = null)
     {
-        await EnsureUserExistsAsync(userId, username, firstName, lastName, adapter.Platform);
+        var user = await EnsureUserExistsAsync(userId, username, firstName, lastName, adapter.Platform);
+
+        if (!IsUserVerified(user))
+        {
+            _stateService.ClearState(chatId);
+            var captchaScreen = _captchaService.GenerateCaptchaScreen(userId);
+            await adapter.RenderScreenAsync(chatId, null, captchaScreen);
+            return;
+        }
+
+        if (!user.HasAcceptedPrivacyPolicy)
+        {
+            _stateService.ClearState(chatId);
+            await adapter.RenderScreenAsync(chatId, null, BuildPrivacyPolicyOnboardingScreen());
+            return;
+        }
+
+        if (!user.HasCompletedOnboarding && string.IsNullOrEmpty(user.AccessToken))
+        {
+            _stateService.ClearState(chatId);
+            await adapter.RenderScreenAsync(chatId, null, BuildOnboardingShiftScreen(userId));
+            return;
+        }
+
+        if (text.StartsWith("/wizard") || text.StartsWith("/onboard"))
+        {
+            _stateService.ClearState(chatId);
+            await adapter.RenderScreenAsync(chatId, null, BuildOnboardingShiftScreen(userId));
+            return;
+        }
 
         if (text.StartsWith("/start") || text.StartsWith("/menu") || IsCancelCommand(text))
         {
@@ -1573,10 +1732,24 @@ public class DiaryBotWorkflowEngine
     public async Task ShowMainMenuAsync(IBotPlatformAdapter adapter, long chatId, string userId, string? messageId = null)
     {
         var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId);
+        if (!IsUserVerified(user))
+        {
+            var captchaScreen = _captchaService.GenerateCaptchaScreen(userId);
+            await adapter.RenderScreenAsync(chatId, messageId, captchaScreen);
+            return;
+        }
+
         if (user == null || !user.HasAcceptedPrivacyPolicy)
         {
-            var onboardingScreen = await BuildMainMenuScreenAsync(userId, adapter.Platform);
+            var onboardingScreen = BuildPrivacyPolicyOnboardingScreen();
             await adapter.RenderScreenAsync(chatId, messageId, onboardingScreen);
+            return;
+        }
+
+        if (!user.HasCompletedOnboarding && string.IsNullOrEmpty(user.AccessToken))
+        {
+            var shiftScreen = BuildOnboardingShiftScreen(userId);
+            await adapter.RenderScreenAsync(chatId, messageId, shiftScreen);
             return;
         }
 
@@ -1610,6 +1783,53 @@ public class DiaryBotWorkflowEngine
                 _stateService.ClearState(chatId);
             }
 
+            var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId);
+            if (!IsUserVerified(user))
+            {
+                if (data.StartsWith("cmd_captcha:"))
+                {
+                    var answer = data["cmd_captcha:".Length..];
+                    bool valid = _captchaService.ValidateCaptcha(userId, answer);
+                    if (valid)
+                    {
+                        if (user != null)
+                        {
+                            user.HasPassedCaptcha = true;
+                            await _db.SaveChangesAsync();
+                            await _userSyncService.SyncUserAcrossPlatformsAsync(user);
+                        }
+                        await adapter.AnswerCallbackAsync(callbackId, "✅ Проверка успешно пройдена!", false);
+
+                        if (user == null || !user.HasAcceptedPrivacyPolicy)
+                        {
+                            await adapter.RenderScreenAsync(chatId, messageId, BuildPrivacyPolicyOnboardingScreen());
+                        }
+                        else if (!user.HasCompletedOnboarding)
+                        {
+                            await adapter.RenderScreenAsync(chatId, messageId, BuildOnboardingShiftScreen(userId));
+                        }
+                        else
+                        {
+                            await ShowMainMenuAsync(adapter, chatId, userId, messageId);
+                        }
+                        return;
+                    }
+                    else
+                    {
+                        await adapter.AnswerCallbackAsync(callbackId, "❌ Неверно! Попробуйте ещё раз.", true);
+                        var newCaptcha = _captchaService.GenerateCaptchaScreen(userId);
+                        await adapter.RenderScreenAsync(chatId, messageId, newCaptcha);
+                        return;
+                    }
+                }
+                else
+                {
+                    var captchaScreen = _captchaService.GenerateCaptchaScreen(userId);
+                    await adapter.RenderScreenAsync(chatId, messageId, captchaScreen);
+                    return;
+                }
+            }
+
             switch (data)
             {
             case "cmd_back_main":
@@ -1627,7 +1847,58 @@ public class DiaryBotWorkflowEngine
 
             case "cmd_accept_privacy":
                 await AcceptPrivacyPolicyAsync(userId);
-                await ShowMainMenuAsync(adapter, chatId, userId, messageId);
+                var refreshedUser = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId);
+                if (refreshedUser != null && !refreshedUser.HasCompletedOnboarding)
+                {
+                    await adapter.RenderScreenAsync(chatId, messageId, BuildOnboardingShiftScreen(userId));
+                }
+                else
+                {
+                    await ShowMainMenuAsync(adapter, chatId, userId, messageId);
+                }
+                break;
+
+            case { } s when s.StartsWith("cmd_onboard_shift:"):
+                var shiftArg = s["cmd_onboard_shift:".Length..];
+                var uShift = await _db.Users.FirstOrDefaultAsync(x => x.Id == userId);
+                if (uShift != null)
+                {
+                    if (shiftArg == "2") uShift.Shift = 2;
+                    else if (shiftArg == "1") uShift.Shift = 1;
+                    await _db.SaveChangesAsync();
+                    await _userSyncService.SyncUserAcrossPlatformsAsync(uShift);
+                }
+                var onboardAlarmScreen = BuildOnboardingAlarmScreen(userId, uShift?.Shift ?? 1);
+                await adapter.RenderScreenAsync(chatId, messageId, onboardAlarmScreen);
+                break;
+
+            case { } s when s.StartsWith("cmd_onboard_alarm:"):
+                var alarmMode = s["cmd_onboard_alarm:".Length..];
+                var uAlarm = await _db.Users.FirstOrDefaultAsync(x => x.Id == userId);
+                if (uAlarm != null)
+                {
+                    ApplyOnboardingAlarmPreset(uAlarm, alarmMode);
+                    uAlarm.HasCompletedOnboarding = true;
+                    await _db.SaveChangesAsync();
+                    await _userSyncService.SyncUserAcrossPlatformsAsync(uAlarm);
+                }
+                var finishScreen = await BuildOnboardingFinishScreenAsync(userId, adapter.Platform);
+                await adapter.RenderScreenAsync(chatId, messageId, finishScreen);
+                break;
+
+            case "cmd_onboard_restart":
+                await adapter.RenderScreenAsync(chatId, messageId, BuildOnboardingShiftScreen(userId));
+                break;
+
+            case "cmd_alarm_toggle_shift":
+                var uToggleShift = await _db.Users.FirstOrDefaultAsync(x => x.Id == userId);
+                if (uToggleShift != null)
+                {
+                    uToggleShift.Shift = uToggleShift.Shift == 1 ? 2 : 1;
+                    await _db.SaveChangesAsync();
+                    await _userSyncService.SyncUserAcrossPlatformsAsync(uToggleShift);
+                }
+                await adapter.RenderScreenAsync(chatId, messageId, await BuildAlarmMenuScreenAsync(userId));
                 break;
 
             case "cmd_check_channel_sub":

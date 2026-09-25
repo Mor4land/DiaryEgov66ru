@@ -34,6 +34,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<BookmarkletAuthService>();
         services.AddSingleton<PlaywrightAuthManager>();
         services.AddSingleton<MaintenanceModeService>();
+        services.AddSingleton<BotCaptchaService>();
         services.AddSingleton<BotStateService>();
         services.AddSingleton<SchoolBellScheduleService>();
 

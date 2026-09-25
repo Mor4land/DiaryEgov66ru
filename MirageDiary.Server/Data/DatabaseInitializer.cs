@@ -66,6 +66,8 @@ public static class DatabaseInitializer
                 ""Shift"" INTEGER NOT NULL DEFAULT 1,
                 ""HasAcceptedPrivacyPolicy"" INTEGER NOT NULL DEFAULT 0,
                 ""PrivacyPolicyAcceptedAtUtc"" TEXT NULL,
+                ""HasPassedCaptcha"" INTEGER NOT NULL DEFAULT 0,
+                ""HasCompletedOnboarding"" INTEGER NOT NULL DEFAULT 0,
                 ""Username"" TEXT NOT NULL DEFAULT '',
                 ""FirstName"" TEXT NOT NULL DEFAULT '',
                 ""LastName"" TEXT NOT NULL DEFAULT '',
@@ -150,6 +152,8 @@ public static class DatabaseInitializer
                 ("Shift", "INTEGER NOT NULL DEFAULT 1"),
                 ("HasAcceptedPrivacyPolicy", "INTEGER NOT NULL DEFAULT 0"),
                 ("PrivacyPolicyAcceptedAtUtc", "TEXT NULL"),
+                ("HasPassedCaptcha", "INTEGER NOT NULL DEFAULT 0"),
+                ("HasCompletedOnboarding", "INTEGER NOT NULL DEFAULT 0"),
                 ("Username", "TEXT NOT NULL DEFAULT ''"),
                 ("FirstName", "TEXT NOT NULL DEFAULT ''"),
                 ("LastName", "TEXT NOT NULL DEFAULT ''"),
@@ -170,6 +174,10 @@ public static class DatabaseInitializer
                     logger.LogInformation("[DatabaseInitializer] Added column '{Column}' to Users table.", col.Name);
                 }
             }
+
+            // Ensure existing active users who already consented or logged in bypass captcha and onboarding
+            cmd.CommandText = @"UPDATE ""Users"" SET ""HasPassedCaptcha"" = 1, ""HasCompletedOnboarding"" = 1 WHERE ""HasAcceptedPrivacyPolicy"" = 1 OR (""AccessToken"" IS NOT NULL AND ""AccessToken"" != '');";
+            await cmd.ExecuteNonQueryAsync();
 
             // Ensure UpdatedAt is populated for all existing rows (give them 30-day grace period from today)
             cmd.CommandText = @"UPDATE ""Users"" SET ""UpdatedAt"" = strftime('%Y-%m-%d %H:%M:%fZ', 'now') WHERE ""UpdatedAt"" IS NULL;";

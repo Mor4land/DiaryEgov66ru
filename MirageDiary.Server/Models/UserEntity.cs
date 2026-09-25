@@ -49,9 +49,11 @@ public class UserEntity
     public string LastMarksHash { get; set; } = "";
     public int Shift { get; set; } = 1; // 1 or 2
 
-    // 152-FZ Privacy Policy Onboarding
+    // 152-FZ Privacy Policy & Anti-Bot Onboarding
     public bool HasAcceptedPrivacyPolicy { get; set; } = false;
     public DateTime? PrivacyPolicyAcceptedAtUtc { get; set; }
+    public bool HasPassedCaptcha { get; set; } = false;
+    public bool HasCompletedOnboarding { get; set; } = false;
 
     // Cross-platform Profile Metadata
     public string Username { get; set; } = "";

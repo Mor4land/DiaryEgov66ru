@@ -221,6 +221,29 @@ public class UserSyncService
                     _db.Users.Update(sourceUser);
                 }
 
+                // 8. Synchronize Anti-Bot & Onboarding flags
+                if (sourceUser.HasPassedCaptcha && !peer.HasPassedCaptcha)
+                {
+                    peer.HasPassedCaptcha = true;
+                    peerModified = true;
+                }
+                else if (!sourceUser.HasPassedCaptcha && peer.HasPassedCaptcha)
+                {
+                    sourceUser.HasPassedCaptcha = true;
+                    _db.Users.Update(sourceUser);
+                }
+
+                if (sourceUser.HasCompletedOnboarding && !peer.HasCompletedOnboarding)
+                {
+                    peer.HasCompletedOnboarding = true;
+                    peerModified = true;
+                }
+                else if (!sourceUser.HasCompletedOnboarding && peer.HasCompletedOnboarding)
+                {
+                    sourceUser.HasCompletedOnboarding = true;
+                    _db.Users.Update(sourceUser);
+                }
+
                 if (peerModified)
                 {
                     peer.UpdatedAt = DateTime.UtcNow;
