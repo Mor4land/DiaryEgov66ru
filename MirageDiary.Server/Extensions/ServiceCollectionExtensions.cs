@@ -66,6 +66,25 @@ public static class ServiceCollectionExtensions
 
     public static IServiceCollection AddMirageHttpClients(this IServiceCollection services)
     {
+        // Default unnamed HttpClient with secure Russian CA validation and 15s hard socket timeout
+        services.AddHttpClient(string.Empty, client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(15);
+        })
+        .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+        {
+            PooledConnectionLifetime = TimeSpan.FromMinutes(15),
+            ConnectTimeout = TimeSpan.FromSeconds(8),
+            SslOptions = new SslClientAuthenticationOptions
+            {
+                RemoteCertificateValidationCallback = (sender, cert, chain, errors) =>
+                {
+                    var cert2 = cert as System.Security.Cryptography.X509Certificates.X509Certificate2;
+                    return RussianTrustedCertificateValidator.Validate(null, cert2, chain, errors);
+                }
+            }
+        });
+
         // DiaryClient with secure TLS validation scoped to Russian Ministry certificates and 15s hard socket timeout
         services.AddHttpClient<DiaryClient>(client =>
         {
@@ -75,15 +94,15 @@ public static class ServiceCollectionExtensions
         {
             PooledConnectionLifetime = TimeSpan.FromMinutes(15),
             ConnectTimeout = TimeSpan.FromSeconds(8),
-                SslOptions = new SslClientAuthenticationOptions
+            SslOptions = new SslClientAuthenticationOptions
+            {
+                RemoteCertificateValidationCallback = (sender, cert, chain, errors) =>
                 {
-                    RemoteCertificateValidationCallback = (sender, cert, chain, errors) =>
-                    {
-                        var cert2 = cert as System.Security.Cryptography.X509Certificates.X509Certificate2;
-                        return RussianTrustedCertificateValidator.Validate(null, cert2, chain, errors);
-                    }
+                    var cert2 = cert as System.Security.Cryptography.X509Certificates.X509Certificate2;
+                    return RussianTrustedCertificateValidator.Validate(null, cert2, chain, errors);
                 }
-            });
+            }
+        });
 
         // HttpClient for diary reverse-proxy (isolated handler)
         services.AddHttpClient("diary-proxy")

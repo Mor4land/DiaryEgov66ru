@@ -57,6 +57,14 @@ public class DiaryBotWorkflowEngine
         _stateService = stateService ?? new BotStateService();
     }
 
+    public string BuildMiniAppUrl(string userId, string? firstName = null, bool force = false)
+    {
+        var baseUrl = (_config["MiniAppUrl"] ?? "https://miragediary.space").TrimEnd('/');
+        var fnParam = !string.IsNullOrEmpty(firstName) ? $"&firstName={Uri.EscapeDataString(firstName)}" : "";
+        var forceParam = force ? "&force=1" : "";
+        return $"{baseUrl}?userId={Uri.EscapeDataString(userId)}{fnParam}{forceParam}";
+    }
+
     public async Task<UserEntity> EnsureUserExistsAsync(string userId, string? username = null, string? firstName = null, string? lastName = null, string platform = "telegram")
     {
         var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId);
@@ -122,7 +130,7 @@ public class DiaryBotWorkflowEngine
         {
             if (platform == "telegram")
             {
-                buttons.Add(new List<BotButton> { BotButton.WebApp("🔐 Войти через Госуслуги", webAppUrl) });
+                buttons.Add(new List<BotButton> { BotButton.WebApp("🔐 Войти через Госуслуги", BuildMiniAppUrl(userId, user?.FirstName)) });
             }
             else
             {
@@ -251,7 +259,7 @@ public class DiaryBotWorkflowEngine
         {
             buttons.Add(new List<BotButton>
             {
-                BotButton.WebApp("🔄 Госуслуги", webAppUrl),
+                BotButton.WebApp("🔄 Госуслуги", BuildMiniAppUrl(userId, user?.FirstName, force: true)),
                 BotButton.Callback("🔗 Связать с MAX", "cmd_link_account")
             });
         }
@@ -684,9 +692,8 @@ public class DiaryBotWorkflowEngine
 
         if (marksText.StartsWith("🔒") || marksText.StartsWith("❌"))
         {
-            var webAppUrl = _config["MiniAppUrl"] ?? "https://miragediary.space";
             if (platform == "telegram")
-                buttons.Insert(0, new List<BotButton> { BotButton.WebApp("🔐 Войти через Госуслуги", webAppUrl) });
+                buttons.Insert(0, new List<BotButton> { BotButton.WebApp("🔐 Войти через Госуслуги", BuildMiniAppUrl(userId, null, force: true)) });
             else
             {
                 var maxBotApp = _config["MaxBot:Username"] ?? _config["MaxBotUsername"] ?? "se13960436_bot";
@@ -707,13 +714,12 @@ public class DiaryBotWorkflowEngine
     {
         var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId);
         var isAuthorized = user != null && !string.IsNullOrEmpty(user.AccessToken);
-        var webAppUrl = _config["MiniAppUrl"] ?? "https://miragediary.space";
 
         if (!isAuthorized)
         {
             var authButtons = new List<List<BotButton>>();
             if (platform == "telegram")
-                authButtons.Add(new List<BotButton> { BotButton.WebApp("🔐 Войти через Госуслуги", webAppUrl) });
+                authButtons.Add(new List<BotButton> { BotButton.WebApp("🔐 Войти через Госуслуги", BuildMiniAppUrl(userId, user?.FirstName)) });
             else
             {
                 var maxBotApp = _config["MaxBot:Username"] ?? _config["MaxBotUsername"] ?? "se13960436_bot";
@@ -732,7 +738,7 @@ public class DiaryBotWorkflowEngine
         {
             var expiredButtons = new List<List<BotButton>>();
             if (platform == "telegram")
-                expiredButtons.Add(new List<BotButton> { BotButton.WebApp("🔐 Войти заново", webAppUrl) });
+                expiredButtons.Add(new List<BotButton> { BotButton.WebApp("🔐 Войти заново", BuildMiniAppUrl(userId, user?.FirstName, force: true)) });
             else
             {
                 var maxBotApp = _config["MaxBot:Username"] ?? _config["MaxBotUsername"] ?? "se13960436_bot";
@@ -1967,7 +1973,7 @@ public class DiaryBotWorkflowEngine
             var webAppUrl = _config["MiniAppUrl"] ?? "https://miragediary.space";
             var buttons = new List<List<BotButton>>();
             if (adapter.Platform == "telegram")
-                buttons.Add(new List<BotButton> { BotButton.WebApp("🔐 Войти заново", webAppUrl) });
+                buttons.Add(new List<BotButton> { BotButton.WebApp("🔐 Войти заново", BuildMiniAppUrl(userId, null, force: true)) });
             else
             {
                 var maxBotApp = _config["MaxBot:Username"] ?? _config["MaxBotUsername"] ?? "se13960436_bot";

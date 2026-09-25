@@ -348,7 +348,14 @@ public class MiniAppController : ControllerBase
                 return Ok(new Models.CheckAuthResponse { IsAuthorized = true });
             }
         }
-        catch { }
+        catch (DiarySessionExpiredException)
+        {
+            return Ok(new Models.CheckAuthResponse { IsAuthorized = false });
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[MiniApp] CheckAuth warning for user={telegramUserId}: {ex.Message}");
+        }
 
         return Ok(new Models.CheckAuthResponse { IsAuthorized = true });
     }

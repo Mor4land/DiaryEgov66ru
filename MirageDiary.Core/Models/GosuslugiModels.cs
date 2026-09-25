@@ -510,9 +510,15 @@ public class GosuslugiMarkItem
     [JsonConverter(typeof(FlexibleStringConverter))]
     public string MarksId { get; set; } = string.Empty;
 
+    private string _rawId = string.Empty;
+
     [JsonPropertyName("id")]
     [JsonConverter(typeof(FlexibleStringConverter))]
-    public string RawId { get; set; } = string.Empty;
+    public string RawId
+    {
+        get => !string.IsNullOrEmpty(_rawId) ? _rawId : (!string.IsNullOrEmpty(MarksId) ? MarksId : string.Empty);
+        set => _rawId = value;
+    }
 
     [JsonIgnore]
     public string Id
@@ -533,9 +539,15 @@ public class GosuslugiMarkItem
     [JsonConverter(typeof(FlexibleStringConverter))]
     public string? MarkValue2 { get; set; }
 
+    private string _rawValue = string.Empty;
+
     [JsonPropertyName("value")]
     [JsonConverter(typeof(FlexibleStringConverter))]
-    public string RawValue { get; set; } = string.Empty;
+    public string RawValue
+    {
+        get => !string.IsNullOrEmpty(_rawValue) ? _rawValue : (!string.IsNullOrEmpty(MarkValue1) ? Value : string.Empty);
+        set => _rawValue = value;
+    }
 
     public static string NormalizeMarkValue(string? raw)
     {
@@ -604,9 +616,15 @@ public class GosuslugiMarkItem
     [JsonConverter(typeof(FlexibleStringConverter))]
     public string MarkDate { get; set; } = string.Empty;
 
+    private string _rawDate = string.Empty;
+
     [JsonPropertyName("date")]
     [JsonConverter(typeof(FlexibleStringConverter))]
-    public string RawDate { get; set; } = string.Empty;
+    public string RawDate
+    {
+        get => !string.IsNullOrEmpty(_rawDate) ? _rawDate : (!string.IsNullOrEmpty(MarkDate) ? MarkDate : string.Empty);
+        set => _rawDate = value;
+    }
 
     [JsonIgnore]
     public string Date

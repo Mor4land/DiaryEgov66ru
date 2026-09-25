@@ -466,11 +466,6 @@ public class DiaryClient
         string studentId = targetStudentId ?? tokenData?.StudentId ?? "";
         string mdmId = "";
 
-        if (!string.IsNullOrEmpty(studentId))
-        {
-            return (studentId, mdmId);
-        }
-
         try
         {
             var students = await GetStudentInfoAsync();
@@ -478,7 +473,9 @@ public class DiaryClient
             {
                 var student = (!string.IsNullOrEmpty(targetStudentId))
                     ? (students.FirstOrDefault(s => s.StudentId == targetStudentId || s.MdmId == targetStudentId) ?? students[0])
-                    : students[0];
+                    : (!string.IsNullOrEmpty(studentId)
+                        ? (students.FirstOrDefault(s => s.StudentId == studentId || s.MdmId == studentId) ?? students[0])
+                        : students[0]);
 
                 studentId = !string.IsNullOrEmpty(student.StudentId) ? student.StudentId : studentId;
                 mdmId = student.MdmId ?? "";

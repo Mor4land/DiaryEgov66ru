@@ -210,7 +210,7 @@ public class DiaryInteractionService
         return await ExecuteSingleFlightAsync(flightKey, async ct =>
         {
             var httpClientFactory = scope.ServiceProvider.GetRequiredService<System.Net.Http.IHttpClientFactory>();
-            var client = httpClientFactory.CreateClient();
+            var client = httpClientFactory.CreateClient("diary-proxy");
             var clientWithUser = new DiaryClient(client, tokenStore, userId);
 
             try
@@ -389,7 +389,7 @@ public class DiaryInteractionService
         return await ExecuteSingleFlightAsync(flightKey, async ct =>
         {
             var httpClientFactory = scope.ServiceProvider.GetRequiredService<System.Net.Http.IHttpClientFactory>();
-            var client = httpClientFactory.CreateClient();
+            var client = httpClientFactory.CreateClient("diary-proxy");
             var clientWithUser = new DiaryClient(client, tokenStore, userId);
 
             try
@@ -638,7 +638,7 @@ public class DiaryInteractionService
         if (!isDbCacheFresh || forceRefresh)
         {
             var httpClientFactory = scope.ServiceProvider.GetRequiredService<System.Net.Http.IHttpClientFactory>();
-            var client = httpClientFactory.CreateClient();
+            var client = httpClientFactory.CreateClient("diary-proxy");
             var clientWithUser = new DiaryClient(client, tokenStore, userId);
 
             try
@@ -715,7 +715,7 @@ public class DiaryInteractionService
         if (marksForQuarter.Count == 0)
         {
             var emptyList = new List<SubjectGradeSummary>();
-            _memoryCache.Set(memKey, emptyList, new MemoryCacheEntryOptions { SlidingExpiration = TimeSpan.FromMinutes(5), Size = 1 });
+            _memoryCache.Set(memKey, emptyList, new MemoryCacheEntryOptions { SlidingExpiration = TimeSpan.FromSeconds(10), AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(15), Size = 1 });
             return emptyList;
         }
 
@@ -914,7 +914,7 @@ public class DiaryInteractionService
 
         var user = await dbContext.Users.FindAsync(userId);
         var httpClientFactory = scope.ServiceProvider.GetRequiredService<System.Net.Http.IHttpClientFactory>();
-        var client = httpClientFactory.CreateClient();
+        var client = httpClientFactory.CreateClient("diary-proxy");
         var clientWithUser = new DiaryClient(client, tokenStore, userId);
 
         // Auto-resolve school and class if not present in DB
@@ -1069,7 +1069,7 @@ public class DiaryInteractionService
         var tokenStore = scope.ServiceProvider.GetRequiredService<ITokenStore>();
 
         var httpClientFactory = scope.ServiceProvider.GetRequiredService<System.Net.Http.IHttpClientFactory>();
-        var client = httpClientFactory.CreateClient();
+        var client = httpClientFactory.CreateClient("diary-proxy");
         var clientWithUser = new DiaryClient(client, tokenStore, userId);
 
         try
@@ -1108,7 +1108,7 @@ public class DiaryInteractionService
         await dbContext.SaveChangesAsync();
 
         var httpClientFactory = scope.ServiceProvider.GetRequiredService<System.Net.Http.IHttpClientFactory>();
-        var client = httpClientFactory.CreateClient();
+        var client = httpClientFactory.CreateClient("diary-proxy");
         var clientWithUser = new DiaryClient(client, tokenStore, userId);
 
         try

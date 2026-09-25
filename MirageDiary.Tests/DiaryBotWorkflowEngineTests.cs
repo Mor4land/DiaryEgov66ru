@@ -86,7 +86,8 @@ public class DiaryBotWorkflowEngineTests : IDisposable
 
         // Row 1: WebApp for Gosuslugi + Link to MAX
         Assert.Equal(2, screen.Buttons[1].Count);
-        Assert.Equal("https://t.me/MirageDiaryBot/app", screen.Buttons[1][0].WebAppUrl);
+        Assert.StartsWith("https://t.me/MirageDiaryBot/app", screen.Buttons[1][0].WebAppUrl);
+        Assert.Contains("userId=tg_12345", screen.Buttons[1][0].WebAppUrl);
         Assert.Equal("cmd_link_account", screen.Buttons[1][1].CallbackData);
         Assert.Contains("MAX", screen.Buttons[1][1].Text);
 
