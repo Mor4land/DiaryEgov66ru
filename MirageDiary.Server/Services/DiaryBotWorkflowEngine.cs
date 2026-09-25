@@ -1344,14 +1344,28 @@ public class DiaryBotWorkflowEngine
         return BotScreen.Create(text, "banner_settings.png").WithButtons(buttons);
     }
 
-    public async Task<BotScreen> ExecuteDeleteAccountAsync(string userId)
+    public async Task<BotScreen> ExecuteDeleteAccountAsync(string userId, IBotPlatformAdapter? adapter = null, long? chatId = null)
     {
         var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId);
         if (user != null)
         {
+            if (!string.IsNullOrEmpty(user.LinkedUserId))
+            {
+                var peer = await _db.Users.FirstOrDefaultAsync(u => u.Id == user.LinkedUserId);
+                if (peer != null && peer.LinkedUserId == user.Id)
+                {
+                    peer.LinkedUserId = "";
+                }
+            }
             _db.Users.Remove(user);
             await _db.SaveChangesAsync();
             await _tokenStore.RevokeTokensAsync(userId);
+        }
+        _captchaService.ClearCaptcha(userId);
+
+        if (adapter != null && chatId.HasValue)
+        {
+            await adapter.DeleteChatHistoryAsync(chatId.Value);
         }
 
         var text = "✅ *Ваш аккаунт и персональные данные полностью удалены.*\n\nСпасибо, что пользовались Mirage Diary!";
@@ -1361,6 +1375,28 @@ public class DiaryBotWorkflowEngine
         };
 
         return BotScreen.Create(text, "banner_menu.png").WithButtons(buttons);
+    }
+
+    public async Task HandleUserStopAsync(IBotPlatformAdapter adapter, long chatId, string userId)
+    {
+        _stateService.ClearState(chatId);
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId);
+        if (user != null)
+        {
+            if (!string.IsNullOrEmpty(user.LinkedUserId))
+            {
+                var peer = await _db.Users.FirstOrDefaultAsync(u => u.Id == user.LinkedUserId);
+                if (peer != null && peer.LinkedUserId == user.Id)
+                {
+                    peer.LinkedUserId = "";
+                }
+            }
+            _db.Users.Remove(user);
+            await _db.SaveChangesAsync();
+            await _tokenStore.RevokeTokensAsync(userId);
+        }
+        _captchaService.ClearCaptcha(userId);
+        await adapter.DeleteChatHistoryAsync(chatId);
     }
 
     // ─── Связка аккаунтов ─────────────────────────────────────────────────────
@@ -1644,6 +1680,13 @@ public class DiaryBotWorkflowEngine
         {
             _stateService.ClearState(chatId);
             await adapter.RenderScreenAsync(chatId, null, BuildDeleteAccountConfirmationScreen());
+            return;
+        }
+
+        if (text.StartsWith("/stop") || text.StartsWith("/стоп") || text.Equals("стоп", StringComparison.OrdinalIgnoreCase))
+        {
+            await HandleUserStopAsync(adapter, chatId, userId);
+            await adapter.SendTextMessageAsync(chatId, "👋 *Работа с ботом остановлена, ваши персональные данные и история сообщений удалены.*\n\nЧтобы начать заново, отправьте команду /start.");
             return;
         }
 
@@ -2102,7 +2145,8 @@ public class DiaryBotWorkflowEngine
                 break;
 
             case "cmd_delete_account_confirm":
-                await adapter.RenderScreenAsync(chatId, messageId, await ExecuteDeleteAccountAsync(userId));
+                var delScreen = await ExecuteDeleteAccountAsync(userId, adapter, chatId);
+                await adapter.RenderScreenAsync(chatId, null, delScreen);
                 break;
 
             case "cmd_link_account":

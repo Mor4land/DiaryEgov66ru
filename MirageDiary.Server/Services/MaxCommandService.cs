@@ -23,6 +23,7 @@ namespace MirageDiary.Server.Services;
 public class MaxCommandService : IBotPlatformAdapter
 {
     private static readonly ConcurrentDictionary<long, DateTime> _userCooldowns = new();
+    private static readonly ConcurrentDictionary<long, ConcurrentQueue<string>> _chatMessageHistory = new();
 
     private readonly IMaxBotClient _botClient;
     private readonly DiaryBotWorkflowEngine _engine;
@@ -43,6 +44,14 @@ public class MaxCommandService : IBotPlatformAdapter
         _logger = logger;
     }
 
+    private static void RecordMessageId(long chatId, string? messageId)
+    {
+        if (string.IsNullOrWhiteSpace(messageId)) return;
+        var queue = _chatMessageHistory.GetOrAdd(chatId, _ => new ConcurrentQueue<string>());
+        queue.Enqueue(messageId);
+        while (queue.Count > 100 && queue.TryDequeue(out _)) { }
+    }
+
     public async Task HandleUpdateAsync(Update update)
     {
         if (update == null) return;
@@ -54,6 +63,7 @@ public class MaxCommandService : IBotPlatformAdapter
                 var msg = msgCreated.Message;
                 long chatId = msg?.Sender?.Id ?? 0;
                 if (chatId == 0) return;
+                RecordMessageId(chatId, msg?.Body?.Mid);
 
                 if (!CheckUserCooldown(chatId)) return;
 
@@ -81,6 +91,7 @@ public class MaxCommandService : IBotPlatformAdapter
 
                 long chatId = cb.User?.Id ?? msgCallback.Message?.Sender?.Id ?? 0;
                 if (chatId == 0) return;
+                RecordMessageId(chatId, msgCallback.Message?.Body?.Mid);
 
                 string messageId = msgCallback.Message?.Body?.Mid ?? "";
                 string maxUserId = $"max_{chatId}";
@@ -93,7 +104,35 @@ public class MaxCommandService : IBotPlatformAdapter
                 long userId = botStarted.User?.Id ?? botStarted.ChatId;
                 if (userId != 0)
                 {
-                    await _engine.ProcessMessageOrCommandAsync(this, userId, $"max_{userId}", "/start");
+                    long chatId = botStarted.ChatId != 0 ? botStarted.ChatId : userId;
+                    await _engine.ProcessMessageOrCommandAsync(this, chatId, $"max_{userId}", "/start", botStarted.User?.Username, botStarted.User?.FirstName, botStarted.User?.LastName);
+                }
+            }
+            else if (update is BotStoppedUpdate botStopped)
+            {
+                long userId = botStopped.User?.Id ?? botStopped.ChatId;
+                if (userId != 0)
+                {
+                    long chatId = botStopped.ChatId != 0 ? botStopped.ChatId : userId;
+                    await _engine.HandleUserStopAsync(this, chatId, $"max_{userId}");
+                }
+            }
+            else if (update is DialogRemovedUpdate dialogRemoved)
+            {
+                long userId = dialogRemoved.User?.Id ?? dialogRemoved.ChatId;
+                if (userId != 0)
+                {
+                    long chatId = dialogRemoved.ChatId != 0 ? dialogRemoved.ChatId : userId;
+                    await _engine.HandleUserStopAsync(this, chatId, $"max_{userId}");
+                }
+            }
+            else if (update is DialogClearedUpdate dialogCleared)
+            {
+                long userId = dialogCleared.User?.Id ?? dialogCleared.ChatId;
+                if (userId != 0)
+                {
+                    long chatId = dialogCleared.ChatId != 0 ? dialogCleared.ChatId : userId;
+                    await _engine.HandleUserStopAsync(this, chatId, $"max_{userId}");
                 }
             }
         }
@@ -193,7 +232,10 @@ public class MaxCommandService : IBotPlatformAdapter
                 });
                 return;
             }
-            catch { }
+            catch
+            {
+                try { await _botClient.DeleteMessageByIdAsync(messageId); } catch { }
+            }
         }
 
         await SendUserMessageAsync(chatId, new SendMessageRequest
@@ -234,7 +276,10 @@ public class MaxCommandService : IBotPlatformAdapter
                     });
                     return;
                 }
-                catch { }
+                catch
+                {
+                    try { await _botClient.DeleteMessageByIdAsync(messageId); } catch { }
+                }
             }
         }
 
@@ -252,14 +297,18 @@ public class MaxCommandService : IBotPlatformAdapter
         {
             request.UserId = userId;
             request.ChatId = null;
-            await _botClient.SendMessageAsync(request);
+            var resp = await _botClient.SendMessageAsync(request);
+            if (resp?.Message?.Body?.Mid != null)
+                RecordMessageId(userId, resp.Message.Body.Mid);
         }
         catch (Exception) when (request.Format == MessageFormat.Markdown)
         {
             try
             {
                 request.Format = null;
-                await _botClient.SendMessageAsync(request);
+                var resp = await _botClient.SendMessageAsync(request);
+                if (resp?.Message?.Body?.Mid != null)
+                    RecordMessageId(userId, resp.Message.Body.Mid);
             }
             catch (Exception retryEx)
             {
@@ -269,6 +318,33 @@ public class MaxCommandService : IBotPlatformAdapter
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to send MAX message to user {UserId}", userId);
+        }
+    }
+
+    public async Task DeleteChatHistoryAsync(long chatId)
+    {
+        try
+        {
+            await _botClient.DeleteChatAsync(chatId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to DeleteChatAsync for MAX user {ChatId}", chatId);
+        }
+
+        if (_chatMessageHistory.TryRemove(chatId, out var queue))
+        {
+            while (queue.TryDequeue(out var mid))
+            {
+                if (!string.IsNullOrEmpty(mid))
+                {
+                    try
+                    {
+                        await _botClient.DeleteMessageByIdAsync(mid);
+                    }
+                    catch { }
+                }
+            }
         }
     }
 

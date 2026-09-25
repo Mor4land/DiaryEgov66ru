@@ -169,4 +169,12 @@ public class BotCaptchaService
             Size = 1
         });
     }
+
+    /// <summary>
+    /// Clears any cached captcha state for the given user.
+    /// </summary>
+    public void ClearCaptcha(string userId)
+    {
+        _cache.Remove($"captcha:{userId}");
+    }
 }

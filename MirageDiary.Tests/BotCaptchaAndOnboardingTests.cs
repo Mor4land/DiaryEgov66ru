@@ -43,6 +43,14 @@ public class TestBotPlatformAdapter : IBotPlatformAdapter
     }
 
     public Task<bool> EnsureChannelSubscribedAsync(long chatId, string userId) => Task.FromResult(true);
+
+    public bool WasChatHistoryDeleted { get; private set; }
+
+    public Task DeleteChatHistoryAsync(long chatId)
+    {
+        WasChatHistoryDeleted = true;
+        return Task.CompletedTask;
+    }
 }
 
 public class BotCaptchaAndOnboardingTests : IDisposable
@@ -252,5 +260,109 @@ public class BotCaptchaAndOnboardingTests : IDisposable
         await _engine.ProcessCallbackAsync(adapter, chatId, "msg1", userId, "cq2", "cmd_onboard_restart");
         Assert.NotNull(adapter.LastRenderedScreen);
         Assert.Contains("Смена обучения", adapter.LastRenderedScreen.Text);
+    }
+
+    [Fact]
+    public async Task StopCommand_WipesUserDataAndDeletesChatHistory()
+    {
+        var adapter = new TestBotPlatformAdapter();
+        long chatId = 11223344;
+        string userId = "user_to_stop_1";
+
+        var user = new UserEntity
+        {
+            Id = userId,
+            HasPassedCaptcha = true,
+            HasAcceptedPrivacyPolicy = true,
+            HasCompletedOnboarding = true,
+            AccessToken = "valid_token_123",
+            Username = "student_stop"
+        };
+        _db.Users.Add(user);
+        await _db.SaveChangesAsync();
+
+        // Send /stop command
+        await _engine.ProcessMessageOrCommandAsync(adapter, chatId, userId, "/stop");
+
+        // Verify user is completely removed from database
+        var deletedUser = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId);
+        Assert.Null(deletedUser);
+
+        // Verify conversation history deletion was requested
+        Assert.True(adapter.WasChatHistoryDeleted);
+
+        // Verify farewell / notification text was sent
+        Assert.NotNull(adapter.LastTextMessage);
+        Assert.Contains("остановлена", adapter.LastTextMessage);
+        Assert.Contains("удалены", adapter.LastTextMessage);
+    }
+
+    [Fact]
+    public async Task HandleUserStopAsync_ForMaxUser_WipesDataAndDeletesChatHistory()
+    {
+        var adapter = new TestBotPlatformAdapter { Platform = "max" };
+        long chatId = 99881122;
+        string maxUserId = $"max_{chatId}";
+
+        var user = new UserEntity
+        {
+            Id = maxUserId,
+            Platform = "max",
+            HasPassedCaptcha = true,
+            HasAcceptedPrivacyPolicy = true,
+            HasCompletedOnboarding = true,
+            AccessToken = "max_token_abc"
+        };
+        _db.Users.Add(user);
+        await _db.SaveChangesAsync();
+
+        // Trigger stop handler (e.g. from BotStoppedUpdate or DialogRemovedUpdate)
+        await _engine.HandleUserStopAsync(adapter, chatId, maxUserId);
+
+        var deletedUser = await _db.Users.FirstOrDefaultAsync(u => u.Id == maxUserId);
+        Assert.Null(deletedUser);
+        Assert.True(adapter.WasChatHistoryDeleted);
+    }
+
+    [Fact]
+    public async Task MaxBot_OnboardingFlow_FromCaptchaToFinish_Success()
+    {
+        var adapter = new TestBotPlatformAdapter { Platform = "max" };
+        long chatId = 44556677;
+        string maxUserId = $"max_{chatId}";
+
+        // 1. Initial /start in MAX -> Shows Captcha
+        await _engine.ProcessMessageOrCommandAsync(adapter, chatId, maxUserId, "/start");
+        Assert.NotNull(adapter.LastRenderedScreen);
+        Assert.Contains("Проверка безопасности", adapter.LastRenderedScreen.Text);
+
+        // 2. Submit correct captcha
+        _captchaService.SetExpectedAnswer(maxUserId, "cat");
+        await _engine.ProcessCallbackAsync(adapter, chatId, "msg1", maxUserId, "cq1", "cmd_captcha:cat");
+        Assert.NotNull(adapter.LastRenderedScreen);
+        Assert.Contains("Политика обработки персональных данных", adapter.LastRenderedScreen.Text);
+
+        // 3. Accept Privacy Policy -> Step 1 (Shift)
+        await _engine.ProcessCallbackAsync(adapter, chatId, "msg1", maxUserId, "cq2", "cmd_accept_privacy");
+        Assert.NotNull(adapter.LastRenderedScreen);
+        Assert.Contains("Смена обучения", adapter.LastRenderedScreen.Text);
+
+        // 4. Select Shift 1 -> Step 2 (Alarm)
+        await _engine.ProcessCallbackAsync(adapter, chatId, "msg1", maxUserId, "cq3", "cmd_onboard_shift:1");
+        Assert.NotNull(adapter.LastRenderedScreen);
+        Assert.Contains("Умный будильник", adapter.LastRenderedScreen.Text);
+
+        // 5. Select All -> Finish screen with MAX App button
+        await _engine.ProcessCallbackAsync(adapter, chatId, "msg1", maxUserId, "cq4", "cmd_onboard_alarm:all");
+        Assert.NotNull(adapter.LastRenderedScreen);
+        Assert.Contains("Настройка успешно завершена", adapter.LastRenderedScreen.Text);
+        Assert.NotNull(adapter.LastRenderedScreen.Buttons[0][0].MaxWebApp);
+        Assert.Contains("Войти через Госуслуги", adapter.LastRenderedScreen.Buttons[0][0].Text);
+
+        // Verify DB entity flags
+        var user = await _db.Users.FirstAsync(u => u.Id == maxUserId);
+        Assert.True(user.HasPassedCaptcha);
+        Assert.True(user.HasAcceptedPrivacyPolicy);
+        Assert.True(user.HasCompletedOnboarding);
     }
 }

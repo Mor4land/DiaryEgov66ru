@@ -23,6 +23,7 @@ public class BotCommandService : IBotPlatformAdapter
     private static readonly ConcurrentDictionary<string, string> _bannerFileIdCache = new();
     private static readonly ConcurrentDictionary<long, string> _currentBannerByChat = new();
     private static readonly ConcurrentDictionary<long, DateTime> _userCooldowns = new();
+    private static readonly ConcurrentDictionary<long, ConcurrentQueue<int>> _chatMessageHistory = new();
 
     private readonly ITelegramBotClient _botClient;
     private readonly DiaryBotWorkflowEngine _engine;
@@ -40,12 +41,21 @@ public class BotCommandService : IBotPlatformAdapter
         _config = config;
     }
 
+    private static void RecordMessageId(long chatId, int messageId)
+    {
+        if (messageId <= 0) return;
+        var queue = _chatMessageHistory.GetOrAdd(chatId, _ => new ConcurrentQueue<int>());
+        queue.Enqueue(messageId);
+        while (queue.Count > 100 && queue.TryDequeue(out _)) { }
+    }
+
     public async Task HandleUpdateAsync(Update update)
     {
         if (update.Type == UpdateType.Message && update.Message != null)
         {
             var msg = update.Message;
             var chatId = msg.Chat.Id;
+            RecordMessageId(chatId, msg.MessageId);
 
             if (!CheckUserCooldown(chatId))
             {
@@ -73,11 +83,21 @@ public class BotCommandService : IBotPlatformAdapter
             var cq = update.CallbackQuery;
             var chatId = cq.Message?.Chat.Id;
             if (chatId == null) return;
+            if (cq.Message != null) RecordMessageId(chatId.Value, cq.Message.MessageId);
 
             string? messageId = cq.Message?.MessageId.ToString();
             string data = cq.Data ?? "";
 
             await _engine.ProcessCallbackAsync(this, chatId.Value, messageId, chatId.Value.ToString(), cq.Id, data);
+        }
+        else if (update.Type == UpdateType.MyChatMember && update.MyChatMember != null)
+        {
+            var status = update.MyChatMember.NewChatMember?.Status;
+            if (status is ChatMemberStatus.Kicked or ChatMemberStatus.Left)
+            {
+                long chatId = update.MyChatMember.Chat.Id;
+                await _engine.HandleUserStopAsync(this, chatId, chatId.ToString());
+            }
         }
     }
 
@@ -88,14 +108,16 @@ public class BotCommandService : IBotPlatformAdapter
 
         if (!string.IsNullOrEmpty(screen.FileId))
         {
+            Message sent;
             if (screen.FileType == "photo")
             {
-                await _botClient.SendPhoto(chatId, InputFile.FromFileId(screen.FileId), caption: screen.Text, parseMode: ParseMode.Markdown, replyMarkup: markup);
+                sent = await _botClient.SendPhoto(chatId, InputFile.FromFileId(screen.FileId), caption: screen.Text, parseMode: ParseMode.Markdown, replyMarkup: markup);
             }
             else
             {
-                await _botClient.SendDocument(chatId, InputFile.FromFileId(screen.FileId), caption: screen.Text, parseMode: ParseMode.Markdown, replyMarkup: markup);
+                sent = await _botClient.SendDocument(chatId, InputFile.FromFileId(screen.FileId), caption: screen.Text, parseMode: ParseMode.Markdown, replyMarkup: markup);
             }
+            if (sent != null) RecordMessageId(chatId, sent.MessageId);
             return;
         }
 
@@ -114,7 +136,8 @@ public class BotCommandService : IBotPlatformAdapter
                 }
                 catch { }
             }
-            await _botClient.SendMessage(chatId, screen.Text, ParseMode.Markdown, replyMarkup: markup);
+            var sent = await _botClient.SendMessage(chatId, screen.Text, ParseMode.Markdown, replyMarkup: markup);
+            if (sent != null) RecordMessageId(chatId, sent.MessageId);
         }
     }
 
@@ -226,8 +249,12 @@ public class BotCommandService : IBotPlatformAdapter
         try
         {
             var sent = await _botClient.SendPhoto(chatId, mediaFile, caption: caption, parseMode: ParseMode.Markdown, replyMarkup: markup);
-            if (sent.Photo != null && sent.Photo.Length > 0)
-                _bannerFileIdCache[bannerFileName] = sent.Photo[^1].FileId;
+            if (sent != null)
+            {
+                RecordMessageId(chatId, sent.MessageId);
+                if (sent.Photo != null && sent.Photo.Length > 0)
+                    _bannerFileIdCache[bannerFileName] = sent.Photo[^1].FileId;
+            }
             _currentBannerByChat[chatId] = bannerFileName;
         }
         catch
@@ -238,8 +265,49 @@ public class BotCommandService : IBotPlatformAdapter
 
     private async Task<Message?> SafeSendMessageAsync(long chatId, string text, InlineKeyboardMarkup? markup = null)
     {
-        try { return await _botClient.SendMessage(chatId, text, ParseMode.Markdown, replyMarkup: markup); }
-        catch { try { return await _botClient.SendMessage(chatId, text, replyMarkup: markup); } catch { return null; } }
+        Message? sent = null;
+        try { sent = await _botClient.SendMessage(chatId, text, ParseMode.Markdown, replyMarkup: markup); }
+        catch { try { sent = await _botClient.SendMessage(chatId, text, replyMarkup: markup); } catch { return null; } }
+        if (sent != null) RecordMessageId(chatId, sent.MessageId);
+        return sent;
+    }
+
+    public async Task DeleteChatHistoryAsync(long chatId)
+    {
+        var idsToDelete = new HashSet<int>();
+        if (_chatMessageHistory.TryRemove(chatId, out var queue))
+        {
+            while (queue.TryDequeue(out var id))
+                idsToDelete.Add(id);
+        }
+
+        if (idsToDelete.Count > 0)
+        {
+            var maxId = idsToDelete.Max();
+            var minId = Math.Max(1, maxId - 100);
+            for (int id = minId; id <= maxId; id++)
+            {
+                idsToDelete.Add(id);
+            }
+        }
+
+        if (idsToDelete.Count > 0)
+        {
+            foreach (var chunk in idsToDelete.Chunk(100))
+            {
+                try
+                {
+                    await _botClient.DeleteMessages(chatId, chunk);
+                }
+                catch
+                {
+                    foreach (var id in chunk)
+                    {
+                        try { await _botClient.DeleteMessage(chatId, id); } catch { }
+                    }
+                }
+            }
+        }
     }
 
     private static bool CheckUserCooldown(long chatId)

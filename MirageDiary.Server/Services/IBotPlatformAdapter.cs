@@ -33,4 +33,9 @@ public interface IBotPlatformAdapter
     /// Проверяет обязательную подписку на канал (для платформ, поддерживающих проверки).
     /// </summary>
     Task<bool> EnsureChannelSubscribedAsync(long chatId, string userId);
+
+    /// <summary>
+    /// Удаляет историю переписки с ботом (все сообщения диалога).
+    /// </summary>
+    Task DeleteChatHistoryAsync(long chatId);
 }
