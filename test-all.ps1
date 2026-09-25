@@ -67,9 +67,9 @@ if (-not $OnlyRemote) {
 
     # Verify Banners
     $bannerNames = @(
-        "banner_menu.png", "banner_settings.png", "banner_alarm.png",
+        "banner_start.png", "banner_menu.png", "banner_settings.png", "banner_alarm.png",
         "banner_schedule.png", "banner_homework.png", "banner_marks.png",
-        "banner_now.png", "banner_profile.png", "banner_admin.png"
+        "banner_now.png", "banner_premium.png", "banner_profile.png", "banner_admin.png"
     )
     $allBannersOk = $true
     foreach ($b in $bannerNames) {

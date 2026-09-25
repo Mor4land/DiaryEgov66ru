@@ -89,7 +89,7 @@ public class BotCaptchaService
             }
         };
 
-        return BotScreen.Create(text, "banner_menu.png").WithButtons(buttons);
+        return BotScreen.Create(text, "banner_start.png").WithButtons(buttons);
     }
 
     private BotScreen GenerateMathCaptcha(string userId)
@@ -138,7 +138,7 @@ public class BotCaptchaService
             }
         };
 
-        return BotScreen.Create(text, "banner_menu.png").WithButtons(buttons);
+        return BotScreen.Create(text, "banner_start.png").WithButtons(buttons);
     }
 
     /// <summary>

@@ -50,6 +50,13 @@ COLOR_ACCENT_BAR = (9, 9, 11)        # #09090B
 # Banner definitions: (filename, title, subtitle, counter, font_size)
 BANNERS = [
     (
+        "banner_start.png",
+        "НАСТРОЙКА БОТА",
+        "Смена обучения, умный будильник и напоминания",
+        "00 — SETUP",
+        150,
+    ),
+    (
         "banner_menu.png",
         "ГЛАВНОЕ МЕНЮ",
         "Личный кабинет, журнал и быстрый доступ",

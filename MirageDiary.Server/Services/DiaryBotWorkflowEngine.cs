@@ -1188,7 +1188,7 @@ public class DiaryBotWorkflowEngine
             new() { BotButton.Link("📄 Читать политику", "https://miragediary.space/privacy") }
         };
 
-        return BotScreen.Create(text, "banner_menu.png").WithButtons(buttons);
+        return BotScreen.Create(text, "banner_start.png").WithButtons(buttons);
     }
 
     public async Task AcceptPrivacyPolicyAsync(string userId)
@@ -1226,7 +1226,7 @@ public class DiaryBotWorkflowEngine
             }
         };
 
-        return BotScreen.Create(text, "banner_alarm.png").WithButtons(buttons);
+        return BotScreen.Create(text, "banner_start.png").WithButtons(buttons);
     }
 
     public BotScreen BuildOnboardingAlarmScreen(string userId, int shift)

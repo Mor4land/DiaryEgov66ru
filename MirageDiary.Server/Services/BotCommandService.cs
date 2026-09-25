@@ -185,9 +185,15 @@ public class BotCommandService : IBotPlatformAdapter
             catch { }
         }
 
-        var localPath = Path.Combine(AppContext.BaseDirectory, "wwwroot", "images", "banners", bannerFileName);
-        if (!File.Exists(localPath))
-            localPath = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "images", "banners", bannerFileName);
+        var candidatePaths = new[]
+        {
+            Path.Combine(AppContext.BaseDirectory, "wwwroot", "images", "banners", bannerFileName),
+            Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "images", "banners", bannerFileName),
+            Path.Combine(Directory.GetCurrentDirectory(), "MirageDiary.Server", "wwwroot", "images", "banners", bannerFileName),
+            Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "wwwroot", "images", "banners", bannerFileName),
+            Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "MirageDiary.Server", "wwwroot", "images", "banners", bannerFileName)
+        };
+        var localPath = candidatePaths.FirstOrDefault(File.Exists) ?? candidatePaths[0];
 
         InputFile mediaFile;
         if (_bannerFileIdCache.TryGetValue(bannerFileName, out var cachedFileId))
@@ -211,7 +217,10 @@ public class BotCommandService : IBotPlatformAdapter
                 _currentBannerByChat[chatId] = bannerFileName;
                 return;
             }
-            catch { }
+            catch
+            {
+                try { await _botClient.DeleteMessage(chatId, msgId.Value); } catch { }
+            }
         }
 
         try

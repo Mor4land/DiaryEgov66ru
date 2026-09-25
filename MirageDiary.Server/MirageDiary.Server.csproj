@@ -24,4 +24,8 @@
     <ProjectReference Include="..\MirageDiary.Core\MirageDiary.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Update="wwwroot\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>
