@@ -214,7 +214,36 @@ def main():
         "--banner",
         type=str,
         default=None,
-        help="Generate only one specific banner by filename (e.g. banner_menu.png)",
+        help="Generate only one specific banner by filename (e.g. banner_menu.png or test_banner.png)",
+    )
+    parser.add_argument(
+        "--test",
+        action="store_true",
+        help="Generate a test banner with custom or sample text",
+    )
+    parser.add_argument(
+        "--title",
+        type=str,
+        default="ТЕСТОВЫЙ ЭКРАН",
+        help="Custom title for test banner (default: 'ТЕСТОВЫЙ ЭКРАН')",
+    )
+    parser.add_argument(
+        "--subtitle",
+        type=str,
+        default="Проверка рендеринга, суперсэмплирования и типографики",
+        help="Custom subtitle for test banner",
+    )
+    parser.add_argument(
+        "--counter",
+        type=str,
+        default="00 — TEST",
+        help="Custom top-right counter for test banner (default: '00 — TEST')",
+    )
+    parser.add_argument(
+        "--font-size",
+        type=int,
+        default=160,
+        help="Custom font size for test banner title (default: 160)",
     )
     args = parser.parse_args()
 
@@ -250,12 +279,16 @@ def main():
     print(f"Subtitle font: {sub_font_path}")
     print("-" * 60)
 
-    banners_to_process = BANNERS
-    if args.banner:
-        banners_to_process = [b for b in BANNERS if b[0] == args.banner]
-        if not banners_to_process:
-            print(f"Error: Banner '{args.banner}' not recognized in definitions.", file=sys.stderr)
-            sys.exit(1)
+    if args.test or args.banner == "test_banner.png":
+        test_filename = args.banner if args.banner else "test_banner.png"
+        banners_to_process = [(test_filename, args.title, args.subtitle, args.counter, args.font_size)]
+    else:
+        banners_to_process = BANNERS
+        if args.banner:
+            banners_to_process = [b for b in BANNERS if b[0] == args.banner]
+            if not banners_to_process:
+                print(f"Error: Banner '{args.banner}' not recognized in definitions.", file=sys.stderr)
+                sys.exit(1)
 
     for filename, title, subtitle, counter, font_size in banners_to_process:
         saved_path = generate_banner(
