@@ -72,10 +72,12 @@ public class TelegramBotPollingWorker : BackgroundService
                 new BotCommand { Command = "calc", Description = "🎯 Калькулятор оценок и целей" },
                 new BotCommand { Command = "now", Description = "🔔 Сколько до звонка" },
                 new BotCommand { Command = "alarm", Description = "🎒 Умный будильник и рюкзак" },
+                new BotCommand { Command = "children", Description = "👨‍👧 Выбор ребенка" },
                 new BotCommand { Command = "profile", Description = "👤 Данные профиля ученика" },
                 new BotCommand { Command = "settings", Description = "⚙️ Настройки и напоминания" },
                 new BotCommand { Command = "link", Description = "🔗 Связка с MAX мессенджером" },
-                new BotCommand { Command = "help", Description = "ℹ️ Справка по всем командам" }
+                new BotCommand { Command = "help", Description = "ℹ️ Справка по всем командам" },
+                new BotCommand { Command = "stop", Description = "🚪 Выход и удаление данных" }
             };
 
             await _botClient.SetMyCommands(commands, cancellationToken: stoppingToken);

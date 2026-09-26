@@ -38,6 +38,8 @@ public class UserEntity
     public string EquipmentReminderTime { get; set; } = "20:30"; // "HH:mm"
     public string LastEquipmentReminderDate { get; set; } = "";
 
+    public bool IsGradeWatcherEnabled { get; set; } = true;
+
     public int UtcOffsetHours { get; set; } = 5;
 
     // Selected Child ID for Parent Role

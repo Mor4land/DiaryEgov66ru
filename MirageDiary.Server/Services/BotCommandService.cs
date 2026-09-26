@@ -51,53 +51,65 @@ public class BotCommandService : IBotPlatformAdapter
 
     public async Task HandleUpdateAsync(Update update)
     {
-        if (update.Type == UpdateType.Message && update.Message != null)
+        try
         {
-            var msg = update.Message;
-            var chatId = msg.Chat.Id;
-            RecordMessageId(chatId, msg.MessageId);
-
-            if (!CheckUserCooldown(chatId))
+            if (update.Type == UpdateType.Message && update.Message != null)
             {
-                await SafeSendMessageAsync(chatId, "⏳ _Защита от спама: подождите 2 секунды перед следующим запросом._");
-                return;
-            }
+                var msg = update.Message;
+                var chatId = msg.Chat.Id;
+                RecordMessageId(chatId, msg.MessageId);
 
-            if (msg.Type == MessageType.Photo || msg.Type == MessageType.Document)
+                if (!CheckUserCooldown(chatId))
+                {
+                    await SafeSendMessageAsync(chatId, "⏳ _Защита от спама: подождите 2 секунды перед следующим запросом._");
+                    return;
+                }
+
+                if (msg.Type == MessageType.Photo && msg.Photo != null && msg.Photo.Length > 0)
+                {
+                    string fileId = msg.Photo[^1].FileId;
+                    await _engine.HandleFileUploadAsync(this, chatId, chatId.ToString(), fileId, "photo");
+                    return;
+                }
+                if (msg.Type == MessageType.Document && msg.Document != null && !string.IsNullOrEmpty(msg.Document.FileId))
+                {
+                    string fileId = msg.Document.FileId;
+                    await _engine.HandleFileUploadAsync(this, chatId, chatId.ToString(), fileId, "document");
+                    return;
+                }
+
+                string text = msg.Text?.Trim() ?? "";
+                string? username = msg.From?.Username;
+                string? firstName = msg.From?.FirstName;
+                string? lastName = msg.From?.LastName;
+
+                await _engine.ProcessMessageOrCommandAsync(this, chatId, chatId.ToString(), text, username, firstName, lastName);
+            }
+            else if (update.Type == UpdateType.CallbackQuery && update.CallbackQuery != null)
             {
-                string fileId = msg.Type == MessageType.Photo ? msg.Photo![^1].FileId : msg.Document!.FileId;
-                string fileType = msg.Type == MessageType.Photo ? "photo" : "document";
-                await _engine.HandleFileUploadAsync(this, chatId, chatId.ToString(), fileId, fileType);
-                return;
+                var cq = update.CallbackQuery;
+                var chatId = cq.Message?.Chat.Id;
+                if (chatId == null) return;
+                if (cq.Message != null) RecordMessageId(chatId.Value, cq.Message.MessageId);
+
+                string? messageId = cq.Message?.MessageId.ToString();
+                string data = cq.Data ?? "";
+
+                await _engine.ProcessCallbackAsync(this, chatId.Value, messageId, chatId.Value.ToString(), cq.Id, data);
             }
-
-            string text = msg.Text?.Trim() ?? "";
-            string? username = msg.From?.Username;
-            string? firstName = msg.From?.FirstName;
-            string? lastName = msg.From?.LastName;
-
-            await _engine.ProcessMessageOrCommandAsync(this, chatId, chatId.ToString(), text, username, firstName, lastName);
+            else if (update.Type == UpdateType.MyChatMember && update.MyChatMember != null)
+            {
+                var status = update.MyChatMember.NewChatMember?.Status;
+                if (status is ChatMemberStatus.Kicked or ChatMemberStatus.Left)
+                {
+                    long chatId = update.MyChatMember.Chat.Id;
+                    await _engine.HandleUserStopAsync(this, chatId, chatId.ToString());
+                }
+            }
         }
-        else if (update.Type == UpdateType.CallbackQuery && update.CallbackQuery != null)
+        catch (Exception ex)
         {
-            var cq = update.CallbackQuery;
-            var chatId = cq.Message?.Chat.Id;
-            if (chatId == null) return;
-            if (cq.Message != null) RecordMessageId(chatId.Value, cq.Message.MessageId);
-
-            string? messageId = cq.Message?.MessageId.ToString();
-            string data = cq.Data ?? "";
-
-            await _engine.ProcessCallbackAsync(this, chatId.Value, messageId, chatId.Value.ToString(), cq.Id, data);
-        }
-        else if (update.Type == UpdateType.MyChatMember && update.MyChatMember != null)
-        {
-            var status = update.MyChatMember.NewChatMember?.Status;
-            if (status is ChatMemberStatus.Kicked or ChatMemberStatus.Left)
-            {
-                long chatId = update.MyChatMember.Chat.Id;
-                await _engine.HandleUserStopAsync(this, chatId, chatId.ToString());
-            }
+            Console.WriteLine($"[BotCommandService] Unhandled exception in HandleUpdateAsync: {ex}");
         }
     }
 
@@ -108,14 +120,28 @@ public class BotCommandService : IBotPlatformAdapter
 
         if (!string.IsNullOrEmpty(screen.FileId))
         {
-            Message sent;
+            Message? sent = null;
             if (screen.FileType == "photo")
             {
-                sent = await _botClient.SendPhoto(chatId, InputFile.FromFileId(screen.FileId), caption: screen.Text, parseMode: ParseMode.Markdown, replyMarkup: markup);
+                try
+                {
+                    sent = await _botClient.SendPhoto(chatId, InputFile.FromFileId(screen.FileId), caption: screen.Text, parseMode: ParseMode.Markdown, replyMarkup: markup);
+                }
+                catch
+                {
+                    try { sent = await _botClient.SendPhoto(chatId, InputFile.FromFileId(screen.FileId), caption: screen.Text, replyMarkup: markup); } catch { }
+                }
             }
             else
             {
-                sent = await _botClient.SendDocument(chatId, InputFile.FromFileId(screen.FileId), caption: screen.Text, parseMode: ParseMode.Markdown, replyMarkup: markup);
+                try
+                {
+                    sent = await _botClient.SendDocument(chatId, InputFile.FromFileId(screen.FileId), caption: screen.Text, parseMode: ParseMode.Markdown, replyMarkup: markup);
+                }
+                catch
+                {
+                    try { sent = await _botClient.SendDocument(chatId, InputFile.FromFileId(screen.FileId), caption: screen.Text, replyMarkup: markup); } catch { }
+                }
             }
             if (sent != null) RecordMessageId(chatId, sent.MessageId);
             return;
@@ -134,10 +160,21 @@ public class BotCommandService : IBotPlatformAdapter
                     await _botClient.EditMessageText(chatId, msgId.Value, screen.Text, ParseMode.Markdown, replyMarkup: markup);
                     return;
                 }
-                catch { }
+                catch (Telegram.Bot.Exceptions.ApiRequestException ex) when (ex.Message.Contains("message is not modified"))
+                {
+                    return;
+                }
+                catch
+                {
+                    try
+                    {
+                        await _botClient.EditMessageText(chatId, msgId.Value, screen.Text, replyMarkup: markup);
+                        return;
+                    }
+                    catch { }
+                }
             }
-            var sent = await _botClient.SendMessage(chatId, screen.Text, ParseMode.Markdown, replyMarkup: markup);
-            if (sent != null) RecordMessageId(chatId, sent.MessageId);
+            await SafeSendMessageAsync(chatId, screen.Text, markup);
         }
     }
 

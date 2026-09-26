@@ -101,6 +101,8 @@ public class MiniAppController : ControllerBase
             SessionId = sessionId
         });
 
+        string userRole = "Student";
+        string selectedStudentId = "";
         try
         {
             var diaryClient = new DiaryClient(_httpFactory.CreateClient(), _tokenStore, request.TelegramUserId);
@@ -108,6 +110,8 @@ public class MiniAppController : ControllerBase
             studentId = res.StudentId;
             className = res.ClassName;
             orgName   = res.OrgName;
+            userRole  = res.Role;
+            selectedStudentId = res.SelectedStudentId;
         }
         catch (Exception ex)
         {
@@ -118,7 +122,7 @@ public class MiniAppController : ControllerBase
         {
             AccessToken  = rawToken,
             RefreshToken = refreshToken,
-            StudentId    = studentId,
+            StudentId    = !string.IsNullOrEmpty(selectedStudentId) ? selectedStudentId : studentId,
             Oid          = oid,
             DeviceId     = deviceId,
             SessionId    = sessionId
@@ -132,6 +136,11 @@ public class MiniAppController : ControllerBase
             user.ClassName = className;
             user.OrgName   = orgName;
             user.StudentId = studentId;
+            if (userRole == "Parent")
+            {
+                user.Role = "Parent";
+                user.SelectedStudentId = selectedStudentId;
+            }
             user.Oid       = oid;
             user.DeviceId  = deviceId;
             user.SessionId = sessionId;
@@ -244,25 +253,36 @@ public class MiniAppController : ControllerBase
                     new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", request.Token);
             }
 
-            var resp = await client.GetAsync("https://www.gosuslugi.ru/api/myschool/v2/auth/student");
-            if (resp.IsSuccessStatusCode)
+            string[] studentUrls = new[]
             {
-                var json = await resp.Content.ReadAsStringAsync();
-                using var doc = System.Text.Json.JsonDocument.Parse(json);
-                if (doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Array && doc.RootElement.GetArrayLength() > 0)
+                "https://www.gosuslugi.ru/api/myschool/v2/auth/student?role=parent",
+                "https://www.gosuslugi.ru/api/myschool/v2/auth/student?role=student"
+            };
+
+            foreach (var url in studentUrls)
+            {
+                var resp = await client.GetAsync(url);
+                if (resp.IsSuccessStatusCode)
                 {
-                    var s = doc.RootElement[0];
-                    studentId = s.TryGetProperty("student_id", out var id) ? id.GetString() ?? "" : "";
-                    className = s.TryGetProperty("class_name", out var cn) ? cn.GetString() ?? "" : "";
-                    orgName   = s.TryGetProperty("org_name",   out var org) ? org.GetString() ?? "" : "";
-                }
-                else if (doc.RootElement.TryGetProperty("students", out var students) &&
-                    students.GetArrayLength() > 0)
-                {
-                    var s = students[0];
-                    studentId = s.TryGetProperty("student_id", out var sid) ? sid.GetString() ?? "" : (s.TryGetProperty("id", out var id) ? id.GetString() ?? "" : "");
-                    className = s.TryGetProperty("className", out var cn)  ? cn.GetString()  ?? "" : "";
-                    orgName   = s.TryGetProperty("orgName",   out var org) ? org.GetString() ?? "" : "";
+                    var json = await resp.Content.ReadAsStringAsync();
+                    using var doc = System.Text.Json.JsonDocument.Parse(json);
+                    if (doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Array && doc.RootElement.GetArrayLength() > 0)
+                    {
+                        var s = doc.RootElement[0];
+                        studentId = s.TryGetProperty("student_id", out var id) ? id.GetString() ?? "" : "";
+                        className = s.TryGetProperty("class_name", out var cn) ? cn.GetString() ?? "" : "";
+                        orgName   = s.TryGetProperty("org_name",   out var org) ? org.GetString() ?? "" : "";
+                        if (!string.IsNullOrEmpty(studentId)) break;
+                    }
+                    else if (doc.RootElement.TryGetProperty("students", out var students) &&
+                        students.GetArrayLength() > 0)
+                    {
+                        var s = students[0];
+                        studentId = s.TryGetProperty("student_id", out var sid) ? sid.GetString() ?? "" : (s.TryGetProperty("id", out var id) ? id.GetString() ?? "" : "");
+                        className = s.TryGetProperty("className", out var cn)  ? cn.GetString()  ?? "" : "";
+                        orgName   = s.TryGetProperty("orgName",   out var org) ? org.GetString() ?? "" : "";
+                        if (!string.IsNullOrEmpty(studentId)) break;
+                    }
                 }
             }
         }
@@ -442,7 +462,7 @@ public class MiniAppController : ControllerBase
                 });
 
                 // Try to resolve studentId, className, orgName via Gosuslugi API
-                string studentId = "", className = "", orgName = "";
+                string studentId = "", className = "", orgName = "", userRole = "Student", selectedStudentId = "";
                 try
                 {
                     var diaryClient = new DiaryClient(_httpFactory.CreateClient("diary-proxy"), _tokenStore, session.TelegramUserId);
@@ -450,15 +470,17 @@ public class MiniAppController : ControllerBase
                     studentId = res.StudentId;
                     className = res.ClassName;
                     orgName   = res.OrgName;
+                    userRole  = res.Role;
+                    selectedStudentId = res.SelectedStudentId;
                 }
                 catch (Exception ex) { Console.WriteLine($"[MiniApp] Ошибка получения профиля: {ex.Message}"); }
 
-                Console.WriteLine($"[MiniApp] Сохраняем токен для userId={session.TelegramUserId}, studentId={studentId}");
+                Console.WriteLine($"[MiniApp] Сохраняем токен для userId={session.TelegramUserId}, studentId={studentId}, role={userRole}");
                 await _tokenStore.SaveTokensAsync(session.TelegramUserId, new TokenData
                 {
                     AccessToken = session.AccessToken,
                     RefreshToken = session.RefreshToken ?? "",
-                    StudentId = studentId,
+                    StudentId = !string.IsNullOrEmpty(selectedStudentId) ? selectedStudentId : studentId,
                     Oid = session.Oid,
                     SessionId = session.MobileSessionId,
                     DeviceId = session.DeviceId
@@ -471,12 +493,17 @@ public class MiniAppController : ControllerBase
                     user.ClassName = className;
                     user.OrgName = orgName;
                     user.StudentId = studentId;
+                    if (userRole == "Parent")
+                    {
+                        user.Role = "Parent";
+                        user.SelectedStudentId = selectedStudentId;
+                    }
                     user.Oid = session.Oid;
                     user.DeviceId = session.DeviceId;
                     user.SessionId = session.MobileSessionId;
                     user.UpdatedAt = DateTime.UtcNow;
                     await _context.SaveChangesAsync();
-                    Console.WriteLine($"[MiniApp] Профиль пользователя обновлён!");
+                    Console.WriteLine($"[MiniApp] Профиль пользователя обновлён (role={user.Role}, child={user.SelectedStudentId})!");
 
                     // Automatically mirror tokens, metadata and settings across linked platforms (e.g. MAX <-> Telegram)
                     await _userSyncService.SyncUserAcrossPlatformsAsync(user);
@@ -551,69 +578,94 @@ public class MiniAppController : ControllerBase
         return Ok(new Models.SimpleSuccessResponse { Success = true });
     }
 
-    private static async Task<(string StudentId, string ClassName, string OrgName)> ResolveGosuslugiStudentDetailsAsync(DiaryClient diaryClient)
+    private static async Task<(string StudentId, string ClassName, string OrgName, string Role, string SelectedStudentId)> ResolveGosuslugiStudentDetailsAsync(DiaryClient diaryClient)
     {
-        string studentId = "", className = "", orgName = "";
+        string studentId = "", className = "", orgName = "", role = "Student", selectedStudentId = "";
         try
         {
             var studentInfos = await diaryClient.GetStudentInfoAsync();
             if (studentInfos != null && studentInfos.Count > 0)
             {
-                var student = studentInfos[0];
-                studentId = !string.IsNullOrEmpty(student.StudentId) ? student.StudentId : (student.MdmId ?? "");
+                bool isParent = studentInfos.Any(s => s.IsParentChild || s.KidId != null) || studentInfos.Count > 1;
+                if (isParent)
+                {
+                    role = "Parent";
+                }
 
-                List<string> idsToTry = new List<string>();
-                if (!string.IsNullOrEmpty(student.StudentId)) idsToTry.Add(student.StudentId);
-                if (!string.IsNullOrEmpty(student.MdmId) && !idsToTry.Contains(student.MdmId)) idsToTry.Add(student.MdmId);
+                // Prioritize children/students with PermissionMark == true
+                var candidates = studentInfos.OrderByDescending(s => s.PermissionMark).ToList();
+                var primaryStudent = candidates[0];
+                studentId = !string.IsNullOrEmpty(primaryStudent.StudentId) ? primaryStudent.StudentId : (primaryStudent.MdmId ?? "");
+
+                if (isParent)
+                {
+                    selectedStudentId = studentId;
+                }
 
                 List<string> yearsToTry = new List<string> { DateTime.UtcNow.Year.ToString(), (DateTime.UtcNow.Year - 1).ToString() };
 
-                foreach (var sid in idsToTry)
+                // Search for classes across candidates (e.g. if one child is in school and has active class)
+                foreach (var candidate in candidates)
                 {
-                    foreach (var year in yearsToTry)
+                    List<string> idsToTry = new List<string>();
+                    if (!string.IsNullOrEmpty(candidate.StudentId)) idsToTry.Add(candidate.StudentId);
+                    if (!string.IsNullOrEmpty(candidate.MdmId) && !idsToTry.Contains(candidate.MdmId)) idsToTry.Add(candidate.MdmId);
+
+                    foreach (var sid in idsToTry)
                     {
-                        try
+                        foreach (var year in yearsToTry)
                         {
-                            var datamart = await diaryClient.GetDatamartAsync(sid, year, new List<string> { "student_classes" });
-                            if (datamart != null && datamart.Count > 0)
+                            try
                             {
-                                foreach (var dmItem in datamart)
+                                var datamart = await diaryClient.GetDatamartAsync(sid, year, new List<string> { "student_classes" });
+                                if (datamart != null && datamart.Count > 0)
                                 {
-                                    if (dmItem.Data != null && dmItem.Data.Count > 0)
+                                    foreach (var dmItem in datamart)
                                     {
-                                        foreach (var elem in dmItem.Data)
+                                        if (dmItem.Data != null && dmItem.Data.Count > 0)
                                         {
-                                            var classInfo = JsonSerializer.Deserialize<GosuslugiClassInfo>(elem.GetRawText(), new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-                                            if (classInfo != null && (!string.IsNullOrEmpty(classInfo.ShortName) || !string.IsNullOrEmpty(classInfo.ClassNum)))
+                                            foreach (var elem in dmItem.Data)
                                             {
-                                                className = !string.IsNullOrEmpty(classInfo.ShortName)
-                                                    ? classInfo.ShortName
-                                                    : $"{classInfo.ClassNum}{classInfo.ClassLetter}".Trim();
-
-                                                string resolvedSchool = "";
-                                                if (elem.TryGetProperty("school_name", out var sn) ||
-                                                    elem.TryGetProperty("schoolName", out sn) ||
-                                                    elem.TryGetProperty("org_name", out sn) ||
-                                                    elem.TryGetProperty("orgName", out sn) ||
-                                                    elem.TryGetProperty("organization", out sn) ||
-                                                    elem.TryGetProperty("organization_name", out sn))
+                                                var classInfo = JsonSerializer.Deserialize<GosuslugiClassInfo>(elem.GetRawText(), new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                                                if (classInfo != null && (!string.IsNullOrEmpty(classInfo.ShortName) || !string.IsNullOrEmpty(classInfo.ClassNum)))
                                                 {
-                                                    resolvedSchool = sn.GetString()?.Trim() ?? "";
-                                                }
+                                                    className = !string.IsNullOrEmpty(classInfo.ShortName)
+                                                        ? classInfo.ShortName
+                                                        : $"{classInfo.ClassNum}{classInfo.ClassLetter}".Trim();
 
-                                                if (!string.IsNullOrEmpty(resolvedSchool) && !string.Equals(resolvedSchool, className, StringComparison.OrdinalIgnoreCase))
-                                                {
-                                                    orgName = resolvedSchool;
+                                                    string resolvedSchool = "";
+                                                    if (elem.TryGetProperty("school_name", out var sn) ||
+                                                        elem.TryGetProperty("schoolName", out sn) ||
+                                                        elem.TryGetProperty("org_name", out sn) ||
+                                                        elem.TryGetProperty("orgName", out sn) ||
+                                                        elem.TryGetProperty("organization", out sn) ||
+                                                        elem.TryGetProperty("organization_name", out sn))
+                                                    {
+                                                        resolvedSchool = sn.GetString()?.Trim() ?? "";
+                                                    }
+
+                                                    if (!string.IsNullOrEmpty(resolvedSchool) && !string.Equals(resolvedSchool, className, StringComparison.OrdinalIgnoreCase))
+                                                    {
+                                                        orgName = resolvedSchool;
+                                                    }
+
+                                                    // We found a child with active classes, select this child!
+                                                    studentId = !string.IsNullOrEmpty(candidate.StudentId) ? candidate.StudentId : sid;
+                                                    if (isParent)
+                                                    {
+                                                        selectedStudentId = studentId;
+                                                    }
+                                                    break;
                                                 }
-                                                break;
                                             }
                                         }
+                                        if (!string.IsNullOrEmpty(className)) break;
                                     }
-                                    if (!string.IsNullOrEmpty(className)) break;
                                 }
                             }
+                            catch { }
+                            if (!string.IsNullOrEmpty(className)) break;
                         }
-                        catch { }
                         if (!string.IsNullOrEmpty(className)) break;
                     }
                     if (!string.IsNullOrEmpty(className)) break;
@@ -625,7 +677,7 @@ public class MiniAppController : ControllerBase
             Console.WriteLine($"[MiniApp] Ошибка получения профиля: {ex.Message}");
         }
 
-        return (studentId, className, orgName);
+        return (studentId, className, orgName, role, selectedStudentId);
     }
 }
 

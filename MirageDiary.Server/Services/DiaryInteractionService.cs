@@ -155,8 +155,9 @@ public class DiaryInteractionService
         string targetDateStr = targetDate.ToString("yyyy-MM-dd");
         string displayDate = targetDate.ToString("dd.MM.yyyy");
 
-        string classCacheKey = hasClassroom ? p2pCache.GenerateKey(orgName, className, targetDateStr) : $"user_{userId}_{targetDateStr}";
-        string memCacheKey = hasClassroom ? $"class_hw:{classCacheKey}" : $"user_hw:{userId}_{targetDateStr}";
+        string effectiveStudentId = !string.IsNullOrEmpty(user?.SelectedStudentId) ? user.SelectedStudentId : (user?.StudentId ?? userId);
+        string classCacheKey = hasClassroom ? p2pCache.GenerateKey(orgName, className, targetDateStr) : $"user_{userId}_{effectiveStudentId}_{targetDateStr}";
+        string memCacheKey = hasClassroom ? $"class_hw:{classCacheKey}" : $"user_hw:{userId}_{effectiveStudentId}_{targetDateStr}";
 
         if (!forceRefresh && _memoryCache.TryGetValue(memCacheKey, out string? memCachedHw) && !string.IsNullOrEmpty(memCachedHw))
         {
@@ -348,9 +349,10 @@ public class DiaryInteractionService
         var user = await dbContext.Users.FindAsync(userId);
         string orgName = user?.OrgName ?? "";
         string className = user?.ClassName ?? "";
+        string effectiveStudentId = !string.IsNullOrEmpty(user?.SelectedStudentId) ? user.SelectedStudentId : (user?.StudentId ?? userId);
         bool hasClassroom = !string.IsNullOrWhiteSpace(orgName) && orgName != "Unknown" && !string.IsNullOrWhiteSpace(className) && className != "Unknown";
-        string classCacheKey = hasClassroom ? p2pCache.GenerateKey(orgName, className, targetDateStr) : $"user_{userId}_{targetDateStr}";
-        string memCacheKey = hasClassroom ? $"class_sched:{classCacheKey}" : $"user_sched:{userId}_{targetDateStr}";
+        string classCacheKey = hasClassroom ? p2pCache.GenerateKey(orgName, className, targetDateStr) : $"user_{userId}_{effectiveStudentId}_{targetDateStr}";
+        string memCacheKey = hasClassroom ? $"class_sched:{classCacheKey}" : $"user_sched:{userId}_{effectiveStudentId}_{targetDateStr}";
 
         // 1. In-memory check
         if (!forceRefresh && _memoryCache.TryGetValue(memCacheKey, out string? cachedSchedule) && !string.IsNullOrEmpty(cachedSchedule))
@@ -586,13 +588,6 @@ public class DiaryInteractionService
     {
         int currentQ = GetCurrentQuarter();
         int targetQ = quarter ?? currentQ;
-        string memKey = $"user_marks:{userId}:q{targetQ}";
-
-        if (!forceRefresh && _memoryCache.TryGetValue(memKey, out List<SubjectGradeSummary>? cachedMarks) && cachedMarks != null)
-        {
-            _serviceProvider.GetService<ServerMetricsService>()?.RecordCacheHit();
-            return cachedMarks;
-        }
 
         if (IsDiaryMaintenanceActive())
         {
@@ -603,13 +598,23 @@ public class DiaryInteractionService
         var tokenStore = scope.ServiceProvider.GetRequiredService<ITokenStore>();
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
+        var user = await dbContext.Users.FindAsync(userId);
+        string effectiveStudentId = !string.IsNullOrEmpty(user?.SelectedStudentId) ? user.SelectedStudentId : (user?.StudentId ?? userId);
+        string memKey = $"user_marks:{userId}_{effectiveStudentId}:q{targetQ}";
+
+        if (!forceRefresh && _memoryCache.TryGetValue(memKey, out List<SubjectGradeSummary>? cachedMarks) && cachedMarks != null)
+        {
+            _serviceProvider.GetService<ServerMetricsService>()?.RecordCacheHit();
+            return cachedMarks;
+        }
+
         var tokenData = await tokenStore.GetTokensAsync(userId);
         if (tokenData == null || string.IsNullOrEmpty(tokenData.AccessToken))
         {
             return new List<SubjectGradeSummary>();
         }
 
-        string studentId = !string.IsNullOrEmpty(tokenData.StudentId) ? tokenData.StudentId : userId;
+        string studentId = !string.IsNullOrEmpty(tokenData.StudentId) ? tokenData.StudentId : effectiveStudentId;
         string dbCacheKey = $"marks_db:{studentId}";
 
         List<GosuslugiMarkItem>? allMarks = null;
@@ -808,17 +813,27 @@ public class DiaryInteractionService
     {
         int currentQ = GetCurrentQuarter();
         int targetQ = quarter ?? currentQ;
-        string marksStrKey = $"user_marks_str:{userId}:q{targetQ}";
+
+        if (IsDiaryMaintenanceActive())
+        {
+            return "⚠️ *Электронный дневник временно недоступен*\n\nШлюз Госуслуг / ФГИС «Моя Школа» проводит регламентные работы. Новые данные загрузятся автоматически после завершения работ.";
+        }
+
+        string effectiveStudentId = userId;
+        using (var scope = _serviceProvider.CreateScope())
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var user = await dbContext.Users.FindAsync(userId);
+            effectiveStudentId = !string.IsNullOrEmpty(user?.SelectedStudentId) ? user.SelectedStudentId : (user?.StudentId ?? userId);
+        }
+
+        string marksStrKey = $"user_marks_str:{userId}_{effectiveStudentId}:q{targetQ}";
         try
         {
             if (!forceRefresh && _memoryCache.TryGetValue(marksStrKey, out string? cachedMarksStr) && !string.IsNullOrEmpty(cachedMarksStr))
             {
                 _serviceProvider.GetService<ServerMetricsService>()?.RecordCacheHit();
                 return cachedMarksStr;
-            }
-            if (IsDiaryMaintenanceActive())
-            {
-                return "⚠️ *Электронный дневник временно недоступен*\n\nШлюз Госуслуг / ФГИС «Моя Школа» проводит регламентные работы. Новые данные загрузятся автоматически после завершения работ.";
             }
 
             var subjects = await GetSubjectGradesSummaryAsync(userId, targetQ, forceRefresh);
@@ -1102,77 +1117,157 @@ public class DiaryInteractionService
         if (user == null) return false;
 
         user.SelectedStudentId = studentId;
+        user.StudentId = studentId;
         user.Role = "Parent";
-        user.OrgName = "";
-        user.ClassName = "";
-        await dbContext.SaveChangesAsync();
 
-        var httpClientFactory = scope.ServiceProvider.GetRequiredService<System.Net.Http.IHttpClientFactory>();
-        var client = httpClientFactory.CreateClient("diary-proxy");
-        var clientWithUser = new DiaryClient(client, tokenStore, userId);
+        string childMetaKey = $"child_meta:{studentId}";
+        bool hasMeta = false;
 
-        try
+        if (_memoryCache.TryGetValue(childMetaKey, out (string ClassName, string OrgName) memMeta))
         {
-            var years = new[] { DateTime.UtcNow.Year.ToString(), (DateTime.UtcNow.Year - 1).ToString() };
-            foreach (var year in years)
+            user.ClassName = memMeta.ClassName;
+            user.OrgName = memMeta.OrgName;
+            hasMeta = true;
+        }
+        else
+        {
+            var dbCached = await dbContext.Cache.FirstOrDefaultAsync(c => c.CacheKey == childMetaKey);
+            if (dbCached != null && !string.IsNullOrEmpty(dbCached.JsonData))
             {
-                var datamart = await clientWithUser.GetDatamartAsync(studentId, year, new List<string> { "student_classes" });
-                if (datamart != null)
+                try
                 {
-                    foreach (var item in datamart)
+                    var meta = JsonSerializer.Deserialize<Dictionary<string, string>>(dbCached.JsonData);
+                    if (meta != null)
                     {
-                        if (item.Data != null)
-                        {
-                            foreach (var elem in item.Data)
-                            {
-                                var classInfo = JsonSerializer.Deserialize<GosuslugiClassInfo>(elem.GetRawText(), new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-                                if (classInfo != null && (!string.IsNullOrEmpty(classInfo.ShortName) || !string.IsNullOrEmpty(classInfo.ClassNum)))
-                                {
-                                    string resolvedClass = !string.IsNullOrEmpty(classInfo.ShortName)
-                                        ? classInfo.ShortName
-                                        : $"{classInfo.ClassNum}{classInfo.ClassLetter}".Trim();
-                                    user.ClassName = resolvedClass;
-
-                                    string resolvedSchool = "";
-                                    if (elem.TryGetProperty("school_name", out var sn) ||
-                                        elem.TryGetProperty("schoolName", out sn) ||
-                                        elem.TryGetProperty("org_name", out sn) ||
-                                        elem.TryGetProperty("orgName", out sn) ||
-                                        elem.TryGetProperty("organization", out sn) ||
-                                        elem.TryGetProperty("organization_name", out sn))
-                                    {
-                                        resolvedSchool = sn.GetString()?.Trim() ?? "";
-                                    }
-
-                                    if (!string.IsNullOrEmpty(resolvedSchool) && !string.Equals(resolvedSchool, resolvedClass, StringComparison.OrdinalIgnoreCase))
-                                    {
-                                        user.OrgName = resolvedSchool;
-                                    }
-                                    else if (string.Equals(user.OrgName, user.ClassName, StringComparison.OrdinalIgnoreCase))
-                                    {
-                                        user.OrgName = "";
-                                    }
-
-                                    await dbContext.SaveChangesAsync();
-                                    break;
-                                }
-                            }
-                        }
-                        if (!string.IsNullOrEmpty(user.OrgName)) break;
+                        user.ClassName = meta.GetValueOrDefault("className", "");
+                        user.OrgName = meta.GetValueOrDefault("orgName", "");
+                        _memoryCache.Set(childMetaKey, (user.ClassName, user.OrgName), TimeSpan.FromDays(30));
+                        hasMeta = true;
                     }
                 }
-                if (!string.IsNullOrEmpty(user.OrgName)) break;
+                catch { }
             }
         }
-        catch { }
+
+        if (!hasMeta)
+        {
+            user.OrgName = "";
+            user.ClassName = "";
+        }
+
+        await dbContext.SaveChangesAsync();
+
+        var tokenData = await tokenStore.GetTokensAsync(userId);
+        if (tokenData != null)
+        {
+            tokenData.StudentId = studentId;
+            await tokenStore.SaveTokensAsync(userId, tokenData);
+        }
+
+        // Only query Datamart over the internet if class info is not already known and cached
+        if (!hasMeta)
+        {
+            var httpClientFactory = scope.ServiceProvider.GetRequiredService<System.Net.Http.IHttpClientFactory>();
+            var client = httpClientFactory.CreateClient("diary-proxy");
+            var clientWithUser = new DiaryClient(client, tokenStore, userId);
+
+            try
+            {
+                var years = new[] { DateTime.UtcNow.Year.ToString(), (DateTime.UtcNow.Year - 1).ToString() };
+                foreach (var year in years)
+                {
+                    var datamart = await clientWithUser.GetDatamartAsync(studentId, year, new List<string> { "student_classes" });
+                    if (datamart != null)
+                    {
+                        foreach (var item in datamart)
+                        {
+                            if (item.Data != null)
+                            {
+                                foreach (var elem in item.Data)
+                                {
+                                    var classInfo = JsonSerializer.Deserialize<GosuslugiClassInfo>(elem.GetRawText(), new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                                    if (classInfo != null && (!string.IsNullOrEmpty(classInfo.ShortName) || !string.IsNullOrEmpty(classInfo.ClassNum)))
+                                    {
+                                        string resolvedClass = !string.IsNullOrEmpty(classInfo.ShortName)
+                                            ? classInfo.ShortName
+                                            : $"{classInfo.ClassNum}{classInfo.ClassLetter}".Trim();
+                                        user.ClassName = resolvedClass;
+
+                                        string resolvedSchool = "";
+                                        if (elem.TryGetProperty("school_name", out var sn) ||
+                                            elem.TryGetProperty("schoolName", out sn) ||
+                                            elem.TryGetProperty("org_name", out sn) ||
+                                            elem.TryGetProperty("orgName", out sn) ||
+                                            elem.TryGetProperty("organization", out sn) ||
+                                            elem.TryGetProperty("organization_name", out sn))
+                                        {
+                                            resolvedSchool = sn.GetString()?.Trim() ?? "";
+                                        }
+
+                                        if (!string.IsNullOrEmpty(resolvedSchool) && !string.Equals(resolvedSchool, resolvedClass, StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            user.OrgName = resolvedSchool;
+                                        }
+                                        else if (string.Equals(user.OrgName, user.ClassName, StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            user.OrgName = "";
+                                        }
+
+                                        await dbContext.SaveChangesAsync();
+                                        break;
+                                    }
+                                }
+                            }
+                            if (!string.IsNullOrEmpty(user.OrgName)) break;
+                        }
+                    }
+                    if (!string.IsNullOrEmpty(user.OrgName)) break;
+                }
+            }
+            catch { }
+
+            // Cache the result (even if empty, so we don't spam Datamart on repeat clicks)
+            var metaDict = new Dictionary<string, string>
+            {
+                ["className"] = user.ClassName ?? "",
+                ["orgName"] = user.OrgName ?? ""
+            };
+            string metaJson = JsonSerializer.Serialize(metaDict);
+            var existingCache = await dbContext.Cache.FirstOrDefaultAsync(c => c.CacheKey == childMetaKey);
+            if (existingCache != null)
+            {
+                existingCache.JsonData = metaJson;
+                existingCache.UpdatedAt = DateTime.UtcNow;
+            }
+            else
+            {
+                dbContext.Cache.Add(new CachedData { CacheKey = childMetaKey, JsonData = metaJson, UpdatedAt = DateTime.UtcNow });
+            }
+            await dbContext.SaveChangesAsync();
+            _memoryCache.Set(childMetaKey, (user.ClassName ?? "", user.OrgName ?? ""), TimeSpan.FromDays(30));
+        }
 
         // Invalidate cached views for this user
         _memoryCache.Remove($"user_profile:{userId}");
         _memoryCache.Remove($"user_marks:{userId}");
+        _memoryCache.Remove($"user_children:{userId}");
         for (int q = 0; q <= 4; q++)
         {
+            _memoryCache.Remove($"user_marks:{userId}:q{q}");
             _memoryCache.Remove($"user_marks_str:{userId}:q{q}");
+            _memoryCache.Remove($"user_marks:{userId}_{studentId}:q{q}");
+            _memoryCache.Remove($"user_marks_str:{userId}_{studentId}:q{q}");
         }
+
+        try
+        {
+            var userSync = scope.ServiceProvider.GetService<UserSyncService>();
+            if (userSync != null)
+            {
+                await userSync.SyncUserAcrossPlatformsAsync(user);
+            }
+        }
+        catch { }
 
         return true;
     }

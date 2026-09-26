@@ -230,9 +230,8 @@ public class DiaryClient
         
         string[] urls = new[]
         {
-            GosuslugiBaseUrl + "v2/auth/student?role=student",
             GosuslugiBaseUrl + "v2/auth/student?role=parent",
-            GosuslugiBaseUrl + "v2/auth/student"
+            GosuslugiBaseUrl + "v2/auth/student?role=student"
         };
 
         bool encountered403 = false;
@@ -266,6 +265,11 @@ public class DiaryClient
                         continue;
                     }
                 }
+                else if (response.StatusCode == HttpStatusCode.NotFound)
+                {
+                    Console.WriteLine($"[DiaryClient] ℹ️ {url} вернул 404 Not Found (профиль/дети не найдены для данной роли). Проверяем следующую роль...");
+                    continue;
+                }
                 else
                 {
                     CheckResponseStatus(response);
@@ -282,7 +286,16 @@ public class DiaryClient
 
                 if (list != null && list.Count > 0)
                 {
-                    Console.WriteLine($"[DiaryClient] ✅ Успешно получен профиль учеников ({list.Count} чел.) для user={_userId} с {url}");
+                    bool isParentUrl = url.Contains("role=parent", StringComparison.OrdinalIgnoreCase);
+                    foreach (var item in list)
+                    {
+                        if (isParentUrl || item.KidId != null)
+                        {
+                            item.IsParentChild = true;
+                        }
+                    }
+
+                    Console.WriteLine($"[DiaryClient] ✅ Успешно получен профиль ({list.Count} чел., isParent={isParentUrl}) для user={_userId} с {url}");
                     return list;
                 }
                 else
@@ -331,6 +344,14 @@ public class DiaryClient
                             });
                             if (list != null && list.Count > 0)
                             {
+                                bool isParentUrl = url.Contains("role=parent", StringComparison.OrdinalIgnoreCase);
+                                foreach (var item in list)
+                                {
+                                    if (isParentUrl || item.KidId != null)
+                                    {
+                                        item.IsParentChild = true;
+                                    }
+                                }
                                 Console.WriteLine($"[DiaryClient] ✅ Успешно восстановлен профиль для user={_userId}!");
                                 return list;
                             }
@@ -409,6 +430,17 @@ public class DiaryClient
                     }
                     else
                     {
+                        string checkErr = pwText;
+                        if (string.IsNullOrEmpty(checkErr))
+                        {
+                            try { checkErr = await response.Content.ReadAsStringAsync(); } catch { }
+                        }
+                        if (!string.IsNullOrEmpty(checkErr) && checkErr.Contains("согласие", StringComparison.OrdinalIgnoreCase))
+                        {
+                            Console.WriteLine($"[DiaryClient] ⚠️ Datamart 403 (Отсутствует согласие для studentId {studentId}): {checkErr}");
+                            return new List<DatamartResponseItem>();
+                        }
+
                         CheckResponseStatus(response);
                     }
                 }
@@ -418,6 +450,11 @@ public class DiaryClient
                     {
                         var errBody = await response.Content.ReadAsStringAsync();
                         Console.WriteLine($"[DiaryClient] ❌ Datamart HTTP {(int)response.StatusCode}: {errBody} | Request: {jsonBody}");
+                        if (errBody.Contains("согласие", StringComparison.OrdinalIgnoreCase))
+                        {
+                            Console.WriteLine($"[DiaryClient] ⚠️ Datamart (Отсутствует согласие для studentId {studentId}): {errBody}");
+                            return new List<DatamartResponseItem>();
+                        }
                     }
                     CheckResponseStatus(response);
                     jsonResponse = await response.Content.ReadAsStringAsync();
@@ -471,11 +508,26 @@ public class DiaryClient
             var students = await GetStudentInfoAsync();
             if (students != null && students.Count > 0)
             {
-                var student = (!string.IsNullOrEmpty(targetStudentId))
-                    ? (students.FirstOrDefault(s => s.StudentId == targetStudentId || s.MdmId == targetStudentId) ?? students[0])
-                    : (!string.IsNullOrEmpty(studentId)
-                        ? (students.FirstOrDefault(s => s.StudentId == studentId || s.MdmId == studentId) ?? students[0])
-                        : students[0]);
+                GosuslugiStudentInfo? student = null;
+                if (!string.IsNullOrEmpty(targetStudentId))
+                {
+                    student = students.FirstOrDefault(s => s.StudentId == targetStudentId || s.MdmId == targetStudentId);
+                }
+
+                if (student == null && !string.IsNullOrEmpty(studentId))
+                {
+                    student = students.FirstOrDefault(s => s.StudentId == studentId || s.MdmId == studentId);
+                    if (student != null && !student.PermissionMark)
+                    {
+                        var active = students.FirstOrDefault(s => s.PermissionMark);
+                        if (active != null) student = active;
+                    }
+                }
+
+                if (student == null)
+                {
+                    student = students.FirstOrDefault(s => s.PermissionMark) ?? students[0];
+                }
 
                 studentId = !string.IsNullOrEmpty(student.StudentId) ? student.StudentId : studentId;
                 mdmId = student.MdmId ?? "";

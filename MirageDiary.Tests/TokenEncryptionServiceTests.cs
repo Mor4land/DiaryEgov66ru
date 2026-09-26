@@ -28,6 +28,33 @@ public class TokenEncryptionServiceTests
     }
 
     [Fact]
+    public void GosuslugiStudentInfo_DeserializesKidIdAndMarksProperly()
+    {
+        string jsonParent = @"[
+            {
+                ""trusted"": true,
+                ""disabled"": false,
+                ""student_last_name"": ""Иванов"",
+                ""student_first_name"": ""Иван"",
+                ""student_id"": ""child-uuid-123"",
+                ""kid_id"": 195972879,
+                ""permission_mark"": true
+            }
+        ]";
+
+        var students = System.Text.Json.JsonSerializer.Deserialize<List<MirageDiary.Core.Models.GosuslugiStudentInfo>>(jsonParent, new System.Text.Json.JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true
+        });
+
+        Assert.NotNull(students);
+        Assert.Single(students);
+        Assert.Equal(195972879, students[0].KidId);
+        Assert.True(students[0].PermissionMark);
+        Assert.Equal("child-uuid-123", students[0].StudentId);
+    }
+
+    [Fact]
     public void Decrypt_EncryptedText_ReturnsOriginalPlainText()
     {
         string secret = "secret_gosuslugi_session_payload";

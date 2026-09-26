@@ -295,17 +295,29 @@ public class DiaryBotWorkflowEngine
     public BotScreen BuildHelpScreen()
     {
         var text = "ℹ️ *Справка по Mirage Diary*\n\n" +
-                   "• *Расписание* — уроки, кабинеты, преподаватели и темы уроков.\n" +
-                   "• *Домашка* — задания на сегодня и завтра.\n" +
-                   "• *Оценки* — средний балл и прогноз итоговой оценки.\n" +
-                   "• *Калькулятор* — расчет количества пятерок для нужной четвертной оценки.\n" +
-                   "• *Будильник* — утренние напоминания расписания и проверка рюкзака вечером.\n" +
-                   "• *До звонка* — сколько минут осталось до конца текущего урока или перемены.\n\n" +
-                   "💡 _Все данные берутся напрямую из ФГИС «Моя Школа» через защищенный шлюз Госуслуг._";
+                   "📋 *Основные команды бота:*\n" +
+                   "• `/menu` или `/start` — Главное меню\n" +
+                   "• `/schedule` `[дата]` — Расписание уроков (напр. `/schedule завтра`)\n" +
+                   "• `/homework` `[дата]` — Домашнее задание (напр. `/homework завтра`)\n" +
+                   "• `/marks` — Оценки и средний балл за четверть\n" +
+                   "• `/calc` — Калькулятор оценок и расчет нужных пятерок\n" +
+                   "• `/now` — Время до звонка и расписание перемен\n" +
+                   "• `/alarm` — Умный будильник и проверка рюкзака\n" +
+                   "• `/children` — Выбор ребенка (для родителей)\n" +
+                   "• `/profile` — Данные вашего профиля, школы и класса\n" +
+                   "• `/settings` — Настройки уведомлений и аккаунта\n" +
+                   "• `/link` — Связать Telegram и MAX аккаунты\n" +
+                   "• `/stop` — Полное удаление аккаунта и переписки\n" +
+                   "• `/help` — Эта справка по командам\n\n" +
+                   "💡 _Все данные загружаются напрямую из ФГИС «Моя Школа» через защищенный шлюз Госуслуг._";
 
         var buttons = new List<List<BotButton>>
         {
-            new() { BotButton.Callback("🏠 Главное меню", "cmd_back_main") }
+            new()
+            {
+                BotButton.Callback("⚙️ Настройки", "cmd_settings"),
+                BotButton.Callback("🏠 Главное меню", "cmd_back_main")
+            }
         };
         return BotScreen.Create(text, "banner_menu.png").WithButtons(buttons);
     }
@@ -318,29 +330,35 @@ public class DiaryBotWorkflowEngine
         bool sched  = master && (user?.IsScheduleReminderEnabled ?? true);
         bool hw     = master && (user?.IsHomeworkReminderEnabled ?? true);
         bool equip  = master && (user?.IsEquipmentReminderEnabled ?? true);
+        bool grades = master && (user?.IsGradeWatcherEnabled ?? true);
 
         string schedTime = user?.ScheduleReminderTime ?? "07:30";
         string hwTime    = user?.HomeworkReminderTime ?? "17:00";
         string equipTime = user?.EquipmentReminderTime ?? "20:30";
 
         var text = "⏰ *Умный будильник*\n\n" +
-                   $"• 🔔 Статус: {(master ? "`🟢 Активен`" : "`🔴 Выключен`")}\n" +
+                   $"• 🔔 Общий статус: {(master ? "`🟢 Активен`" : "`🔴 Выключен`")}\n" +
+                   $"• 📊 Новые оценки: {(grades ? "`🟢 Вкл`" : "`🔴 Выкл`")}\n" +
                    $"• 📅 Расписание: {(sched ? $"`{schedTime}`" : "`Выкл`")}\n" +
                    $"• 📚 Домашка: {(hw ? $"`{hwTime}`" : "`Выкл`")}\n" +
                    $"• 🎒 Вещи и рюкзак: {(equip ? $"`{equipTime}`" : "`Выкл`")}";
 
         var buttons = new List<List<BotButton>>
         {
-            new() { BotButton.Callback(master ? "🔔 Будильник: 🟢 ВКЛЮЧЁН" : "🔕 Будильник: 🔴 ВЫКЛЮЧЕН", "cmd_alarm_toggle_master") },
+            new() { BotButton.Callback(master ? "🔔 Уведомления: 🟢 ВКЛЮЧЕНЫ" : "🔕 Уведомления: 🔴 ВЫКЛЮЧЕНЫ", "cmd_alarm_toggle_master") },
             new()
             {
-                BotButton.Callback($"📅 Расписание: {(sched ? schedTime : "ВЫКЛ")}", "cmd_alarm_sched"),
-                BotButton.Callback($"📚 Домашка: {(hw ? hwTime : "ВЫКЛ")}", "cmd_alarm_hw")
+                BotButton.Callback($"📊 Оценки: {(grades ? "🟢 ВКЛ" : "🔴 ВЫКЛ")}", "cmd_alarm_grades_toggle"),
+                BotButton.Callback($"📅 Расписание: {(sched ? schedTime : "ВЫКЛ")}", "cmd_alarm_sched")
             },
             new()
             {
-                BotButton.Callback($"🎒 Вещи: {(equip ? equipTime : "ВЫКЛ")}", "cmd_alarm_equip"),
-                BotButton.Callback("⚡ Проверить вещи", "cmd_alarm_check_now")
+                BotButton.Callback($"📚 Домашка: {(hw ? hwTime : "ВЫКЛ")}", "cmd_alarm_hw"),
+                BotButton.Callback($"🎒 Вещи: {(equip ? equipTime : "ВЫКЛ")}", "cmd_alarm_equip")
+            },
+            new()
+            {
+                BotButton.Callback("⚡ Проверить рюкзак сейчас", "cmd_alarm_check_now")
             },
             new()
             {
@@ -361,11 +379,25 @@ public class DiaryBotWorkflowEngine
             user.IsScheduleReminderEnabled = user.IsAlarmEnabled;
             user.IsHomeworkReminderEnabled = user.IsAlarmEnabled;
             user.IsEquipmentReminderEnabled = user.IsAlarmEnabled;
+            user.IsGradeWatcherEnabled = user.IsAlarmEnabled;
             await _db.SaveChangesAsync();
             await _userSyncService.SyncUserAcrossPlatformsAsync(user);
         }
         var screen = await BuildAlarmMenuScreenAsync(userId);
-        return BotCallbackResult.Ok(screen, user?.IsAlarmEnabled == true ? "Будильник включен" : "Будильник выключен");
+        return BotCallbackResult.Ok(screen, user?.IsAlarmEnabled == true ? "Уведомления включены" : "Уведомления выключены");
+    }
+
+    public async Task<BotCallbackResult> ToggleGradeWatcherReminderAsync(string userId)
+    {
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId);
+        if (user != null)
+        {
+            user.IsGradeWatcherEnabled = !user.IsGradeWatcherEnabled;
+            await _db.SaveChangesAsync();
+            await _userSyncService.SyncUserAcrossPlatformsAsync(user);
+        }
+        var screen = await BuildAlarmMenuScreenAsync(userId);
+        return BotCallbackResult.Ok(screen, user?.IsGradeWatcherEnabled == true ? "Оповещения об оценках включены" : "Оповещения об оценках выключены");
     }
 
     public async Task<BotScreen> BuildScheduleReminderMenuScreenAsync(string userId)
@@ -1061,6 +1093,10 @@ public class DiaryBotWorkflowEngine
         }
 
         var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId);
+        if (user != null)
+        {
+            await _db.Entry(user).ReloadAsync();
+        }
         var screenText = "👨‍👧 *Выберите ребенка для просмотра дневника:*";
         var screenButtons = new List<List<BotButton>>();
 
@@ -1083,9 +1119,20 @@ public class DiaryBotWorkflowEngine
 
     public async Task<BotCallbackResult> SelectChildAsync(string userId, string studentId)
     {
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId);
+        if (user != null && user.SelectedStudentId == studentId)
+        {
+            var currentScreen = await BuildChildrenMenuScreenAsync(userId);
+            return BotCallbackResult.Ok(currentScreen, "✅ Ребёнок уже выбран");
+        }
+
         bool ok = await _diaryService.SelectChildAsync(userId, studentId);
-        var screen = await BuildProfileScreenAsync(userId, forceRefresh: true);
-        return BotCallbackResult.Ok(screen, ok ? "Ребёнок успешно выбран!" : "Ошибка выбора ребёнка");
+        if (user != null)
+        {
+            await _db.Entry(user).ReloadAsync();
+        }
+        var screen = await BuildChildrenMenuScreenAsync(userId);
+        return BotCallbackResult.Ok(screen, ok ? "✅ Ребёнок успешно выбран!" : "❌ Ошибка выбора ребёнка");
     }
 
     // ─── До звонка ────────────────────────────────────────────────────────────
@@ -1718,35 +1765,35 @@ public class DiaryBotWorkflowEngine
         {
             await HandleLinkCommandAsync(adapter, chatId, userId, text);
         }
-        else if (text.StartsWith("/alarm"))
+        else if (text.StartsWith("/alarm") || text.StartsWith("/будильник"))
         {
             await adapter.RenderScreenAsync(chatId, null, await BuildAlarmCheckScreenAsync(userId));
         }
-        else if (text.StartsWith("/profile") || text.StartsWith("/me"))
+        else if (text.StartsWith("/profile") || text.StartsWith("/me") || text.StartsWith("/профиль"))
         {
             await adapter.RenderScreenAsync(chatId, null, await BuildProfileScreenAsync(userId));
         }
-        else if (text.StartsWith("/homework"))
+        else if (text.StartsWith("/homework") || text.StartsWith("/дз") || text.StartsWith("/домашка"))
         {
             var parts = text.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
             string dateArg = parts.Length > 1 ? parts[1].Trim() : "";
             await adapter.RenderScreenAsync(chatId, null, await BuildHomeworkScreenAsync(userId, dateArg));
         }
-        else if (text.StartsWith("/schedule"))
+        else if (text.StartsWith("/schedule") || text.StartsWith("/расписание"))
         {
             var parts = text.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
             string dateArg = parts.Length > 1 ? parts[1].Trim() : "";
             await adapter.RenderScreenAsync(chatId, null, await BuildScheduleScreenAsync(userId, dateArg));
         }
-        else if (text.StartsWith("/marks") || text.StartsWith("/grades"))
+        else if (text.StartsWith("/marks") || text.StartsWith("/grades") || text.StartsWith("/оценки"))
         {
             await adapter.RenderScreenAsync(chatId, null, await BuildMarksScreenAsync(userId, platform: adapter.Platform));
         }
-        else if (text.StartsWith("/calc") || text.StartsWith("/calculator"))
+        else if (text.StartsWith("/calc") || text.StartsWith("/calculator") || text.StartsWith("/калькулятор"))
         {
             await adapter.RenderScreenAsync(chatId, null, await BuildGradeCalculatorSubjectsScreenAsync(userId, platform: adapter.Platform));
         }
-        else if (text.StartsWith("/children") || text.StartsWith("/kids"))
+        else if (text.StartsWith("/children") || text.StartsWith("/kids") || text.StartsWith("/дети"))
         {
             await adapter.RenderScreenAsync(chatId, null, await BuildChildrenMenuScreenAsync(userId));
         }
@@ -2135,6 +2182,14 @@ public class DiaryBotWorkflowEngine
                     await adapter.RenderScreenAsync(chatId, messageId, await BuildAlarmMenuScreenAsync(userId));
                 break;
 
+            case "cmd_alarm_grades_toggle":
+                var grRes = await ToggleGradeWatcherReminderAsync(userId);
+                if (grRes.Screen != null)
+                    await adapter.RenderScreenAsync(chatId, messageId, grRes.Screen);
+                else
+                    await adapter.RenderScreenAsync(chatId, messageId, await BuildAlarmMenuScreenAsync(userId));
+                break;
+
             case "cmd_alarm_check":
             case "cmd_alarm_check_now":
                 await adapter.RenderScreenAsync(chatId, null, await BuildAlarmCheckScreenAsync(userId));
@@ -2345,6 +2400,12 @@ public class DiaryBotWorkflowEngine
     // ─── Обработка текстового ввода в состояниях ──────────────────────────────
     public async Task HandleStateInputAsync(IBotPlatformAdapter adapter, long chatId, string userId, string text, UserSession session)
     {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            await adapter.SendTextMessageAsync(chatId, "⚠️ Введите значение или напишите «Отмена»:");
+            return;
+        }
+
         switch (session.State)
         {
             case UserState.WaitingForHeadTeacherId:

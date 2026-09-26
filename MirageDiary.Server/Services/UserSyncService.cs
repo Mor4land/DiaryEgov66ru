@@ -54,12 +54,11 @@ public class UserSyncService
             string studentId = sourceUser.StudentId ?? "";
             string linkedId = sourceUser.LinkedUserId ?? "";
 
-            // Query potential peer accounts
+            // Query potential peer accounts (same individual across Telegram / MAX / MiniApp)
             var peers = await _db.Users
                 .Where(u => u.Id != sourceId &&
                     (
                         (!string.IsNullOrEmpty(oid) && u.Oid == oid) ||
-                        (!string.IsNullOrEmpty(studentId) && u.StudentId == studentId) ||
                         (!string.IsNullOrEmpty(linkedId) && u.Id == linkedId) ||
                         (u.LinkedUserId == sourceId) ||
                         (!string.IsNullOrEmpty(cleanUsername) && u.Username.ToLower() == cleanUsername.ToLower())
@@ -168,6 +167,11 @@ public class UserSyncService
                 if (peer.EquipmentReminderTime != sourceUser.EquipmentReminderTime)
                 {
                     peer.EquipmentReminderTime = sourceUser.EquipmentReminderTime;
+                    peerModified = true;
+                }
+                if (peer.IsGradeWatcherEnabled != sourceUser.IsGradeWatcherEnabled)
+                {
+                    peer.IsGradeWatcherEnabled = sourceUser.IsGradeWatcherEnabled;
                     peerModified = true;
                 }
                 if (peer.UtcOffsetHours != sourceUser.UtcOffsetHours)

@@ -133,23 +133,33 @@ public class GradeWatcherWorker : BackgroundService
 
     private async Task CheckMarksForActiveUsersAsync(CancellationToken stoppingToken)
     {
-        using var scope = _services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var tokenStore = scope.ServiceProvider.GetRequiredService<ITokenStore>();
-        var httpFactory = scope.ServiceProvider.GetRequiredService<System.Net.Http.IHttpClientFactory>();
-        var botClient = scope.ServiceProvider.GetService<ITelegramBotClient>();
-        var maxBotClient = scope.ServiceProvider.GetService<IMaxBotClient>();
+        List<string> userIds;
+        using (var initScope = _services.CreateScope())
+        {
+            var initDb = initScope.ServiceProvider.GetRequiredService<AppDbContext>();
+            userIds = await initDb.Users
+                .AsNoTracking()
+                .Where(u => !string.IsNullOrEmpty(u.AccessToken) && u.IsAlarmEnabled && u.IsGradeWatcherEnabled)
+                .Select(u => u.Id)
+                .ToListAsync(stoppingToken);
+        }
 
-        // Выбираем пользователей с активным токеном
-        var users = await db.Users
-            .Where(u => !string.IsNullOrEmpty(u.AccessToken))
-            .ToListAsync(stoppingToken);
+        if (userIds.Count == 0) return;
 
-        if (users.Count == 0) return;
-
-        foreach (var user in users)
+        foreach (var userId in userIds)
         {
             if (stoppingToken.IsCancellationRequested) break;
+
+            using var userScope = _services.CreateScope();
+            var db = userScope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var tokenStore = userScope.ServiceProvider.GetRequiredService<ITokenStore>();
+            var httpFactory = userScope.ServiceProvider.GetRequiredService<System.Net.Http.IHttpClientFactory>();
+            var botClient = userScope.ServiceProvider.GetService<ITelegramBotClient>();
+            var maxBotClient = userScope.ServiceProvider.GetService<IMaxBotClient>();
+
+            var user = await db.Users.FirstOrDefaultAsync(u => u.Id == userId, stoppingToken);
+            if (user == null || string.IsNullOrEmpty(user.AccessToken) || !user.IsAlarmEnabled || !user.IsGradeWatcherEnabled)
+                continue;
 
             try
             {
@@ -194,20 +204,24 @@ public class GradeWatcherWorker : BackgroundService
                     db.Cache.Add(new CachedData { CacheKey = dbCacheKey, JsonData = marksJson, UpdatedAt = DateTime.UtcNow });
                 }
 
-                var memCache = scope.ServiceProvider.GetService<IMemoryCache>();
+                var memCache = userScope.ServiceProvider.GetService<IMemoryCache>();
                 if (memCache != null)
                 {
                     for (int q = 0; q <= 4; q++)
                     {
                         memCache.Remove($"user_marks:{user.Id}:q{q}");
                         memCache.Remove($"user_marks_str:{user.Id}:q{q}");
+                        memCache.Remove($"user_marks:{user.Id}_{studentId}:q{q}");
+                        memCache.Remove($"user_marks_str:{user.Id}_{studentId}:q{q}");
                     }
                 }
 
-                string currentHash = ComputeMarksHash(marks);
+                string expectedHashPrefix = $"{studentId}:";
+                string currentRawHash = ComputeMarksHash(marks);
+                string currentHash = $"{studentId}:{currentRawHash}";
 
-                // Если это первый запуск для пользователя (или кэш ещё не был инициализирован) — сохраняем базовый хэш без спама
-                if (string.IsNullOrEmpty(user.LastMarksHash) || previousMarks == null || previousMarks.Count == 0)
+                // Если это первый запуск для пользователя или сменился активный ребёнок — сохраняем базовый хэш без спама
+                if (string.IsNullOrEmpty(user.LastMarksHash) || !user.LastMarksHash.StartsWith(expectedHashPrefix) || previousMarks == null || previousMarks.Count == 0)
                 {
                     user.LastMarksHash = currentHash;
                     await db.SaveChangesAsync(stoppingToken);
@@ -217,7 +231,7 @@ public class GradeWatcherWorker : BackgroundService
                 // Если хэш изменился — значит появились новые оценки или изменения!
                 if (user.LastMarksHash != currentHash)
                 {
-                    _logger.LogInformation($"[GradeWatcher] 🔥 Обнаружено изменение оценок для пользователя {user.Id}!");
+                    _logger.LogInformation($"[GradeWatcher] 🔥 Обнаружено изменение оценок для пользователя {user.Id} (student={studentId})!");
 
                     // Сравниваем оценки с предыдущим срезом по ключу
                     var prevKeys = new HashSet<string>(previousMarks.Select(GetMarkKey));
@@ -249,6 +263,22 @@ public class GradeWatcherWorker : BackgroundService
                         sb.AppendLine(marksToSend.Count == 1
                             ? "🔥 *Новая оценка в электронном журнале!*"
                             : "🔥 *Новые оценки в электронном журнале!*");
+
+                        if (user.Role == "Parent" || !string.IsNullOrEmpty(user.SelectedStudentId))
+                        {
+                            if (memCache != null && memCache.TryGetValue($"user_children:{user.Id}", out List<GosuslugiStudentInfo>? kids) && kids != null)
+                            {
+                                var k = kids.FirstOrDefault(x => x.StudentId == studentId);
+                                if (k != null)
+                                {
+                                    string kname = $"{k.StudentLastName} {k.StudentFirstName}".Trim();
+                                    if (!string.IsNullOrEmpty(kname))
+                                    {
+                                        sb.AppendLine($"👶 *Ученик:* `{TelegramMarkdownEscaper.Escape(kname)}`");
+                                    }
+                                }
+                            }
+                        }
                         sb.AppendLine();
 
                         foreach (var m in marksToSend)
@@ -294,12 +324,25 @@ public class GradeWatcherWorker : BackgroundService
                             }
                             else if (botClient != null)
                             {
-                                await botClient.SendMessage(
-                                    chatId: user.Id,
-                                    text: sb.ToString(),
-                                    parseMode: ParseMode.Markdown,
-                                    cancellationToken: stoppingToken);
-                                _logger.LogInformation($"[GradeWatcher] ✅ Пуш об оценке успешно доставлен TG пользователю {user.Id}.");
+                                try
+                                {
+                                    await botClient.SendMessage(
+                                        chatId: user.Id,
+                                        text: sb.ToString(),
+                                        parseMode: ParseMode.Markdown,
+                                        cancellationToken: stoppingToken);
+                                    _logger.LogInformation($"[GradeWatcher] ✅ Пуш об оценке успешно доставлен TG пользователю {user.Id}.");
+                                }
+                                catch (Exception mex)
+                                {
+                                    _logger.LogWarning($"[GradeWatcher] Ошибка отправки Markdown пуша для {user.Id}: {mex.Message}. Попытка резервной отправки без разметки...");
+                                    string plain = sb.ToString().Replace("*", "").Replace("_", "").Replace("`", "");
+                                    await botClient.SendMessage(
+                                        chatId: user.Id,
+                                        text: plain,
+                                        cancellationToken: stoppingToken);
+                                    _logger.LogInformation($"[GradeWatcher] ✅ Резервный пуш без разметки доставлен TG пользователю {user.Id}.");
+                                }
                             }
                         }
                         catch (Exception tex)

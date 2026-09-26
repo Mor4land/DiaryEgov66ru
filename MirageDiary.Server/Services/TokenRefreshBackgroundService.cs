@@ -110,6 +110,7 @@ public class TokenRefreshBackgroundService : BackgroundService
 
                 var expUtc = DiaryClient.GetTokenExpirationUtc(tokenData.AccessToken);
                 bool isMobile = !string.IsNullOrEmpty(tokenData.DeviceId) && !string.IsNullOrEmpty(tokenData.Oid);
+                bool attemptedPlaywright = false;
 
                 // Proactive refresh if token expires within 60 minutes or if exp is null/already expired
                 bool needsProactiveRefresh = expUtc == null || (expUtc.Value - DateTime.UtcNow) < TimeSpan.FromMinutes(60);
@@ -146,6 +147,7 @@ public class TokenRefreshBackgroundService : BackgroundService
                     }
                     else
                     {
+                        attemptedPlaywright = true;
                         _logger.LogInformation($"[TokenRefreshWorker] 🌐 Проактивное продление веб-сессии через Playwright для {user.Id}...");
                         var refreshedCookies = await PlaywrightSessionRefresher.TryRefreshCookiesAsync(tokenData.AccessToken);
                         if (!string.IsNullOrEmpty(refreshedCookies))
@@ -197,7 +199,7 @@ public class TokenRefreshBackgroundService : BackgroundService
                         }
                     }
 
-                    if (!renewed && !isMobile)
+                    if (!renewed && !isMobile && !attemptedPlaywright)
                     {
                         var refreshedCookies = await PlaywrightSessionRefresher.TryRefreshCookiesAsync(tokenData.AccessToken);
                         if (!string.IsNullOrEmpty(refreshedCookies))

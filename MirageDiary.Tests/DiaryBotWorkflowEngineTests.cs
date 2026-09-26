@@ -146,22 +146,25 @@ public class DiaryBotWorkflowEngineTests : IDisposable
         Assert.Contains("`17:00`", screen.Text);
         Assert.Contains("`20:30`", screen.Text);
 
-        Assert.Equal(4, screen.Buttons.Count);
+        Assert.Equal(5, screen.Buttons.Count);
 
         // Row 0: Master toggle
         Assert.Equal("cmd_alarm_toggle_master", screen.Buttons[0][0].CallbackData);
 
-        // Row 1: Schedule & Homework
-        Assert.Equal("cmd_alarm_sched", screen.Buttons[1][0].CallbackData);
-        Assert.Equal("cmd_alarm_hw", screen.Buttons[1][1].CallbackData);
+        // Row 1: Grades & Schedule
+        Assert.Equal("cmd_alarm_grades_toggle", screen.Buttons[1][0].CallbackData);
+        Assert.Equal("cmd_alarm_sched", screen.Buttons[1][1].CallbackData);
 
-        // Row 2: Equipment & Check now
-        Assert.Equal("cmd_alarm_equip", screen.Buttons[2][0].CallbackData);
-        Assert.Equal("cmd_alarm_check_now", screen.Buttons[2][1].CallbackData);
+        // Row 2: Homework & Equipment
+        Assert.Equal("cmd_alarm_hw", screen.Buttons[2][0].CallbackData);
+        Assert.Equal("cmd_alarm_equip", screen.Buttons[2][1].CallbackData);
 
-        // Row 3: Back to Settings & Main Menu
-        Assert.Equal("cmd_settings", screen.Buttons[3][0].CallbackData);
-        Assert.Equal("cmd_back_main", screen.Buttons[3][1].CallbackData);
+        // Row 3: Check now
+        Assert.Equal("cmd_alarm_check_now", screen.Buttons[3][0].CallbackData);
+
+        // Row 4: Back to Settings & Main Menu
+        Assert.Equal("cmd_settings", screen.Buttons[4][0].CallbackData);
+        Assert.Equal("cmd_back_main", screen.Buttons[4][1].CallbackData);
     }
 
     [Fact]
@@ -246,7 +249,8 @@ public class DiaryBotWorkflowEngineTests : IDisposable
 
         Assert.Contains("ℹ️ *Справка по Mirage Diary*", screen.Text);
         Assert.Single(screen.Buttons);
-        Assert.Equal("cmd_back_main", screen.Buttons[0][0].CallbackData);
+        Assert.Equal("cmd_settings", screen.Buttons[0][0].CallbackData);
+        Assert.Equal("cmd_back_main", screen.Buttons[0][1].CallbackData);
     }
 
     [Fact]

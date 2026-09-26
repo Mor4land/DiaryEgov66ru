@@ -43,6 +43,13 @@ public class RoleService
         // 2. Lookup primary user entity in DB
         var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == cleanUserId);
 
+        // If user is a Parent or has a selected child, preserve Parent role
+        // unless their explicit ID was matched in Admins configuration above.
+        if (user != null && (user.Role == "Parent" || !string.IsNullOrEmpty(user.SelectedStudentId)))
+        {
+            return "Parent";
+        }
+
         // Check primary DB role
         if (user != null)
         {
@@ -53,7 +60,7 @@ public class RoleService
                 return "HeadTeacher";
         }
 
-        // 3. If this is a MAX user or linked user, check linked Telegram or OID/StudentId account
+        // 3. If this is a MAX user or linked user, check linked Telegram or OID account (same individual)
         if (!string.IsNullOrEmpty(cleanUserId))
         {
             // Check by LinkedUserId if present
@@ -71,13 +78,12 @@ public class RoleService
                 }
             }
 
-            // Check if another account with matching Oid / StudentId is Admin or HeadTeacher
-            if (user != null && (!string.IsNullOrEmpty(user.Oid) || !string.IsNullOrEmpty(user.StudentId)))
+            // Check if another account with matching Oid is Admin or HeadTeacher (same Gosuslugi individual)
+            if (user != null && !string.IsNullOrEmpty(user.Oid))
             {
                 var peer = await _db.Users.FirstOrDefaultAsync(u =>
                     u.Id != cleanUserId &&
-                    ((!string.IsNullOrEmpty(user.Oid) && u.Oid == user.Oid) ||
-                     (!string.IsNullOrEmpty(user.StudentId) && u.StudentId == user.StudentId)));
+                    u.Oid == user.Oid);
 
                 if (peer != null)
                 {

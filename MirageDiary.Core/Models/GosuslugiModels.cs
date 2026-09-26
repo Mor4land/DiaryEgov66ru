@@ -48,6 +48,12 @@ public class GosuslugiStudentInfo
 
     [JsonPropertyName("mdm_id")]
     public string MdmId { get; set; } = string.Empty;
+
+    [JsonPropertyName("kid_id")]
+    public long? KidId { get; set; }
+
+    [JsonIgnore]
+    public bool IsParentChild { get; set; }
 }
 
 public class GosuslugiClassInfo
