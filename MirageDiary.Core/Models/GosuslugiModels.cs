@@ -188,9 +188,12 @@ public class GosuslugiLessonItem
     {
         get
         {
-            if (!string.IsNullOrWhiteSpace(RawLessonType)) return RawLessonType;
-            if (!string.IsNullOrWhiteSpace(TypeValue)) return TypeValue;
-            return string.Empty;
+            string raw = !string.IsNullOrWhiteSpace(RawLessonType) ? RawLessonType : TypeValue;
+            if (string.IsNullOrWhiteSpace(raw)) return string.Empty;
+            raw = raw.Trim();
+            if (raw == "0" || raw.Equals("Урок", StringComparison.OrdinalIgnoreCase) || raw.Equals("Обычный урок", StringComparison.OrdinalIgnoreCase))
+                return string.Empty;
+            return raw;
         }
         set => RawLessonType = value;
     }

@@ -106,4 +106,24 @@ public class ScheduleFormattingTests
         Assert.Contains("Квадратные уравнения", formatted);
         Assert.Contains("2. *Физкультура* `[09:25–10:10]` • каб. Спортзал ❌ *(Отменен)*", formatted);
     }
+
+    [Theory]
+    [InlineData("{\"subject_name\":\"Русский язык\",\"lesson_type\":0}")]
+    [InlineData("{\"subject_name\":\"Русский язык\",\"lesson_type\":\"0\"}")]
+    [InlineData("{\"subject_name\":\"Русский язык\",\"type_value\":0}")]
+    [InlineData("{\"subject_name\":\"Русский язык\",\"type_value\":\"0\"}")]
+    [InlineData("{\"subject_name\":\"Русский язык\",\"lesson_type\":\"Урок\"}")]
+    [InlineData("{\"subject_name\":\"Русский язык\",\"lesson_type\":\"Обычный урок\"}")]
+    public void LessonItem_ZeroOrStandardLessonType_DoesNotDisplayLessonType(string json)
+    {
+        var item = JsonSerializer.Deserialize<GosuslugiLessonItem>(json, JsonOpts);
+        Assert.NotNull(item);
+        Assert.Empty(item.LessonType);
+
+        var lessons = new List<GosuslugiLessonItem> { item };
+        string formatted = DiaryInteractionService.FormatSchedule(lessons, "28.09.2026");
+
+        Assert.DoesNotContain("Вид:", formatted);
+        Assert.DoesNotContain("Вид:* 0", formatted);
+    }
 }

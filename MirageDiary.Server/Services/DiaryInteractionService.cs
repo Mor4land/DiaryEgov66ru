@@ -486,7 +486,10 @@ public class DiaryInteractionService
 
             sb.AppendLine($"{num}. *{subject}*{time}{room}{distant}{status}");
 
-            if (!string.IsNullOrWhiteSpace(l.LessonType) && !l.LessonType.Equals("Урок", StringComparison.OrdinalIgnoreCase))
+            if (!string.IsNullOrWhiteSpace(l.LessonType) && 
+                !l.LessonType.Equals("Урок", StringComparison.OrdinalIgnoreCase) &&
+                !l.LessonType.Equals("0", StringComparison.OrdinalIgnoreCase) &&
+                !l.LessonType.Equals("Обычный урок", StringComparison.OrdinalIgnoreCase))
             {
                 sb.AppendLine($"   🏷️ *Вид:* {TelegramMarkdownEscaper.Escape(l.LessonType.Trim())}");
             }
