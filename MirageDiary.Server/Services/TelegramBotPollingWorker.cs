@@ -76,6 +76,7 @@ public class TelegramBotPollingWorker : BackgroundService
                 new BotCommand { Command = "profile", Description = "👤 Данные профиля ученика" },
                 new BotCommand { Command = "settings", Description = "⚙️ Настройки и напоминания" },
                 new BotCommand { Command = "link", Description = "🔗 Связка с MAX мессенджером" },
+                new BotCommand { Command = "logout", Description = "🔒 Выйти из аккаунта" },
                 new BotCommand { Command = "help", Description = "ℹ️ Справка по всем командам" },
                 new BotCommand { Command = "stop", Description = "🚪 Выход и удаление данных" }
             };

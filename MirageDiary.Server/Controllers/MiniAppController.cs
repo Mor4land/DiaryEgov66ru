@@ -26,6 +26,7 @@ public class MiniAppController : ControllerBase
     private readonly BookmarkletAuthService _bookmarkletAuth;
     private readonly PlaywrightAuthManager _playwrightAuth;
     private readonly UserSyncService _userSyncService;
+    private readonly DiaryInteractionService _diaryService;
 
     public MiniAppController(
         ITokenStore tokenStore,
@@ -33,7 +34,8 @@ public class MiniAppController : ControllerBase
         IHttpClientFactory httpFactory,
         BookmarkletAuthService bookmarkletAuth,
         PlaywrightAuthManager playwrightAuth,
-        UserSyncService userSyncService)
+        UserSyncService userSyncService,
+        DiaryInteractionService diaryService)
     {
         _tokenStore      = tokenStore;
         _context         = context;
@@ -41,6 +43,7 @@ public class MiniAppController : ControllerBase
         _bookmarkletAuth = bookmarkletAuth;
         _playwrightAuth  = playwrightAuth;
         _userSyncService = userSyncService;
+        _diaryService    = diaryService;
     }
 
     /// <summary>
@@ -378,6 +381,50 @@ public class MiniAppController : ControllerBase
         }
 
         return Ok(new Models.CheckAuthResponse { IsAuthorized = true });
+    }
+
+    /// <summary>
+    /// Returns current grades summary for all subjects for the grade simulator.
+    /// </summary>
+    [HttpGet("grades/summary/{userId}")]
+    public async Task<IActionResult> GetGradesSummary(string userId, [FromQuery] int? quarter = null)
+    {
+        if (string.IsNullOrWhiteSpace(userId))
+            return BadRequest(new { error = "User ID is required." });
+
+        string cleanUserId = userId.Trim();
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == cleanUserId);
+        if (user == null || string.IsNullOrEmpty(user.AccessToken))
+        {
+            return Unauthorized(new { error = "User is not authorized with active diary session." });
+        }
+
+        try
+        {
+            int targetQ = quarter ?? DiaryInteractionService.GetCurrentQuarter();
+            var summaries = await _diaryService.GetSubjectGradesSummaryAsync(user.Id, targetQ);
+
+            return Ok(new
+            {
+                studentName = $"{user.FirstName} {user.LastName}".Trim(),
+                className = user.ClassName,
+                quarter = targetQ,
+                subjects = summaries.Select(s => new
+                {
+                    subjectName = s.SubjectName,
+                    averageGpa = s.AverageGpa,
+                    weightedSum = s.WeightedSum,
+                    totalWeight = s.TotalWeight,
+                    finalForecast = s.FinalForecast,
+                    statusEmoji = s.StatusEmoji,
+                    marks = s.Marks.Select(m => new { value = m.Value, weight = m.Weight, date = m.Date })
+                })
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { error = ex.Message });
+        }
     }
 
     private static bool IsJwtExpired(string rawToken)

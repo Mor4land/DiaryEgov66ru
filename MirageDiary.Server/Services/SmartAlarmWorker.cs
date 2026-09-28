@@ -7,12 +7,15 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;
 using Telegram.Bot;
+using Telegram.Bot.Types.ReplyMarkups;
 using MirageDiary.Server.Data;
 using System.Collections.Generic;
 using MAX.Bot.Interfaces;
 using MAX.Bot.Interfaces.Models;
 using MAX.Bot.Interfaces.Models.Request;
 using MAX.Bot.Interfaces.Models.Request.Message;
+using MAX.Bot.Interfaces.Models.Request.Message.Attachment;
+using MAX.Bot.Interfaces.Models.Request.Message.Attachment.Payloads;
 
 namespace MirageDiary.Server.Services;
 
@@ -102,6 +105,20 @@ public class SmartAlarmWorker : BackgroundService
             string todayStr = userNow.ToString("yyyy-MM-dd");
             bool dbChanged = false;
 
+            // Если у пользователя привязаны оба аккаунта (Telegram и MAX), учитываем предпочтительный канал доставки
+            if (!string.IsNullOrEmpty(student.NotificationChannel))
+            {
+                bool isMax = student.Id.StartsWith("max_");
+                if (student.NotificationChannel.Equals("telegram", StringComparison.OrdinalIgnoreCase) && isMax)
+                {
+                    continue; // Уведомления направляются только в Telegram
+                }
+                if (student.NotificationChannel.Equals("max", StringComparison.OrdinalIgnoreCase) && !isMax)
+                {
+                    continue; // Уведомления направляются только в MAX
+                }
+            }
+
             // Helper to check if current user time falls within the activation window [TargetTime, TargetTime + 30 min]
             bool IsInTimeWindow(string reminderTimeStr)
             {
@@ -135,7 +152,11 @@ public class SmartAlarmWorker : BackgroundService
                     if (HasScheduleContent(schedText))
                     {
                         string msg = $"🔔 *Умный будильник: расписание уроков на сегодня!*\n\n{schedText}";
-                        await SendMessageToUserAsync(student.Id, msg, tgBotClient, maxBotClient, stoppingToken);
+                        var (tgMarkup, maxAttachments) = CreateNotificationKeyboard(
+                            ("📅 Расписание", "cmd_schedule"),
+                            ("🔔 До звонка", "cmd_now")
+                        );
+                        await SendMessageToUserAsync(student.Id, msg, tgBotClient, maxBotClient, stoppingToken, tgMarkup, maxAttachments);
                         student.LastScheduleReminderDate = todayStr;
                         MarkHandledToday("sched");
                         dbChanged = true;
@@ -165,7 +186,11 @@ public class SmartAlarmWorker : BackgroundService
                     if (HasHomeworkContent(hwText))
                     {
                         string msg = $"📚 *Умный будильник: домашнее задание на завтра!*\n\n{hwText}";
-                        await SendMessageToUserAsync(student.Id, msg, tgBotClient, maxBotClient, stoppingToken);
+                        var (tgMarkup, maxAttachments) = CreateNotificationKeyboard(
+                            ("📚 Вся домашка", "cmd_homework:завтра"),
+                            ("📅 Расписание", "cmd_schedule:завтра")
+                        );
+                        await SendMessageToUserAsync(student.Id, msg, tgBotClient, maxBotClient, stoppingToken, tgMarkup, maxAttachments);
                         student.LastHomeworkReminderDate = todayStr;
                         MarkHandledToday("hw");
                         dbChanged = true;
@@ -222,7 +247,11 @@ public class SmartAlarmWorker : BackgroundService
                     {
                         string items = string.Join("\n• ", foundTriggers.Select(t => char.ToUpper(t[0]) + t[1..]));
                         string msg = $"🎒 *Умный будильник: собираем рюкзак на завтра!*\n\nНе забудьте взять с собой:\n• {items}\n\n✨ _Положите их в рюкзак прямо сейчас, чтобы не забыть утром!_";
-                        await SendMessageToUserAsync(student.Id, msg, tgBotClient, maxBotClient, stoppingToken);
+                        var (tgMarkup, maxAttachments) = CreateNotificationKeyboard(
+                            ("🎒 Проверить рюкзак", "cmd_alarm_check_now"),
+                            ("📚 Домашка на завтра", "cmd_homework:завтра")
+                        );
+                        await SendMessageToUserAsync(student.Id, msg, tgBotClient, maxBotClient, stoppingToken, tgMarkup, maxAttachments);
                     }
 
                     bool isNetworkError = combined.Contains("таймаут") || combined.Contains("ошибка при");
@@ -253,7 +282,14 @@ public class SmartAlarmWorker : BackgroundService
         }
     }
 
-    private async Task SendMessageToUserAsync(string userId, string msg, ITelegramBotClient? tgBotClient, IMaxBotClient? maxBotClient, CancellationToken ct)
+    private async Task SendMessageToUserAsync(
+        string userId,
+        string msg,
+        ITelegramBotClient? tgBotClient,
+        IMaxBotClient? maxBotClient,
+        CancellationToken ct,
+        InlineKeyboardMarkup? tgMarkup = null,
+        List<Attachment>? maxAttachments = null)
     {
         if (userId.StartsWith("max_"))
         {
@@ -263,7 +299,8 @@ public class SmartAlarmWorker : BackgroundService
                 {
                     UserId = maxChatId,
                     Text = msg,
-                    Format = MessageFormat.Markdown
+                    Format = MessageFormat.Markdown,
+                    Attachments = maxAttachments
                 });
             }
         }
@@ -271,13 +308,65 @@ public class SmartAlarmWorker : BackgroundService
         {
             try
             {
-                await tgBotClient.SendMessage(chatId, msg, parseMode: Telegram.Bot.Types.Enums.ParseMode.Markdown, cancellationToken: ct);
+                await tgBotClient.SendMessage(chatId, msg, parseMode: Telegram.Bot.Types.Enums.ParseMode.Markdown, replyMarkup: tgMarkup, cancellationToken: ct);
             }
             catch
             {
-                await tgBotClient.SendMessage(chatId, msg, cancellationToken: ct);
+                await tgBotClient.SendMessage(chatId, msg, replyMarkup: tgMarkup, cancellationToken: ct);
             }
         }
+    }
+
+    private static (InlineKeyboardMarkup tgMarkup, List<Attachment> maxAttachments) CreateNotificationKeyboard(
+        (string text, string callback) btn1,
+        (string text, string callback)? btn2 = null)
+    {
+        var tgRow1 = new List<InlineKeyboardButton>
+        {
+            InlineKeyboardButton.WithCallbackData(btn1.text, btn1.callback)
+        };
+        if (btn2.HasValue)
+        {
+            tgRow1.Add(InlineKeyboardButton.WithCallbackData(btn2.Value.text, btn2.Value.callback));
+        }
+
+        var tgMarkup = new InlineKeyboardMarkup(new[]
+        {
+            tgRow1,
+            new List<InlineKeyboardButton>
+            {
+                InlineKeyboardButton.WithCallbackData("🏠 Главное меню", "cmd_back_main")
+            }
+        });
+
+        var maxRow1 = new List<Button>
+        {
+            new CallbackButton { Text = btn1.text, Payload = btn1.callback }
+        };
+        if (btn2.HasValue)
+        {
+            maxRow1.Add(new CallbackButton { Text = btn2.Value.text, Payload = btn2.Value.callback });
+        }
+
+        var maxAttachments = new List<Attachment>
+        {
+            new InlineKeyboardAttachment
+            {
+                Payload = new InlineKeyboardPayload
+                {
+                    Buttons = new List<List<Button>>
+                    {
+                        maxRow1,
+                        new List<Button>
+                        {
+                            new CallbackButton { Text = "🏠 Главное меню", Payload = "cmd_back_main" }
+                        }
+                    }
+                }
+            }
+        };
+
+        return (tgMarkup, maxAttachments);
     }
 
     private static bool HasScheduleContent(string? text)

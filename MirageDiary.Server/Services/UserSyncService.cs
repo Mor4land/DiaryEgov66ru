@@ -179,6 +179,16 @@ public class UserSyncService
                     peer.UtcOffsetHours = sourceUser.UtcOffsetHours;
                     peerModified = true;
                 }
+                if (!string.IsNullOrEmpty(sourceUser.NotificationChannel) && peer.NotificationChannel != sourceUser.NotificationChannel)
+                {
+                    peer.NotificationChannel = sourceUser.NotificationChannel;
+                    peerModified = true;
+                }
+                else if (string.IsNullOrEmpty(sourceUser.NotificationChannel) && !string.IsNullOrEmpty(peer.NotificationChannel))
+                {
+                    sourceUser.NotificationChannel = peer.NotificationChannel;
+                    _db.Users.Update(sourceUser);
+                }
 
                 // 5. Synchronize Role (elevate peer if source is Admin or HeadTeacher)
                 if (sourceUser.Role == "Admin" && peer.Role != "Admin")

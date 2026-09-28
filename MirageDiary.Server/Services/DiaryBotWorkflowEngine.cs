@@ -66,12 +66,13 @@ public class DiaryBotWorkflowEngine
         return user.HasPassedCaptcha || user.HasAcceptedPrivacyPolicy || !string.IsNullOrEmpty(user.AccessToken);
     }
 
-    public string BuildMiniAppUrl(string userId, string? firstName = null, bool force = false)
+    public string BuildMiniAppUrl(string userId, string? firstName = null, bool force = false, string? mode = null)
     {
         var baseUrl = (_config["MiniAppUrl"] ?? "https://miragediary.space").TrimEnd('/');
         var fnParam = !string.IsNullOrEmpty(firstName) ? $"&firstName={Uri.EscapeDataString(firstName)}" : "";
         var forceParam = force ? "&force=1" : "";
-        return $"{baseUrl}?userId={Uri.EscapeDataString(userId)}{fnParam}{forceParam}";
+        var modeParam = !string.IsNullOrEmpty(mode) ? $"&mode={Uri.EscapeDataString(mode)}" : "";
+        return $"{baseUrl}?userId={Uri.EscapeDataString(userId)}{fnParam}{forceParam}{modeParam}";
     }
 
     public async Task<UserEntity> EnsureUserExistsAsync(string userId, string? username = null, string? firstName = null, string? lastName = null, string platform = "telegram")
@@ -106,6 +107,51 @@ public class DiaryBotWorkflowEngine
             }
         }
         return user;
+    }
+
+    public async Task<(bool hasBoth, UserEntity? peerUser)> CheckDualPlatformRegistrationAsync(UserEntity? user)
+    {
+        if (user == null || string.IsNullOrWhiteSpace(user.Id)) return (false, null);
+
+        bool isCurrentMax = user.Id.StartsWith("max_");
+
+        // 1. Direct LinkedUserId check
+        if (!string.IsNullOrEmpty(user.LinkedUserId))
+        {
+            var peer = await _db.Users.FirstOrDefaultAsync(u => u.Id == user.LinkedUserId);
+            if (peer != null)
+            {
+                bool peerIsMax = peer.Id.StartsWith("max_");
+                if (isCurrentMax != peerIsMax) return (true, peer);
+            }
+        }
+
+        // 2. Shared Oid or StudentId
+        string oid = user.Oid ?? "";
+        string studentId = user.StudentId ?? "";
+        if (!string.IsNullOrEmpty(oid) || !string.IsNullOrEmpty(studentId))
+        {
+            var peer = await _db.Users.FirstOrDefaultAsync(u => u.Id != user.Id &&
+                ((!string.IsNullOrEmpty(oid) && u.Oid == oid) ||
+                 (!string.IsNullOrEmpty(studentId) && u.StudentId == studentId)));
+
+            if (peer != null)
+            {
+                bool peerIsMax = peer.Id.StartsWith("max_");
+                if (isCurrentMax != peerIsMax)
+                {
+                    if (string.IsNullOrEmpty(user.LinkedUserId))
+                    {
+                        user.LinkedUserId = peer.Id;
+                        peer.LinkedUserId = user.Id;
+                        await _db.SaveChangesAsync();
+                    }
+                    return (true, peer);
+                }
+            }
+        }
+
+        return (false, null);
     }
 
     // ─── Главное меню ──────────────────────────────────────────────────────────
@@ -240,14 +286,31 @@ public class DiaryBotWorkflowEngine
             text += "\n\n💡 _Отправьте фото или PDF с расписанием звонков — я сохраню его для учеников вашей школы._";
         }
 
+        var (hasBothPlatforms, _) = await CheckDualPlatformRegistrationAsync(user);
+        if (hasBothPlatforms && string.IsNullOrEmpty(user?.NotificationChannel))
+        {
+            text += "\n\n🔔 *Куда присылать уведомления?*\n" +
+                    "Вы привязали и Telegram, и MAX! Выберите, куда отправлять оценки, расписание и домашку:";
+
+            int insertIndex = isAuthorized && platform == "max" ? 1 : 0;
+            buttons.Insert(insertIndex, new List<BotButton>
+            {
+                BotButton.Callback("✈️ В Telegram", "cmd_set_notify_channel:telegram"),
+                BotButton.Callback("💬 В MAX", "cmd_set_notify_channel:max"),
+                BotButton.Callback("🔄 В оба", "cmd_set_notify_channel:all")
+            });
+        }
+
         return BotScreen.Create(text, "banner_menu.png").WithButtons(buttons);
     }
 
+    // ─── Настройки ────────────────────────────────────────────────────────────
     // ─── Настройки ────────────────────────────────────────────────────────────
     public async Task<BotScreen> BuildSettingsMenuScreenAsync(string userId, string platform = "telegram")
     {
         var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId);
         var alarmOn = user?.IsAlarmEnabled ?? true;
+        var gradesOn = user?.IsGradeWatcherEnabled ?? true;
         var webAppUrl = _config["MiniAppUrl"] ?? "https://t.me";
         var maxBotApp = _config["MaxBot:Username"] ?? _config["MaxBotUsername"] ?? "se13960436_bot";
 
@@ -279,16 +342,109 @@ public class DiaryBotWorkflowEngine
             BotButton.Callback("🗑 Удалить аккаунт", "cmd_delete_account")
         });
 
+        var (hasBoth, _) = await CheckDualPlatformRegistrationAsync(user);
+        string channelLine = "";
+        if (hasBoth)
+        {
+            string chText = (user?.NotificationChannel?.ToLowerInvariant()) switch
+            {
+                "telegram" => "`✈️ Только Telegram`",
+                "max" => "`💬 Только MAX`",
+                "all" => "`🔄 В оба (TG + MAX)`",
+                _ => "`⚠️ Не выбран (в оба)`"
+            };
+            channelLine = $"\n• 📨 Доставка уведомлений: {chText}";
+
+            buttons.Insert(buttons.Count - 1, new List<BotButton>
+            {
+                BotButton.Callback("📨 Выбор мессенджера для пушей", "cmd_settings_notify_channel")
+            });
+        }
+
         buttons.Add(new List<BotButton>
         {
             BotButton.Callback("🏠 Главное меню", "cmd_back_main")
         });
 
         string text = "⚙️ *Настройки*\n\n" +
-                      $"• ⏰ Будильник: {(alarmOn ? "`🟢 Включен`" : "`🔴 Выключен`")}\n" +
+                      $"• 📊 Оповещения об оценках: {(gradesOn ? "`🟢 Включены`" : "`🔴 Выключены`")}\n" +
+                      $"• ⏰ Будильник: {(alarmOn ? "`🟢 Включен`" : "`🔴 Выключен`")}" +
+                      channelLine + "\n" +
                       $"• 👤 ID: `{userId}`";
 
         return BotScreen.Create(text, "banner_settings.png").WithButtons(buttons);
+    }
+
+    public async Task<BotCallbackResult> ToggleSettingsGradeWatcherAsync(string userId, string platform = "telegram")
+    {
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId);
+        if (user != null)
+        {
+            user.IsGradeWatcherEnabled = !user.IsGradeWatcherEnabled;
+            await _db.SaveChangesAsync();
+            await _userSyncService.SyncUserAcrossPlatformsAsync(user);
+        }
+        var screen = await BuildSettingsMenuScreenAsync(userId, platform);
+        return BotCallbackResult.Ok(screen, user?.IsGradeWatcherEnabled == true ? "Оповещения об оценках включены" : "Оповещения об оценках выключены");
+    }
+
+    public async Task<BotScreen> BuildNotificationChannelSelectScreenAsync(string userId, string platform = "telegram")
+    {
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId);
+        string ch = user?.NotificationChannel?.ToLowerInvariant() ?? "";
+
+        var text = "📨 *Выбор мессенджера для уведомлений*\n\n" +
+                   "Вы зарегистрированы одновременно в Telegram и в MAX.\n\n" +
+                   "Куда присылать оповещения о новых оценках, расписании и домашке:\n\n" +
+                   "• ✈️ *Только Telegram* — пуши приходят только в чат Telegram\n" +
+                   "• 💬 *Только MAX* — пуши приходят только в чат MAX\n" +
+                   "• 🔄 *В оба мессенджера* — дублировать во все привязанные чаты\n\n" +
+                   "💡 _Вы можете изменить этот выбор в любой момент в /settings._";
+
+        var buttons = new List<List<BotButton>>
+        {
+            new() { BotButton.Callback($"{(ch == "telegram" ? "✅ " : "")}✈️ Только в Telegram", "cmd_set_notify_channel:telegram") },
+            new() { BotButton.Callback($"{(ch == "max" ? "✅ " : "")}💬 Только в MAX", "cmd_set_notify_channel:max") },
+            new() { BotButton.Callback($"{(ch == "all" || string.IsNullOrEmpty(ch) ? "✅ " : "")}🔄 В оба мессенджера", "cmd_set_notify_channel:all") },
+            new() { BotButton.Callback("⚙️ Назад в настройки", "cmd_settings"), BotButton.Callback("🏠 Главное меню", "cmd_back_main") }
+        };
+
+        return BotScreen.Create(text, "banner_settings.png").WithButtons(buttons);
+    }
+
+    public async Task<BotCallbackResult> SetNotificationChannelPreferenceAsync(string userId, string channel, string platform = "telegram")
+    {
+        channel = channel.ToLowerInvariant().Trim();
+        if (channel is not ("telegram" or "max" or "all"))
+        {
+            channel = "all";
+        }
+
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId);
+        if (user != null)
+        {
+            user.NotificationChannel = channel;
+
+            // Синхронизируем парный аккаунт
+            var (hasBoth, peer) = await CheckDualPlatformRegistrationAsync(user);
+            if (peer != null)
+            {
+                peer.NotificationChannel = channel;
+            }
+
+            await _db.SaveChangesAsync();
+            await _userSyncService.SyncUserAcrossPlatformsAsync(user);
+        }
+
+        string alertText = channel switch
+        {
+            "telegram" => "Уведомления будут приходить только в Telegram ✈️",
+            "max" => "Уведомления будут приходить только в MAX 💬",
+            _ => "Уведомления будут приходить в оба мессенджера 🔄"
+        };
+
+        var screen = await BuildSettingsMenuScreenAsync(userId, platform);
+        return BotCallbackResult.Ok(screen, alertText);
     }
 
     // ─── Справка ──────────────────────────────────────────────────────────────
@@ -296,19 +452,23 @@ public class DiaryBotWorkflowEngine
     {
         var text = "ℹ️ *Справка по Mirage Diary*\n\n" +
                    "📋 *Основные команды бота:*\n" +
-                   "• `/menu` или `/start` — Главное меню\n" +
-                   "• `/schedule` `[дата]` — Расписание уроков (напр. `/schedule завтра`)\n" +
-                   "• `/homework` `[дата]` — Домашнее задание (напр. `/homework завтра`)\n" +
-                   "• `/marks` — Оценки и средний балл за четверть\n" +
-                   "• `/calc` — Калькулятор оценок и расчет нужных пятерок\n" +
-                   "• `/now` — Время до звонка и расписание перемен\n" +
-                   "• `/alarm` — Умный будильник и проверка рюкзака\n" +
-                   "• `/children` — Выбор ребенка (для родителей)\n" +
-                   "• `/profile` — Данные вашего профиля, школы и класса\n" +
-                   "• `/settings` — Настройки уведомлений и аккаунта\n" +
-                   "• `/link` — Связать Telegram и MAX аккаунты\n" +
-                   "• `/stop` — Полное удаление аккаунта и переписки\n" +
-                   "• `/help` — Эта справка по командам\n\n" +
+                   "• `/start` или `/menu` — Главное меню\n" +
+                   "• `/schedule` `[дата]` — Расписание уроков (`/schedule завтра`, `/расписание`)\n" +
+                   "• `/homework` `[дата]` — Домашнее задание (`/homework завтра`, `/дз`)\n" +
+                   "• `/marks` — Оценки и средний балл за четверть (`/оценки`)\n" +
+                   "• `/calc` — Калькулятор оценок и расчет пятерок (`/калькулятор`)\n" +
+                   "• `/now` — Сколько времени до звонка и смены (`/звонок`)\n" +
+                   "• `/alarm` — Умный будильник, напоминания и рюкзак (`/будильник`)\n" +
+                   "• `/children` — Выбор ребенка для родителей (`/дети`)\n" +
+                   "• `/profile` — Профиль ученика, класс и школа (`/профиль`)\n" +
+                   "• `/settings` — Настройки уведомлений и аккаунта (`/настройки`)\n" +
+                   "• `/notify_tg` / `/notify_max` / `/notify_all` — Выбор мессенджера для пушей\n" +
+                   "• `/link` — Связать Telegram и MAX аккаунты (`/связать`)\n" +
+                   "• `/grades_off` / `/grades_on` — Выключение / включение пушей об оценках\n" +
+                   "• `/logout` — Безопасный выход из учетной записи (`/выйти`)\n" +
+                   "• `/stop` — Полное удаление аккаунта и сессий\n" +
+                   "• `/help` — Эта справка по всем командам (`/помощь`)\n\n" +
+                   "🔮 *Симулятор оценок в /calc:* выберите предмет и нажмите «Если 2 / 3 / 4 / 5», чтобы узнать, на сколько упадёт или вырастет балл и сколько пятёрок нужно для компенсации.\n\n" +
                    "💡 _Все данные загружаются напрямую из ФГИС «Моя Школа» через защищенный шлюз Госуслуг._";
 
         var buttons = new List<List<BotButton>>
@@ -330,7 +490,7 @@ public class DiaryBotWorkflowEngine
         bool sched  = master && (user?.IsScheduleReminderEnabled ?? true);
         bool hw     = master && (user?.IsHomeworkReminderEnabled ?? true);
         bool equip  = master && (user?.IsEquipmentReminderEnabled ?? true);
-        bool grades = master && (user?.IsGradeWatcherEnabled ?? true);
+        bool grades = user?.IsGradeWatcherEnabled ?? true;
 
         string schedTime = user?.ScheduleReminderTime ?? "07:30";
         string hwTime    = user?.HomeworkReminderTime ?? "17:00";
@@ -379,7 +539,6 @@ public class DiaryBotWorkflowEngine
             user.IsScheduleReminderEnabled = user.IsAlarmEnabled;
             user.IsHomeworkReminderEnabled = user.IsAlarmEnabled;
             user.IsEquipmentReminderEnabled = user.IsAlarmEnabled;
-            user.IsGradeWatcherEnabled = user.IsAlarmEnabled;
             await _db.SaveChangesAsync();
             await _userSyncService.SyncUserAcrossPlatformsAsync(user);
         }
@@ -811,8 +970,24 @@ public class DiaryBotWorkflowEngine
             return BotScreen.Create(emptyText, "banner_marks.png").WithButtons(emptyButtons);
         }
 
-        var text = "🎯 *Калькулятор оценок*\n\nВыберите предмет для расчета необходимых оценок:";
+        var text = "🎯 *Калькулятор оценок*\n\nВыберите предмет для расчета или запустите симулятор:";
         var buttons = new List<List<BotButton>>();
+
+        if (platform == "telegram")
+        {
+            buttons.Add(new List<BotButton>
+            {
+                BotButton.WebApp("🔮 Интерактивный симулятор в Mini App", BuildMiniAppUrl(userId, user?.FirstName, mode: "simulator"))
+            });
+        }
+        else
+        {
+            var maxBotApp = _config["MaxBot:Username"] ?? _config["MaxBotUsername"] ?? "se13960436_bot";
+            buttons.Add(new List<BotButton>
+            {
+                BotButton.MaxApp("🔮 Интерактивный симулятор в Mini App", maxBotApp, userId)
+            });
+        }
 
         for (int i = 0; i < subjects.Count; i += 2)
         {
@@ -861,22 +1036,44 @@ public class DiaryBotWorkflowEngine
                    $"📚 *Предмет:* {safeSubject}\n" +
                    $"📊 *Текущий балл:* `{gpaStr}`\n" +
                    $"🔮 *Прогноз четверти:* *{s.FinalForecast}*\n\n" +
-                   "Какую оценку в четверти вы хотите получить?";
+                   "Выберите цель на четверть или смоделируйте невыставленную отметку:";
 
-        var buttons = new List<List<BotButton>>
+        var buttons = new List<List<BotButton>>();
+
+        if (platform == "telegram")
         {
-            new()
+            buttons.Add(new List<BotButton>
             {
-                BotButton.Callback("🟢 Цель 5", $"cmd_calc_target:{subjectIndex}:5"),
-                BotButton.Callback("🟡 Цель 4", $"cmd_calc_target:{subjectIndex}:4"),
-                BotButton.Callback("🔴 Цель 3", $"cmd_calc_target:{subjectIndex}:3")
-            },
-            new()
+                BotButton.WebApp("🔮 Симулятор оценок в Mini App", BuildMiniAppUrl(userId, null, mode: "simulator"))
+            });
+        }
+        else
+        {
+            var maxBotApp = _config["MaxBot:Username"] ?? _config["MaxBotUsername"] ?? "se13960436_bot";
+            buttons.Add(new List<BotButton>
             {
-                BotButton.Callback("⬅️ Выбрать другой предмет", "cmd_calc"),
-                BotButton.Callback("🏠 Главное меню", "cmd_back_main")
-            }
-        };
+                BotButton.MaxApp("🔮 Симулятор оценок в Mini App", maxBotApp, userId)
+            });
+        }
+
+        buttons.Add(new List<BotButton>
+        {
+            BotButton.Callback("🟢 Цель 5", $"cmd_calc_target:{subjectIndex}:5"),
+            BotButton.Callback("🟡 Цель 4", $"cmd_calc_target:{subjectIndex}:4"),
+            BotButton.Callback("🔴 Цель 3", $"cmd_calc_target:{subjectIndex}:3")
+        });
+
+        buttons.Add(new List<BotButton>
+        {
+            BotButton.Callback("🔻 Что если 2?", $"cmd_calc_sim:{subjectIndex}:2:1:1"),
+            BotButton.Callback("🔺 Что если 5?", $"cmd_calc_sim:{subjectIndex}:5:1:1")
+        });
+
+        buttons.Add(new List<BotButton>
+        {
+            BotButton.Callback("⬅️ Выбрать другой предмет", "cmd_calc"),
+            BotButton.Callback("🏠 Главное меню", "cmd_back_main")
+        });
 
         return BotScreen.Create(text, "banner_marks.png").WithButtons(buttons);
     }
@@ -961,6 +1158,159 @@ public class DiaryBotWorkflowEngine
                 BotButton.Callback("🏠 Главное меню", "cmd_back_main")
             }
         };
+
+        return BotScreen.Create(text, "banner_marks.png").WithButtons(buttons);
+    }
+
+    public async Task<BotScreen> BuildHypotheticalGradeScreenAsync(
+        string userId,
+        int subjectIndex,
+        int grade = 2,
+        int weight = 1,
+        int count = 1,
+        string platform = "telegram")
+    {
+        List<DiaryInteractionService.SubjectGradeSummary>? subjects = null;
+        try
+        {
+            subjects = await _diaryService.GetSubjectGradesSummaryAsync(userId);
+        }
+        catch
+        {
+            return await BuildGradeCalculatorSubjectsScreenAsync(userId, platform: platform);
+        }
+
+        if (subjects == null || subjectIndex < 0 || subjectIndex >= subjects.Count)
+        {
+            return await BuildGradeCalculatorSubjectsScreenAsync(userId, platform: platform);
+        }
+
+        var s = subjects[subjectIndex];
+        string safeSubject = TelegramMarkdownEscaper.Escape(s.SubjectName);
+
+        var sim = GradeCalculator.SimulateUnpostedGrade(
+            subjectIndex,
+            s.SubjectName,
+            s.WeightedSum,
+            s.TotalWeight,
+            grade,
+            weight,
+            count
+        );
+
+        var ci = System.Globalization.CultureInfo.InvariantCulture;
+        string weightTitle = weight switch
+        {
+            1 => "ответ на уроке / ДЗ",
+            2 => "контрольная работа",
+            3 => "ВПР / экзамен",
+            _ => "работа"
+        };
+        string gradeEmoji = grade switch
+        {
+            5 => "🟢",
+            4 => "🟡",
+            3 => "🟠",
+            2 => "🔴",
+            _ => "⚪"
+        };
+        string countText = count > 1 ? $" × {count} шт." : "";
+
+        string deltaSign = sim.Delta >= 0 ? "+" : "";
+        string deltaIcon = sim.Delta > 0 ? "📈" : (sim.Delta < 0 ? "📉" : "—");
+        string deltaStr = $"{deltaSign}{sim.Delta.ToString("F2", ci)} {deltaIcon}";
+
+        string forecastChangeStr;
+        if (sim.CurrentForecast != sim.NewForecast)
+        {
+            string icon = sim.ForecastDropped ? "⚠️" : "🎉";
+            forecastChangeStr = $"`{sim.CurrentForecast}` ➡️ *{sim.NewForecast}* {icon}";
+        }
+        else
+        {
+            forecastChangeStr = $"*{sim.NewForecast}* _(без изменений)_";
+        }
+
+        string impactText;
+        if (sim.ForecastDropped)
+        {
+            impactText = $"⚠️ *Внимание!* Из-за этой отметки итоговая оценка за четверть упадёт с *{sim.CurrentForecast}* до *{sim.NewForecast}*!";
+        }
+        else if (sim.Delta < 0)
+        {
+            impactText = $"📉 *Средний балл просядет*, но четвертная оценка *{sim.NewForecast}* пока удерживается.";
+        }
+        else
+        {
+            impactText = $"🎉 *Балл вырастет!* Новая отметка укрепит четвертную оценку.";
+        }
+
+        string recoverySection = "";
+        if (sim.NeededFivesW1ToRecover > 0)
+        {
+            int targetGrade = sim.CurrentForecast > 0 ? sim.CurrentForecast : (grade >= 4 ? grade : 4);
+            double th = GradeCalculator.GetTargetThreshold(targetGrade);
+            recoverySection = $"\n\n🎯 *Как удержать оценку «{targetGrade}» (порог ≥ {th.ToString("F2", ci)}):*\n" +
+                              $"Чтобы компенсировать балл, потребуется получить:\n" +
+                              $"• 🟢 *{sim.NeededFivesW1ToRecover}* пятерок за ответы на уроках (вес 1)\n" +
+                              $"• 🟢 *{sim.NeededFivesW2ToRecover}* пятёрки за контрольные (вес 2)";
+        }
+        else if (sim.Delta < 0)
+        {
+            recoverySection = "\n\n✅ *Запас прочности:* средний балл останется в зоне текущей оценки.";
+        }
+
+        var text = $"🔮 *Симулятор невыставленной оценки*\n\n" +
+                   $"📚 *Предмет:* {safeSubject}\n" +
+                   $"• *Текущий балл:* `{sim.CurrentGpa.ToString("F2", ci)}` (прогноз: *{sim.CurrentForecast}*)\n" +
+                   $"• *Ожидаемая оценка:* {gradeEmoji} *{grade}*{countText} (вес *{weight}* — {weightTitle})\n\n" +
+                   $"📊 *Результат после выставления:*\n" +
+                   $"• *Новый средний балл:* `{sim.NewGpa.ToString("F2", ci)}` ({deltaStr})\n" +
+                   $"• *Новый прогноз четверти:* {forecastChangeStr}\n\n" +
+                   $"{impactText}" +
+                   $"{recoverySection}";
+
+        var buttons = new List<List<BotButton>>();
+
+        if (platform == "telegram")
+        {
+            buttons.Add(new List<BotButton>
+            {
+                BotButton.WebApp("🔮 Открыть симулятор в Mini App", BuildMiniAppUrl(userId, null, mode: "simulator"))
+            });
+        }
+        else
+        {
+            var maxBotApp = _config["MaxBot:Username"] ?? _config["MaxBotUsername"] ?? "se13960436_bot";
+            buttons.Add(new List<BotButton>
+            {
+                BotButton.MaxApp("🔮 Открыть симулятор в Mini App", maxBotApp, userId)
+            });
+        }
+
+        // Ряд 1: выбор оценки
+        buttons.Add(new List<BotButton>
+        {
+            BotButton.Callback($"{(grade == 2 ? "✓ " : "")}🔴 2", $"cmd_calc_sim:{subjectIndex}:2:{weight}:{count}"),
+            BotButton.Callback($"{(grade == 3 ? "✓ " : "")}🟠 3", $"cmd_calc_sim:{subjectIndex}:3:{weight}:{count}"),
+            BotButton.Callback($"{(grade == 4 ? "✓ " : "")}🟡 4", $"cmd_calc_sim:{subjectIndex}:4:{weight}:{count}"),
+            BotButton.Callback($"{(grade == 5 ? "✓ " : "")}🟢 5", $"cmd_calc_sim:{subjectIndex}:5:{weight}:{count}")
+        });
+
+        // Ряд 2: выбор веса (1, 2, 3)
+        buttons.Add(new List<BotButton>
+        {
+            BotButton.Callback($"{(weight == 1 ? "✓ " : "")}Урок (1)", $"cmd_calc_sim:{subjectIndex}:{grade}:1:{count}"),
+            BotButton.Callback($"{(weight == 2 ? "✓ " : "")}КР (2)", $"cmd_calc_sim:{subjectIndex}:{grade}:2:{count}"),
+            BotButton.Callback($"{(weight == 3 ? "✓ " : "")}ВПР (3)", $"cmd_calc_sim:{subjectIndex}:{grade}:3:{count}")
+        });
+
+        // Ряд 3: навигация
+        buttons.Add(new List<BotButton>
+        {
+            BotButton.Callback("⬅️ К предмету", $"cmd_calc_subj:{subjectIndex}"),
+            BotButton.Callback("🏠 Главное меню", "cmd_back_main")
+        });
 
         return BotScreen.Create(text, "banner_marks.png").WithButtons(buttons);
     }
@@ -1801,6 +2151,43 @@ public class DiaryBotWorkflowEngine
         {
             await adapter.RenderScreenAsync(chatId, null, await BuildSettingsMenuScreenAsync(userId, adapter.Platform));
         }
+        else if (text.StartsWith("/grades_off") || text.StartsWith("/marks_off") || text.StartsWith("/оценки_выкл"))
+        {
+            var u = await _db.Users.FirstOrDefaultAsync(x => x.Id == userId);
+            if (u != null)
+            {
+                u.IsGradeWatcherEnabled = false;
+                await _db.SaveChangesAsync();
+                await _userSyncService.SyncUserAcrossPlatformsAsync(u);
+            }
+            await adapter.SendTextMessageAsync(chatId, "🔕 *Оповещения о новых оценках выключены.*\n\nВы всегда можете включить их обратно в /settings или командой /grades_on.");
+        }
+        else if (text.StartsWith("/grades_on") || text.StartsWith("/marks_on") || text.StartsWith("/оценки_вкл"))
+        {
+            var u = await _db.Users.FirstOrDefaultAsync(x => x.Id == userId);
+            if (u != null)
+            {
+                u.IsGradeWatcherEnabled = true;
+                await _db.SaveChangesAsync();
+                await _userSyncService.SyncUserAcrossPlatformsAsync(u);
+            }
+            await adapter.SendTextMessageAsync(chatId, "🔔 *Оповещения о новых оценках включены!*\n\nБот мгновенно уведомит вас при появлении свежих отметок в журнале.");
+        }
+        else if (text.StartsWith("/notify_tg") || text.StartsWith("/уведомления_тг"))
+        {
+            await SetNotificationChannelPreferenceAsync(userId, "telegram", adapter.Platform);
+            await adapter.SendTextMessageAsync(chatId, "✈️ *Канал уведомлений:* Все оповещения будут приходить *только в Telegram*.");
+        }
+        else if (text.StartsWith("/notify_max") || text.StartsWith("/уведомления_макс"))
+        {
+            await SetNotificationChannelPreferenceAsync(userId, "max", adapter.Platform);
+            await adapter.SendTextMessageAsync(chatId, "💬 *Канал уведомлений:* Все оповещения будут приходить *только в MAX*.");
+        }
+        else if (text.StartsWith("/notify_all") || text.StartsWith("/уведомления_все"))
+        {
+            await SetNotificationChannelPreferenceAsync(userId, "all", adapter.Platform);
+            await adapter.SendTextMessageAsync(chatId, "🔄 *Канал уведомлений:* Оповещения будут приходить *в оба мессенджера (Telegram + MAX)*.");
+        }
         else if (text == "/" || text.StartsWith("/help") || text.StartsWith("/помощь") || text.StartsWith("/команды"))
         {
             await adapter.RenderScreenAsync(chatId, null, BuildHelpScreen());
@@ -1863,7 +2250,7 @@ public class DiaryBotWorkflowEngine
     {
         try
         {
-            if (data != "cmd_profile_refresh" && !data.StartsWith("cmd_select_child:") && !data.StartsWith("select_child_"))
+            if (data != "cmd_profile_refresh" && !data.StartsWith("cmd_select_child:") && !data.StartsWith("select_child_") && !data.StartsWith("cmd_set_notify_channel:"))
             {
                 await adapter.AnswerCallbackAsync(callbackId);
             }
@@ -2112,6 +2499,20 @@ public class DiaryBotWorkflowEngine
                 }
                 break;
 
+            case { } s when s.StartsWith("cmd_calc_sim:") || s.StartsWith("calc_sim_"):
+                string simStr = s.StartsWith("cmd_calc_sim:") ? s["cmd_calc_sim:".Length..] : s["calc_sim_".Length..];
+                var simParts = simStr.Split(new[] { ':', '_' }, StringSplitOptions.RemoveEmptyEntries);
+                if (simParts.Length >= 1 && int.TryParse(simParts[0], out int simSubjIdx))
+                {
+                    int simGrade = simParts.Length > 1 && int.TryParse(simParts[1], out int g) ? g : 2;
+                    int simWeight = simParts.Length > 2 && int.TryParse(simParts[2], out int w) ? w : 1;
+                    int simCount = simParts.Length > 3 && int.TryParse(simParts[3], out int c) ? c : 1;
+
+                    await adapter.RenderScreenAsync(chatId, messageId, await BuildHypotheticalGradeScreenAsync(
+                        userId, simSubjIdx, simGrade, simWeight, simCount, platform: adapter.Platform));
+                }
+                break;
+
             // ── Профиль и переключение детей ──
             case "cmd_profile_refresh":
                 if (_profileRefreshCooldown.TryGetValue(userId, out var lastRefreshTime))
@@ -2167,6 +2568,26 @@ public class DiaryBotWorkflowEngine
 
             case "cmd_settings":
                 await adapter.RenderScreenAsync(chatId, messageId, await BuildSettingsMenuScreenAsync(userId, adapter.Platform));
+                break;
+
+            case "cmd_settings_grades_toggle":
+                var sGrRes = await ToggleSettingsGradeWatcherAsync(userId, adapter.Platform);
+                if (sGrRes.Screen != null)
+                    await adapter.RenderScreenAsync(chatId, messageId, sGrRes.Screen);
+                else
+                    await adapter.RenderScreenAsync(chatId, messageId, await BuildSettingsMenuScreenAsync(userId, adapter.Platform));
+                break;
+
+            case "cmd_settings_notify_channel":
+                await adapter.RenderScreenAsync(chatId, messageId, await BuildNotificationChannelSelectScreenAsync(userId, adapter.Platform));
+                break;
+
+            case { } s when s.StartsWith("cmd_set_notify_channel:"):
+                string channelPref = s["cmd_set_notify_channel:".Length..];
+                var chRes = await SetNotificationChannelPreferenceAsync(userId, channelPref, adapter.Platform);
+                if (chRes.Screen != null)
+                    await adapter.RenderScreenAsync(chatId, messageId, chRes.Screen);
+                await adapter.AnswerCallbackAsync(callbackId, chRes.AlertText, showAlert: false);
                 break;
 
             case "cmd_alarm":

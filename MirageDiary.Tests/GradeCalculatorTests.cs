@@ -140,4 +140,186 @@ public class GradeCalculatorTests
         var marksNonNumeric = GradeCalculator.ParseMarkValues("Н");
         Assert.Empty(marksNonNumeric);
     }
+
+    [Fact]
+    public void CalculateMarksGpa_WithWeightsAndDoubleMarks_CalculatesAccurately()
+    {
+        var marks = new List<MirageDiary.Core.Models.GosuslugiMarkItem>
+        {
+            new() { Value = "5", Weight = 2, SubjectName = "Алгебра" },   // 5*2 = 10, w=2
+            new() { Value = "5/4", Weight = 1, SubjectName = "Алгебра" }  // 5*1 + 4*1 = 9, w=2
+        };
+
+        var (sum, totalW, gpa) = GradeCalculator.CalculateMarksGpa(marks);
+        Assert.Equal(19, sum);
+        Assert.Equal(4, totalW);
+        Assert.Equal(4.75, gpa);
+    }
+
+    [Fact]
+    public void CalculateSubjectGpa_FiltersBySubjectNameCaseInsensitively()
+    {
+        var marks = new List<MirageDiary.Core.Models.GosuslugiMarkItem>
+        {
+            new() { Value = "5", Weight = 1, SubjectName = "Алгебра" },
+            new() { Value = "3", Weight = 1, SubjectName = "Геометрия" },
+            new() { Value = "4", Weight = 1, SubjectName = " алгебра " }
+        };
+
+        var (sum, totalW, gpa) = GradeCalculator.CalculateSubjectGpa(marks, "Алгебра");
+        Assert.Equal(9, sum);
+        Assert.Equal(2, totalW);
+        Assert.Equal(4.50, gpa);
+    }
+
+    [Fact]
+    public void ComputeSubjectDynamics_DetectsPositiveDeltaAndForecastChange()
+    {
+        var prevMarks = new List<MirageDiary.Core.Models.GosuslugiMarkItem>
+        {
+            new() { Value = "3", Weight = 1, SubjectName = "Алгебра" } // GPA = 3.00, forecast = 3
+        };
+
+        var currMarks = new List<MirageDiary.Core.Models.GosuslugiMarkItem>
+        {
+            new() { Value = "3", Weight = 1, SubjectName = "Алгебра" },
+            new() { Value = "5", Weight = 2, SubjectName = "Алгебра" } // (3 + 10) / 3 = 4.33, forecast = 4
+        };
+
+        var dynamics = GradeCalculator.ComputeSubjectDynamics(prevMarks, currMarks, "Алгебра");
+        Assert.Equal(3.00, dynamics.PreviousGpa);
+        Assert.Equal(4.33, dynamics.NewGpa);
+        Assert.Equal(1.33, dynamics.Delta);
+        Assert.True(dynamics.IsPositive);
+        Assert.Equal(3, dynamics.PreviousForecast);
+        Assert.Equal(4, dynamics.NewForecast);
+
+        string gpaLine = dynamics.FormatSubjectGpaLine();
+        Assert.Contains("`3.00` ➡️ *4.33*", gpaLine);
+        Assert.Contains("🟢 +1.33", gpaLine);
+
+        string forecastLine = dynamics.FormatForecastLine();
+        Assert.Contains("`3` ➡️ *4* 🎉", forecastLine);
+    }
+
+    [Fact]
+    public void ComputeSubjectDynamics_FirstMark_ShowsFirstMarkNote()
+    {
+        var prevMarks = new List<MirageDiary.Core.Models.GosuslugiMarkItem>();
+        var currMarks = new List<MirageDiary.Core.Models.GosuslugiMarkItem>
+        {
+            new() { Value = "5", Weight = 1, SubjectName = "Биология" }
+        };
+
+        var dynamics = GradeCalculator.ComputeSubjectDynamics(prevMarks, currMarks, "Биология");
+        Assert.True(dynamics.IsFirstMark);
+        Assert.Equal(5.00, dynamics.NewGpa);
+
+        string gpaLine = dynamics.FormatSubjectGpaLine();
+        Assert.Contains("`5.00` *(первая оценка)*", gpaLine);
+
+        string forecastLine = dynamics.FormatForecastLine();
+        Assert.Contains("*5*", forecastLine);
+        Assert.DoesNotContain("➡️", forecastLine);
+    }
+
+    [Fact]
+    public void ComputeSubjectDynamics_NegativeDelta_ShowsWarningAndDrop()
+    {
+        var prevMarks = new List<MirageDiary.Core.Models.GosuslugiMarkItem>
+        {
+            new() { Value = "5", Weight = 1, SubjectName = "Физика" } // GPA = 5.00, forecast = 5
+        };
+        var currMarks = new List<MirageDiary.Core.Models.GosuslugiMarkItem>
+        {
+            new() { Value = "5", Weight = 1, SubjectName = "Физика" },
+            new() { Value = "2", Weight = 1, SubjectName = "Физика" } // GPA = 3.50, forecast = 4
+        };
+
+        var dynamics = GradeCalculator.ComputeSubjectDynamics(prevMarks, currMarks, "Физика");
+        Assert.True(dynamics.IsNegative);
+        Assert.Equal(-1.50, dynamics.Delta);
+
+        string gpaLine = dynamics.FormatSubjectGpaLine();
+        Assert.Contains("🔻 -1.50", gpaLine);
+
+        string forecastLine = dynamics.FormatForecastLine();
+        Assert.Contains("`5` ➡️ *4* ⚠️", forecastLine);
+    }
+
+    [Fact]
+    public void ComputeOverallDynamics_CalculatesOverallAverageAndFormatsCorrectly()
+    {
+        var prevMarks = new List<MirageDiary.Core.Models.GosuslugiMarkItem>
+        {
+            new() { Value = "4", Weight = 1, SubjectName = "Русский язык" }
+        };
+        var currMarks = new List<MirageDiary.Core.Models.GosuslugiMarkItem>
+        {
+            new() { Value = "4", Weight = 1, SubjectName = "Русский язык" },
+            new() { Value = "5", Weight = 1, SubjectName = "Литература" }
+        };
+
+        var overall = GradeCalculator.ComputeOverallDynamics(prevMarks, currMarks);
+        Assert.Equal(4.00, overall.PreviousGpa);
+        Assert.Equal(4.50, overall.NewGpa);
+        Assert.Equal(0.50, overall.Delta);
+
+        string overallLine = overall.FormatOverallGpaLine();
+        Assert.Contains("📈 *Общий средний балл:* `4.00` ➡️ *4.50* (🟢 +0.50)", overallLine);
+    }
+
+    [Fact]
+    public void SimulateUnpostedGrade_HypotheticalTwoControlWork_DropsForecastAndCalculatesRecovery()
+    {
+        // Student currently has Sum = 36, Weight = 10, GPA = 3.60 (Forecast = 4)
+        var sim = GradeCalculator.SimulateUnpostedGrade(
+            subjectIndex: 0,
+            subjectName: "Алгебра",
+            currentWeightedSum: 36,
+            currentTotalWeight: 10,
+            grade: 2,
+            weight: 2,
+            count: 1
+        );
+
+        Assert.Equal(3.60, sim.CurrentGpa);
+        Assert.Equal(4, sim.CurrentForecast);
+        Assert.Equal(40, sim.NewSum);
+        Assert.Equal(12, sim.NewWeight);
+        Assert.Equal(3.33, sim.NewGpa);
+        Assert.Equal(-0.27, sim.Delta);
+        Assert.Equal(3, sim.NewForecast);
+        Assert.True(sim.ForecastDropped);
+
+        // Target recovery is 4 (threshold >= 3.60)
+        // diff = 3.60 * 12 - 40 = 3.20.
+        // Fives W1 needed: ceil(3.20 / 1.40) = 3
+        // Fives W2 needed: ceil(3.20 / 2.80) = 2
+        Assert.Equal(3, sim.NeededFivesW1ToRecover);
+        Assert.Equal(2, sim.NeededFivesW2ToRecover);
+    }
+
+    [Fact]
+    public void SimulateUnpostedGrade_MultipleFives_BoostsAverage()
+    {
+        // Student has Sum = 14, Weight = 4, GPA = 3.50 (Forecast 4)
+        var sim = GradeCalculator.SimulateUnpostedGrade(
+            subjectIndex: 1,
+            subjectName: "Русский язык",
+            currentWeightedSum: 14,
+            currentTotalWeight: 4,
+            grade: 5,
+            weight: 1,
+            count: 2
+        );
+
+        // Added sum: 5 * 1 * 2 = 10. New sum = 24.
+        // Added weight: 1 * 2 = 2. New weight = 6.
+        // New GPA: 24 / 6 = 4.00.
+        Assert.Equal(4.00, sim.NewGpa);
+        Assert.Equal(0.50, sim.Delta);
+        Assert.False(sim.ForecastDropped);
+        Assert.Equal(0, sim.NeededFivesW1ToRecover);
+    }
 }

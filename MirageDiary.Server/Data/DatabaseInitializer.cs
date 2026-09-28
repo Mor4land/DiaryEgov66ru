@@ -74,6 +74,7 @@ public static class DatabaseInitializer
                 ""LastName"" TEXT NOT NULL DEFAULT '',
                 ""Platform"" TEXT NOT NULL DEFAULT 'telegram',
                 ""LinkedUserId"" TEXT NOT NULL DEFAULT '',
+                ""NotificationChannel"" TEXT NOT NULL DEFAULT '',
                 ""UpdatedAt"" TEXT NULL
             );";
             await cmd.ExecuteNonQueryAsync();
@@ -161,6 +162,7 @@ public static class DatabaseInitializer
                 ("LastName", "TEXT NOT NULL DEFAULT ''"),
                 ("Platform", "TEXT NOT NULL DEFAULT 'telegram'"),
                 ("LinkedUserId", "TEXT NOT NULL DEFAULT ''"),
+                ("NotificationChannel", "TEXT NOT NULL DEFAULT ''"),
                 ("SelectedStudentId", "TEXT NOT NULL DEFAULT ''"),
                 ("UpdatedAt", "TEXT NULL")
             };

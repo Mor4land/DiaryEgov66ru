@@ -18,10 +18,13 @@ using MirageDiary.Server.Models;
 using MirageDiary.Server.Security;
 using Telegram.Bot;
 using Telegram.Bot.Types.Enums;
+using Telegram.Bot.Types.ReplyMarkups;
 using MAX.Bot.Interfaces;
 using MAX.Bot.Interfaces.Models;
 using MAX.Bot.Interfaces.Models.Request;
 using MAX.Bot.Interfaces.Models.Request.Message;
+using MAX.Bot.Interfaces.Models.Request.Message.Attachment;
+using MAX.Bot.Interfaces.Models.Request.Message.Attachment.Payloads;
 
 namespace MirageDiary.Server.Services;
 
@@ -139,7 +142,7 @@ public class GradeWatcherWorker : BackgroundService
             var initDb = initScope.ServiceProvider.GetRequiredService<AppDbContext>();
             userIds = await initDb.Users
                 .AsNoTracking()
-                .Where(u => !string.IsNullOrEmpty(u.AccessToken) && u.IsAlarmEnabled && u.IsGradeWatcherEnabled)
+                .Where(u => !string.IsNullOrEmpty(u.AccessToken) && u.IsGradeWatcherEnabled)
                 .Select(u => u.Id)
                 .ToListAsync(stoppingToken);
         }
@@ -158,7 +161,7 @@ public class GradeWatcherWorker : BackgroundService
             var maxBotClient = userScope.ServiceProvider.GetService<IMaxBotClient>();
 
             var user = await db.Users.FirstOrDefaultAsync(u => u.Id == userId, stoppingToken);
-            if (user == null || string.IsNullOrEmpty(user.AccessToken) || !user.IsAlarmEnabled || !user.IsGradeWatcherEnabled)
+            if (user == null || string.IsNullOrEmpty(user.AccessToken) || !user.IsGradeWatcherEnabled)
                 continue;
 
             try
@@ -281,35 +284,123 @@ public class GradeWatcherWorker : BackgroundService
                         }
                         sb.AppendLine();
 
-                        foreach (var m in marksToSend)
+                        // Группируем свежие оценки по предметам для структурированного вывода и расчета динамики
+                        var subjectGroups = marksToSend.GroupBy(m => !string.IsNullOrWhiteSpace(m.SubjectName) ? m.SubjectName.Trim() : "Урок");
+                        foreach (var group in subjectGroups)
                         {
-                            string markDisplay = !string.IsNullOrEmpty(m.Value) ? m.Value : "—";
-                            string lessonName = !string.IsNullOrEmpty(m.SubjectName) ? TelegramMarkdownEscaper.Escape(m.SubjectName) : "Урок";
-                            
-                            string workKindStr = !string.IsNullOrEmpty(m.WorkKind) ? TelegramMarkdownEscaper.Escape(m.WorkKind) : "";
-                            string commentStr = !string.IsNullOrEmpty(m.Comment) ? TelegramMarkdownEscaper.Escape(m.Comment) : "";
-                            string reason = "";
-                            if (!string.IsNullOrEmpty(workKindStr) && !string.IsNullOrEmpty(commentStr))
-                                reason = $" ({workKindStr}, {commentStr})";
-                            else if (!string.IsNullOrEmpty(workKindStr))
-                                reason = $" ({workKindStr})";
-                            else if (!string.IsNullOrEmpty(commentStr))
-                                reason = $" ({commentStr})";
+                            string subjectName = group.Key;
+                            string safeSubject = TelegramMarkdownEscaper.Escape(subjectName);
+                            sb.AppendLine($"📚 *{safeSubject}*");
 
-                            string weight = (m.Weight.HasValue && m.Weight.Value > 1) ? $" [вес: {m.Weight.Value}]" : "";
+                            foreach (var m in group)
+                            {
+                                string markDisplay = !string.IsNullOrEmpty(m.Value) ? m.Value : "—";
+                                string workKindStr = !string.IsNullOrEmpty(m.WorkKind) ? TelegramMarkdownEscaper.Escape(m.WorkKind) : "";
+                                string commentStr = !string.IsNullOrEmpty(m.Comment) ? TelegramMarkdownEscaper.Escape(m.Comment) : "";
+                                string reason = "";
+                                if (!string.IsNullOrEmpty(workKindStr) && !string.IsNullOrEmpty(commentStr))
+                                    reason = $" ({workKindStr}, {commentStr})";
+                                else if (!string.IsNullOrEmpty(workKindStr))
+                                    reason = $" ({workKindStr})";
+                                else if (!string.IsNullOrEmpty(commentStr))
+                                    reason = $" ({commentStr})";
 
-                            sb.AppendLine($"📚 *{lessonName}*");
-                            sb.AppendLine($"⭐️ Оценка: *{TelegramMarkdownEscaper.Escape(markDisplay)}*{reason}{weight}");
-                            if (!string.IsNullOrEmpty(m.Date))
-                                sb.AppendLine($"📅 Дата: {TelegramMarkdownEscaper.Escape(m.Date)}");
+                                string weight = (m.Weight.HasValue && m.Weight.Value > 1) ? $" [вес: {m.Weight.Value}]" : "";
+                                string dateStr = !string.IsNullOrEmpty(m.Date) ? $" • {TelegramMarkdownEscaper.Escape(m.Date)}" : "";
+
+                                sb.AppendLine($"⭐️ Оценка: *{TelegramMarkdownEscaper.Escape(markDisplay)}*{weight}{reason}{dateStr}");
+                            }
+
+                            // Динамика среднего балла и прогноз четвертной оценки по данному предмету
+                            var subjDynamics = GradeCalculator.ComputeSubjectDynamics(previousMarks, marks, subjectName);
+                            string gpaLine = subjDynamics.FormatSubjectGpaLine();
+                            if (!string.IsNullOrEmpty(gpaLine))
+                                sb.AppendLine(gpaLine);
+
+                            string forecastLine = subjDynamics.FormatForecastLine();
+                            if (!string.IsNullOrEmpty(forecastLine))
+                                sb.AppendLine(forecastLine);
+
                             sb.AppendLine();
                         }
 
-                        sb.AppendLine("💡 _Проверь подробности и средний балл командой /marks_");
-
-                        try
+                        if (freshMarks.Count > marksToSend.Count)
                         {
-                            if (user.Id.StartsWith("max_"))
+                            int remaining = freshMarks.Count - marksToSend.Count;
+                            string markWord = remaining % 10 == 1 && remaining % 100 != 11 ? "оценка" :
+                                              (remaining % 10 is >= 2 and <= 4 && (remaining % 100 < 10 || remaining % 100 >= 20) ? "оценки" : "оценок");
+                            sb.AppendLine($"_...и ещё {remaining} {markWord}_");
+                            sb.AppendLine();
+                        }
+
+                        // Динамика общего среднего балла по всем предметам
+                        var overallDynamics = GradeCalculator.ComputeOverallDynamics(previousMarks, marks);
+                        string overallLine = overallDynamics.FormatOverallGpaLine();
+                        if (!string.IsNullOrEmpty(overallLine))
+                        {
+                            sb.AppendLine(overallLine);
+                            sb.AppendLine();
+                        }
+
+                        sb.AppendLine("💡 _Подробная статистика и цели в меню ниже:_");
+
+                        var tgMarkup = new InlineKeyboardMarkup(new[]
+                        {
+                            new[]
+                            {
+                                InlineKeyboardButton.WithCallbackData("📊 Все оценки", "cmd_marks"),
+                                InlineKeyboardButton.WithCallbackData("🎯 Калькулятор целей", "cmd_calc")
+                            },
+                            new[]
+                            {
+                                InlineKeyboardButton.WithCallbackData("🏠 Главное меню", "cmd_back_main")
+                            }
+                        });
+
+                        var maxAttachments = new List<Attachment>
+                        {
+                            new InlineKeyboardAttachment
+                            {
+                                Payload = new InlineKeyboardPayload
+                                {
+                                    Buttons = new List<List<Button>>
+                                    {
+                                        new List<Button>
+                                        {
+                                            new CallbackButton { Text = "📊 Все оценки", Payload = "cmd_marks" },
+                                            new CallbackButton { Text = "🎯 Калькулятор целей", Payload = "cmd_calc" }
+                                        },
+                                        new List<Button>
+                                        {
+                                            new CallbackButton { Text = "🏠 Главное меню", Payload = "cmd_back_main" }
+                                        }
+                                    }
+                                }
+                            }
+                        };
+
+                        // Проверка предпочтения канала доставки для связанных аккаунтов
+                        bool shouldSendPush = true;
+                        if (!string.IsNullOrEmpty(user.NotificationChannel))
+                        {
+                            bool isMax = user.Id.StartsWith("max_");
+                            if (user.NotificationChannel.Equals("telegram", StringComparison.OrdinalIgnoreCase) && isMax)
+                            {
+                                shouldSendPush = false;
+                                _logger.LogInformation($"[GradeWatcher] Пропуск отправки пуша в MAX для {user.Id}: в настройках выбран Telegram.");
+                            }
+                            else if (user.NotificationChannel.Equals("max", StringComparison.OrdinalIgnoreCase) && !isMax)
+                            {
+                                shouldSendPush = false;
+                                _logger.LogInformation($"[GradeWatcher] Пропуск отправки пуша в TG для {user.Id}: в настройках выбран MAX.");
+                            }
+                        }
+
+                        if (shouldSendPush)
+                        {
+                            try
+                            {
+                                if (user.Id.StartsWith("max_"))
                             {
                                 if (long.TryParse(user.Id.Replace("max_", ""), out long maxUserId) && maxBotClient != null)
                                 {
@@ -317,7 +408,8 @@ public class GradeWatcherWorker : BackgroundService
                                     {
                                         UserId = maxUserId,
                                         Text = sb.ToString(),
-                                        Format = MessageFormat.Markdown
+                                        Format = MessageFormat.Markdown,
+                                        Attachments = maxAttachments
                                     });
                                     _logger.LogInformation($"[GradeWatcher] ✅ Пуш об оценке успешно доставлен MAX пользователю {user.Id}.");
                                 }
@@ -330,6 +422,7 @@ public class GradeWatcherWorker : BackgroundService
                                         chatId: user.Id,
                                         text: sb.ToString(),
                                         parseMode: ParseMode.Markdown,
+                                        replyMarkup: tgMarkup,
                                         cancellationToken: stoppingToken);
                                     _logger.LogInformation($"[GradeWatcher] ✅ Пуш об оценке успешно доставлен TG пользователю {user.Id}.");
                                 }
@@ -340,6 +433,7 @@ public class GradeWatcherWorker : BackgroundService
                                     await botClient.SendMessage(
                                         chatId: user.Id,
                                         text: plain,
+                                        replyMarkup: tgMarkup,
                                         cancellationToken: stoppingToken);
                                     _logger.LogInformation($"[GradeWatcher] ✅ Резервный пуш без разметки доставлен TG пользователю {user.Id}.");
                                 }
@@ -348,6 +442,7 @@ public class GradeWatcherWorker : BackgroundService
                         catch (Exception tex)
                         {
                             _logger.LogWarning($"[GradeWatcher] Не удалось отправить пуш пользователю {user.Id}: {tex.Message}");
+                        }
                         }
                     }
                     else

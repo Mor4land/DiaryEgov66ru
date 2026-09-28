@@ -63,6 +63,7 @@ public class UserEntity
     public string LastName { get; set; } = "";
     public string Platform { get; set; } = "telegram"; // "telegram", "max", "miniapp"
     public string LinkedUserId { get; set; } = "";
+    public string NotificationChannel { get; set; } = ""; // "", "telegram", "max", "all"
     public DateTime? UpdatedAt { get; set; } = DateTime.UtcNow;
 
     public bool HasPremium()

@@ -379,4 +379,69 @@ public class DiaryBotWorkflowEngineTests : IDisposable
         int q = DiaryInteractionService.GetMarkQuarter(dateStr);
         Assert.Equal(expectedQ, q);
     }
+
+    [Fact]
+    public async Task DualPlatform_BannerAndSettings_WorkCorrectly()
+    {
+        string tgId = "tg_user_100";
+        string maxId = "max_user_200";
+
+        var tgUser = new UserEntity
+        {
+            Id = tgId,
+            Platform = "telegram",
+            LinkedUserId = maxId,
+            HasAcceptedPrivacyPolicy = true,
+            HasCompletedOnboarding = true,
+            AccessToken = "valid_token"
+        };
+        var maxUser = new UserEntity
+        {
+            Id = maxId,
+            Platform = "max",
+            LinkedUserId = tgId,
+            HasAcceptedPrivacyPolicy = true,
+            HasCompletedOnboarding = true,
+            AccessToken = "valid_token"
+        };
+
+        _db.Users.AddRange(tgUser, maxUser);
+        await _db.SaveChangesAsync();
+
+        // 1. Dual registration check
+        var (hasBoth, peer) = await _engine.CheckDualPlatformRegistrationAsync(tgUser);
+        Assert.True(hasBoth);
+        Assert.NotNull(peer);
+        Assert.Equal(maxId, peer.Id);
+
+        // 2. Main menu when channel is unset - must show banner & selection buttons
+        var menuScreen = await _engine.BuildMainMenuScreenAsync(tgId, "telegram");
+        Assert.Contains("Куда присылать уведомления?", menuScreen.Text);
+        Assert.Contains(menuScreen.Buttons, row => row.Any(b => b.CallbackData == "cmd_set_notify_channel:telegram"));
+        Assert.Contains(menuScreen.Buttons, row => row.Any(b => b.CallbackData == "cmd_set_notify_channel:max"));
+        Assert.Contains(menuScreen.Buttons, row => row.Any(b => b.CallbackData == "cmd_set_notify_channel:all"));
+
+        // 3. User chooses Telegram
+        var prefRes = await _engine.SetNotificationChannelPreferenceAsync(tgId, "telegram", "telegram");
+        Assert.Contains("Telegram", prefRes.AlertText ?? "");
+
+        var updatedTg = await _db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == tgId);
+        var updatedMax = await _db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == maxId);
+        Assert.Equal("telegram", updatedTg!.NotificationChannel);
+        Assert.Equal("telegram", updatedMax!.NotificationChannel);
+
+        // 4. Main menu after setting channel - banner is gone
+        var menuAfter = await _engine.BuildMainMenuScreenAsync(tgId, "telegram");
+        Assert.DoesNotContain("Куда присылать уведомления?", menuAfter.Text);
+
+        // 5. Settings screen shows preferred channel and button to change
+        var settingsScreen = await _engine.BuildSettingsMenuScreenAsync(tgId, "telegram");
+        Assert.Contains("• 📨 Доставка уведомлений: `✈️ Только Telegram`", settingsScreen.Text);
+        Assert.Contains(settingsScreen.Buttons, row => row.Any(b => b.CallbackData == "cmd_settings_notify_channel"));
+
+        // 6. Dedicated channel selection screen
+        var channelScreen = await _engine.BuildNotificationChannelSelectScreenAsync(tgId, "telegram");
+        Assert.Contains("Выбор мессенджера для уведомлений", channelScreen.Text);
+        Assert.Contains("✅ ✈️ Только в Telegram", channelScreen.Buttons[0][0].Text);
+    }
 }

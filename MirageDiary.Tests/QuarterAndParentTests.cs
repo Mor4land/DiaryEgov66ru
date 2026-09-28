@@ -214,4 +214,127 @@ public class QuarterAndParentTests : IDisposable
         Assert.Single(deserialized);
         Assert.Equal("Алгебра", deserialized[0].SubjectName);
     }
+
+    [Fact]
+    public async Task ToggleGradeWatcher_OperatesIndependentlyFromMasterAlarm()
+    {
+        string userId = "user_grade_toggle_test";
+        _db.Users.Add(new UserEntity
+        {
+            Id = userId,
+            IsAlarmEnabled = true,
+            IsGradeWatcherEnabled = true
+        });
+        await _db.SaveChangesAsync();
+
+        // 1. Toggle grade watcher OFF
+        var res1 = await _engine.ToggleGradeWatcherReminderAsync(userId);
+        Assert.Contains("выключены", res1.AlertText ?? "");
+
+        var userAfterGrToggle = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId);
+        Assert.NotNull(userAfterGrToggle);
+        Assert.False(userAfterGrToggle.IsGradeWatcherEnabled);
+        Assert.True(userAfterGrToggle.IsAlarmEnabled); // Master alarm remains ON
+
+        // 2. Toggle master alarm OFF - must NOT overwrite IsGradeWatcherEnabled
+        var res2 = await _engine.ToggleMasterAlarmAsync(userId);
+        Assert.Contains("выключены", res2.AlertText ?? "");
+
+        var userAfterMasterToggle = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId);
+        Assert.NotNull(userAfterMasterToggle);
+        Assert.False(userAfterMasterToggle.IsAlarmEnabled);
+        Assert.False(userAfterMasterToggle.IsGradeWatcherEnabled);
+
+        // 3. Toggle master alarm ON - must NOT force grade watcher ON if user turned it off
+        var res3 = await _engine.ToggleMasterAlarmAsync(userId);
+        Assert.Contains("включены", res3.AlertText ?? "");
+
+        var userAfterMasterOn = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId);
+        Assert.NotNull(userAfterMasterOn);
+        Assert.True(userAfterMasterOn.IsAlarmEnabled);
+        Assert.False(userAfterMasterOn.IsGradeWatcherEnabled); // Still OFF!
+    }
+
+    [Fact]
+    public async Task SelectChildAsync_InstantlyUpdatesSelectedStudentAndHash()
+    {
+        string userId = "parent_test_user";
+        _db.Users.Add(new UserEntity
+        {
+            Id = userId,
+            Role = "Parent",
+            StudentId = "child_1",
+            SelectedStudentId = "child_1",
+            LastMarksHash = "child_1:hash123"
+        });
+        await _db.SaveChangesAsync();
+
+        var diaryService = _sp.GetRequiredService<DiaryInteractionService>();
+        bool ok = await diaryService.SelectChildAsync(userId, "child_2");
+        Assert.True(ok);
+
+        var updated = await _db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == userId);
+        Assert.NotNull(updated);
+        Assert.Equal("child_2", updated.SelectedStudentId);
+        Assert.Equal("child_2", updated.StudentId);
+        Assert.Equal("child_2:initial", updated.LastMarksHash);
+    }
+
+    [Fact]
+    public async Task BuildHypotheticalGradeScreenAsync_RendersSimulatedMarksAndRecoveryPlan()
+    {
+        string userId = "test_student_sim";
+        var user = new UserEntity
+        {
+            Id = userId,
+            StudentId = "student_sim_1",
+            AccessToken = "valid_tok",
+            Role = "Student",
+            HasAcceptedPrivacyPolicy = true
+        };
+        _db.Users.Add(user);
+        await _db.SaveChangesAsync();
+
+        var memCache = _sp.GetRequiredService<IMemoryCache>();
+        int currentQ = DiaryInteractionService.GetCurrentQuarter();
+        string memKey = $"user_marks:{userId}_{user.StudentId}:q{currentQ}";
+
+        var mockSubjects = new List<DiaryInteractionService.SubjectGradeSummary>
+        {
+            new()
+            {
+                SubjectName = "Алгебра",
+                AverageGpa = 3.60,
+                FinalForecast = 4,
+                WeightedSum = 36,
+                TotalWeight = 10,
+                StatusEmoji = "🟡"
+            }
+        };
+        memCache.Set(memKey, mockSubjects);
+
+        // 1. Check subject target options screen has simulation buttons
+        var optionsScreen = await _engine.BuildSubjectTargetOptionsScreenAsync(userId, 0, "telegram");
+        Assert.NotNull(optionsScreen);
+        Assert.Contains("Алгебра", optionsScreen.Text);
+        Assert.Contains(optionsScreen.Buttons, row => row.Any(b => b.CallbackData == "cmd_calc_sim:0:2:1:1"));
+
+        // 2. Simulate getting a 2 with weight 2 (control work)
+        var simScreen = await _engine.BuildHypotheticalGradeScreenAsync(userId, 0, grade: 2, weight: 2, count: 1, "telegram");
+        Assert.NotNull(simScreen);
+        Assert.Contains("Симулятор невыставленной оценки", simScreen.Text);
+        Assert.Contains("Алгебра", simScreen.Text);
+        Assert.Contains("🔴 *2*", simScreen.Text);
+        Assert.Contains("вес *2*", simScreen.Text);
+        Assert.Contains("`4` ➡️ *3* ⚠️", simScreen.Text);
+        Assert.Contains("итоговая оценка за четверть упадёт", simScreen.Text);
+        Assert.Contains("Как удержать оценку «4»", simScreen.Text);
+        Assert.Contains("3* пятерок за ответы на уроках", simScreen.Text);
+
+        // Verify simulation buttons (grades, weights, count, navigation)
+        Assert.Contains(simScreen.Buttons, row => row.Any(b => b.CallbackData == "cmd_calc_sim:0:2:2:1"));
+        Assert.Contains(simScreen.Buttons, row => row.Any(b => b.CallbackData == "cmd_calc_sim:0:5:2:1"));
+        Assert.Contains(simScreen.Buttons, row => row.Any(b => b.CallbackData == "cmd_calc_subj:0"));
+        Assert.Contains(simScreen.Buttons, row => row.Any(b => b.CallbackData == "cmd_back_main"));
+    }
 }

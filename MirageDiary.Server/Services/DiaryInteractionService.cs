@@ -868,9 +868,17 @@ public class DiaryInteractionService
                             string wSuffix = w > 1 ? $"×{w}" : "";
                             string val = TelegramMarkdownEscaper.Escape(m.Value);
                             return $"{val}{wSuffix}";
-                        });
+                        })
+                        .ToList();
 
-                    sb.AppendLine($"  └ _{string.Join("  ", markStrings)}_");
+                    if (markStrings.Count > 0)
+                    {
+                        sb.AppendLine($"  └ _{string.Join("  ", markStrings)}_");
+                    }
+                    else
+                    {
+                        sb.AppendLine("  └ _нет оценок_");
+                    }
                     sb.AppendLine();
 
                     totalAllSum += s.WeightedSum;
@@ -1123,6 +1131,8 @@ public class DiaryInteractionService
         user.StudentId = studentId;
         user.Role = "Parent";
 
+        user.LastMarksHash = $"{studentId}:initial";
+
         string childMetaKey = $"child_meta:{studentId}";
         bool hasMeta = false;
 
@@ -1167,93 +1177,9 @@ public class DiaryInteractionService
             await tokenStore.SaveTokensAsync(userId, tokenData);
         }
 
-        // Only query Datamart over the internet if class info is not already known and cached
-        if (!hasMeta)
-        {
-            var httpClientFactory = scope.ServiceProvider.GetRequiredService<System.Net.Http.IHttpClientFactory>();
-            var client = httpClientFactory.CreateClient("diary-proxy");
-            var clientWithUser = new DiaryClient(client, tokenStore, userId);
-
-            try
-            {
-                var years = new[] { DateTime.UtcNow.Year.ToString(), (DateTime.UtcNow.Year - 1).ToString() };
-                foreach (var year in years)
-                {
-                    var datamart = await clientWithUser.GetDatamartAsync(studentId, year, new List<string> { "student_classes" });
-                    if (datamart != null)
-                    {
-                        foreach (var item in datamart)
-                        {
-                            if (item.Data != null)
-                            {
-                                foreach (var elem in item.Data)
-                                {
-                                    var classInfo = JsonSerializer.Deserialize<GosuslugiClassInfo>(elem.GetRawText(), new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-                                    if (classInfo != null && (!string.IsNullOrEmpty(classInfo.ShortName) || !string.IsNullOrEmpty(classInfo.ClassNum)))
-                                    {
-                                        string resolvedClass = !string.IsNullOrEmpty(classInfo.ShortName)
-                                            ? classInfo.ShortName
-                                            : $"{classInfo.ClassNum}{classInfo.ClassLetter}".Trim();
-                                        user.ClassName = resolvedClass;
-
-                                        string resolvedSchool = "";
-                                        if (elem.TryGetProperty("school_name", out var sn) ||
-                                            elem.TryGetProperty("schoolName", out sn) ||
-                                            elem.TryGetProperty("org_name", out sn) ||
-                                            elem.TryGetProperty("orgName", out sn) ||
-                                            elem.TryGetProperty("organization", out sn) ||
-                                            elem.TryGetProperty("organization_name", out sn))
-                                        {
-                                            resolvedSchool = sn.GetString()?.Trim() ?? "";
-                                        }
-
-                                        if (!string.IsNullOrEmpty(resolvedSchool) && !string.Equals(resolvedSchool, resolvedClass, StringComparison.OrdinalIgnoreCase))
-                                        {
-                                            user.OrgName = resolvedSchool;
-                                        }
-                                        else if (string.Equals(user.OrgName, user.ClassName, StringComparison.OrdinalIgnoreCase))
-                                        {
-                                            user.OrgName = "";
-                                        }
-
-                                        await dbContext.SaveChangesAsync();
-                                        break;
-                                    }
-                                }
-                            }
-                            if (!string.IsNullOrEmpty(user.OrgName)) break;
-                        }
-                    }
-                    if (!string.IsNullOrEmpty(user.OrgName)) break;
-                }
-            }
-            catch { }
-
-            // Cache the result (even if empty, so we don't spam Datamart on repeat clicks)
-            var metaDict = new Dictionary<string, string>
-            {
-                ["className"] = user.ClassName ?? "",
-                ["orgName"] = user.OrgName ?? ""
-            };
-            string metaJson = JsonSerializer.Serialize(metaDict);
-            var existingCache = await dbContext.Cache.FirstOrDefaultAsync(c => c.CacheKey == childMetaKey);
-            if (existingCache != null)
-            {
-                existingCache.JsonData = metaJson;
-                existingCache.UpdatedAt = DateTime.UtcNow;
-            }
-            else
-            {
-                dbContext.Cache.Add(new CachedData { CacheKey = childMetaKey, JsonData = metaJson, UpdatedAt = DateTime.UtcNow });
-            }
-            await dbContext.SaveChangesAsync();
-            _memoryCache.Set(childMetaKey, (user.ClassName ?? "", user.OrgName ?? ""), TimeSpan.FromDays(30));
-        }
-
-        // Invalidate cached views for this user
+        // Invalidate cached views for this user (retaining user_children so switching doesn't refetch children list)
         _memoryCache.Remove($"user_profile:{userId}");
         _memoryCache.Remove($"user_marks:{userId}");
-        _memoryCache.Remove($"user_children:{userId}");
         for (int q = 0; q <= 4; q++)
         {
             _memoryCache.Remove($"user_marks:{userId}:q{q}");
@@ -1271,6 +1197,99 @@ public class DiaryInteractionService
             }
         }
         catch { }
+
+        // Асинхронно в фоне подгружаем школу и класс из Datamart, если метаданных еще нет в кэше,
+        // чтобы не задерживать ответ пользователю и обеспечить мгновенный отклик интерфейса (< 50 мс).
+        if (!hasMeta)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    using var bgScope = _serviceProvider.CreateScope();
+                    var bgTokenStore = bgScope.ServiceProvider.GetRequiredService<ITokenStore>();
+                    var bgDbContext = bgScope.ServiceProvider.GetRequiredService<AppDbContext>();
+                    var bgHttpFactory = bgScope.ServiceProvider.GetRequiredService<System.Net.Http.IHttpClientFactory>();
+                    var bgClient = new DiaryClient(bgHttpFactory.CreateClient("diary-proxy"), bgTokenStore, userId);
+
+                    var years = new[] { DateTime.UtcNow.Year.ToString(), (DateTime.UtcNow.Year - 1).ToString() };
+                    string foundClass = "";
+                    string foundSchool = "";
+
+                    foreach (var year in years)
+                    {
+                        var datamart = await bgClient.GetDatamartAsync(studentId, year, new List<string> { "student_classes" });
+                        if (datamart != null)
+                        {
+                            foreach (var item in datamart)
+                            {
+                                if (item.Data != null)
+                                {
+                                    foreach (var elem in item.Data)
+                                    {
+                                        var classInfo = JsonSerializer.Deserialize<GosuslugiClassInfo>(elem.GetRawText(), new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                                        if (classInfo != null && (!string.IsNullOrEmpty(classInfo.ShortName) || !string.IsNullOrEmpty(classInfo.ClassNum)))
+                                        {
+                                            foundClass = !string.IsNullOrEmpty(classInfo.ShortName)
+                                                ? classInfo.ShortName
+                                                : $"{classInfo.ClassNum}{classInfo.ClassLetter}".Trim();
+
+                                            if (elem.TryGetProperty("school_name", out var sn) ||
+                                                elem.TryGetProperty("schoolName", out sn) ||
+                                                elem.TryGetProperty("org_name", out sn) ||
+                                                elem.TryGetProperty("orgName", out sn) ||
+                                                elem.TryGetProperty("organization", out sn) ||
+                                                elem.TryGetProperty("organization_name", out sn))
+                                            {
+                                                foundSchool = sn.GetString()?.Trim() ?? "";
+                                            }
+                                            break;
+                                        }
+                                    }
+                                }
+                                if (!string.IsNullOrEmpty(foundClass)) break;
+                            }
+                        }
+                        if (!string.IsNullOrEmpty(foundClass)) break;
+                    }
+
+                    if (!string.IsNullOrEmpty(foundClass) || !string.IsNullOrEmpty(foundSchool))
+                    {
+                        var bgUser = await bgDbContext.Users.FindAsync(userId);
+                        if (bgUser != null && bgUser.SelectedStudentId == studentId)
+                        {
+                            bgUser.ClassName = foundClass;
+                            if (!string.IsNullOrEmpty(foundSchool) && !string.Equals(foundSchool, foundClass, StringComparison.OrdinalIgnoreCase))
+                            {
+                                bgUser.OrgName = foundSchool;
+                            }
+                            await bgDbContext.SaveChangesAsync();
+                        }
+
+                        var metaDict = new Dictionary<string, string>
+                        {
+                            ["className"] = foundClass,
+                            ["orgName"] = foundSchool
+                        };
+                        string metaJson = JsonSerializer.Serialize(metaDict);
+                        var existingCache = await bgDbContext.Cache.FirstOrDefaultAsync(c => c.CacheKey == childMetaKey);
+                        if (existingCache != null)
+                        {
+                            existingCache.JsonData = metaJson;
+                            existingCache.UpdatedAt = DateTime.UtcNow;
+                        }
+                        else
+                        {
+                            bgDbContext.Cache.Add(new CachedData { CacheKey = childMetaKey, JsonData = metaJson, UpdatedAt = DateTime.UtcNow });
+                        }
+                        await bgDbContext.SaveChangesAsync();
+                        _memoryCache.Set(childMetaKey, (foundClass, foundSchool), TimeSpan.FromDays(30));
+                        _memoryCache.Remove($"user_profile:{userId}");
+                    }
+                }
+                catch { }
+            });
+        }
 
         return true;
     }
