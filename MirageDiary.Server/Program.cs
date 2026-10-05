@@ -4,6 +4,14 @@ using MirageDiary.Server.Extensions;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Production Logging Configuration (Suppress EF Core SQL queries & HttpClient polling spam)
+builder.Logging.AddFilter("Microsoft", LogLevel.Warning);
+builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
+builder.Logging.AddFilter("Microsoft.EntityFrameworkCore", LogLevel.Warning);
+builder.Logging.AddFilter("Microsoft.EntityFrameworkCore.Database.Command", LogLevel.Warning);
+builder.Logging.AddFilter("System.Net.Http", LogLevel.Warning);
+builder.Logging.AddFilter("System.Net.Http.HttpClient", LogLevel.Warning);
+
 // 1. Configuration files
 builder.Configuration.AddJsonFile("admins.json", optional: true, reloadOnChange: true);
 builder.Configuration.AddJsonFile(Path.Combine(AppContext.BaseDirectory, "data", "admins.json"), optional: true, reloadOnChange: true);

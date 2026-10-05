@@ -40,7 +40,7 @@ Write-Host "Verified: Master keys and connection strings managed via environment
 
 # 5. SCP Files to Production VPS
 Write-Host "[5/6] Transferring release binaries and assets to VPS..." -ForegroundColor Yellow
-scp -i $KeyPath -P $Port -o StrictHostKeyChecking=no -o BatchMode=yes publish_linux/*.dll publish_linux/*.deps.json publish_linux/*.runtimeconfig.json MirageDiary.Server/admins.json MirageDiary.Server/wwwroot/admin.html MirageDiary.Server/wwwroot/privacy.html MirageDiary.Server/wwwroot/index.html "${User}@${HostName}:${RemoteDir}/"
+scp -i $KeyPath -P $Port -o StrictHostKeyChecking=no -o BatchMode=yes publish_linux/*.dll publish_linux/*.deps.json publish_linux/*.runtimeconfig.json MirageDiary.Server/admins.json MirageDiary.Server/wwwroot/admin.html MirageDiary.Server/wwwroot/privacy.html MirageDiary.Server/wwwroot/index.html start.sh "${User}@${HostName}:${RemoteDir}/"
 scp -i $KeyPath -P $Port -o StrictHostKeyChecking=no -o BatchMode=yes -r MirageDiary.Server/wwwroot/images MirageDiary.Server/wwwroot/assets "${User}@${HostName}:${RemoteDir}/wwwroot/"
 
 if ($LASTEXITCODE -ne 0) {
@@ -49,7 +49,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # Ensure wwwroot updated on remote
-$remoteScript = "cp ${RemoteDir}/admin.html ${RemoteDir}/wwwroot/admin.html ; cp ${RemoteDir}/privacy.html ${RemoteDir}/wwwroot/privacy.html ; cp ${RemoteDir}/index.html ${RemoteDir}/wwwroot/index.html ; chmod 600 ${RemoteDir}/miragediary.db ${RemoteDir}/token_master.key ${RemoteDir}/appsettings.json 2>/dev/null"
+$remoteScript = "cp ${RemoteDir}/admin.html ${RemoteDir}/wwwroot/admin.html ; cp ${RemoteDir}/privacy.html ${RemoteDir}/wwwroot/privacy.html ; cp ${RemoteDir}/index.html ${RemoteDir}/wwwroot/index.html ; chmod +x ${RemoteDir}/start.sh ; chmod 600 ${RemoteDir}/miragediary.db ${RemoteDir}/token_master.key ${RemoteDir}/appsettings.json 2>/dev/null"
 ssh -i $KeyPath -p $Port -o StrictHostKeyChecking=no -o BatchMode=yes "${User}@${HostName}" $remoteScript
 
 # 6. Restart Server Supervisor and Healthcheck
