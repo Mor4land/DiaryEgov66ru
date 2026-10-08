@@ -110,4 +110,6 @@
   - Реестр всех 12 контрактов Datamart (`student_lessons`, `student_marks`, `student_subject_plan`, `student_statsubject` и др.).
   - Авторизация, сессии (`createSession`, `saveToken`, `entToken`), TRM (`esia-rs/api/public/v1/trm/push`).
   - Скрытые эндпоинты: чеклисты готовности портфеля, похвалы учителей (`praise.json`), связка с Алисой (`/api/linking/get_pin`), геолокация и QR-турникеты.
+  - **Раздел 5:** Реестр известных архитектурных багов серверов Госуслуг (split-brain кэша оценок, циклический флаппинг, датирование оценок будущими месяцами, рассинхрон сессий) и реализованные контрмеры в `MirageDiary`.
+
 
