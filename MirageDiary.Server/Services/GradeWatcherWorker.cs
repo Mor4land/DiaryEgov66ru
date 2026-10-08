@@ -15,8 +15,10 @@ using MirageDiary.Core;
 using MirageDiary.Core.Models;
 using MirageDiary.Server.Data;
 using MirageDiary.Server.Models;
+using Microsoft.Extensions.Configuration;
 using MirageDiary.Server.Security;
 using Telegram.Bot;
+using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
 using Telegram.Bot.Types.ReplyMarkups;
 using MAX.Bot.Interfaces;
@@ -178,33 +180,60 @@ public class GradeWatcherWorker : BackgroundService
                 if (marks == null || marks.Count == 0)
                     continue;
 
-                // Синхронизируем с кэшем БД (marks_db:{studentId}), чтобы при открытии бота у пользователя сразу были свежие оценки
+                // Синхронизируем с кэшем БД:
+                // 1) Личный срез пользователя (marks_db:{user.Id}_{studentId}) для расчета диффов без интерференции между родителем и учеником
+                // 2) Общий срез студента (marks_db:{studentId}) для мгновенной загрузки дневника при открытии бота
                 string studentId = !string.IsNullOrEmpty(tokenData.StudentId) ? tokenData.StudentId : user.Id;
-                string dbCacheKey = $"marks_db:{studentId}";
-                var existingDb = await db.Cache.FirstOrDefaultAsync(c => c.CacheKey == dbCacheKey, stoppingToken);
+                string userDbCacheKey = $"marks_db:{user.Id}_{studentId}";
+                string sharedDbCacheKey = $"marks_db:{studentId}";
+
+                var userDbEntry = await db.Cache.FirstOrDefaultAsync(c => c.CacheKey == userDbCacheKey, stoppingToken);
+                var sharedDbEntry = await db.Cache.FirstOrDefaultAsync(c => c.CacheKey == sharedDbCacheKey, stoppingToken);
 
                 List<GosuslugiMarkItem>? previousMarks = null;
-                if (existingDb != null && !string.IsNullOrEmpty(existingDb.JsonData))
+                if (userDbEntry != null && !string.IsNullOrEmpty(userDbEntry.JsonData))
                 {
                     try
                     {
-                        previousMarks = JsonSerializer.Deserialize<List<GosuslugiMarkItem>>(existingDb.JsonData, DiaryClient.DatamartJsonOptions);
+                        previousMarks = JsonSerializer.Deserialize<List<GosuslugiMarkItem>>(userDbEntry.JsonData, DiaryClient.DatamartJsonOptions);
                     }
                     catch (Exception pex)
                     {
-                        _logger.LogDebug($"[GradeWatcher] Ошибка десериализации предыдущих оценок: {pex.Message}");
+                        _logger.LogDebug($"[GradeWatcher] Ошибка десериализации предыдущих оценок пользователя {user.Id}: {pex.Message}");
                     }
+                }
+                // Если персонального кэша еще нет (первый запуск после обновления) — пробуем общий кэш
+                if ((previousMarks == null || previousMarks.Count == 0) && sharedDbEntry != null && !string.IsNullOrEmpty(sharedDbEntry.JsonData))
+                {
+                    try
+                    {
+                        previousMarks = JsonSerializer.Deserialize<List<GosuslugiMarkItem>>(sharedDbEntry.JsonData, DiaryClient.DatamartJsonOptions);
+                    }
+                    catch { }
                 }
 
                 string marksJson = JsonSerializer.Serialize(marks, DiaryClient.DatamartJsonOptions);
-                if (existingDb != null)
+
+                // Сохраняем/обновляем персональный срез пользователя
+                if (userDbEntry != null)
                 {
-                    existingDb.JsonData = marksJson;
-                    existingDb.UpdatedAt = DateTime.UtcNow;
+                    userDbEntry.JsonData = marksJson;
+                    userDbEntry.UpdatedAt = DateTime.UtcNow;
                 }
                 else
                 {
-                    db.Cache.Add(new CachedData { CacheKey = dbCacheKey, JsonData = marksJson, UpdatedAt = DateTime.UtcNow });
+                    db.Cache.Add(new CachedData { CacheKey = userDbCacheKey, JsonData = marksJson, UpdatedAt = DateTime.UtcNow });
+                }
+
+                // Актуализируем общий срез студента для быстрого открытия меню в боте
+                if (sharedDbEntry != null)
+                {
+                    sharedDbEntry.JsonData = marksJson;
+                    sharedDbEntry.UpdatedAt = DateTime.UtcNow;
+                }
+                else
+                {
+                    db.Cache.Add(new CachedData { CacheKey = sharedDbCacheKey, JsonData = marksJson, UpdatedAt = DateTime.UtcNow });
                 }
 
                 var memCache = userScope.ServiceProvider.GetService<IMemoryCache>();
@@ -261,6 +290,9 @@ public class GradeWatcherWorker : BackgroundService
                     // ложное уведомление НЕ отправляется, а хэш тихо актуализируется в БД.
                     if (freshMarks.Count > 0)
                     {
+                        _logger.LogInformation($"[GradeWatcher] 🔔 Найдено свежих оценок: {freshMarks.Count} шт. для user={user.Id} (student={studentId}): " +
+                            string.Join(", ", freshMarks.Select(m => $"{m.SubjectName} '{m.Value}' ({m.Date}, id={m.Id})")));
+
                         var marksToSend = freshMarks.Take(5).ToList();
                         var sb = new StringBuilder();
                         sb.AppendLine(marksToSend.Count == 1
@@ -284,6 +316,8 @@ public class GradeWatcherWorker : BackgroundService
                         }
                         sb.AppendLine();
 
+                        int currentQuarter = DiaryInteractionService.GetCurrentQuarter();
+
                         // Группируем свежие оценки по предметам для структурированного вывода и расчета динамики
                         var subjectGroups = marksToSend.GroupBy(m => !string.IsNullOrWhiteSpace(m.SubjectName) ? m.SubjectName.Trim() : "Урок");
                         foreach (var group in subjectGroups)
@@ -291,6 +325,12 @@ public class GradeWatcherWorker : BackgroundService
                             string subjectName = group.Key;
                             string safeSubject = TelegramMarkdownEscaper.Escape(subjectName);
                             sb.AppendLine($"📚 *{safeSubject}*");
+
+                            // Определяем целевую четверть для данного предмета (если оценка выставлена на ноябрь / следующую четверть)
+                            int targetQuarter = group
+                                .Select(x => DiaryInteractionService.GetMarkQuarter(x.Date))
+                                .FirstOrDefault(q => q > 0);
+                            if (targetQuarter == 0) targetQuarter = currentQuarter;
 
                             foreach (var m in group)
                             {
@@ -306,18 +346,25 @@ public class GradeWatcherWorker : BackgroundService
                                     reason = $" ({commentStr})";
 
                                 string weight = (m.Weight.HasValue && m.Weight.Value > 1) ? $" [вес: {m.Weight.Value}]" : "";
-                                string dateStr = !string.IsNullOrEmpty(m.Date) ? $" • {TelegramMarkdownEscaper.Escape(m.Date)}" : "";
+                                int markQuarter = DiaryInteractionService.GetMarkQuarter(m.Date);
+                                string quarterSuffix = (markQuarter > 0 && markQuarter != currentQuarter) ? $" [{markQuarter}-я четверть]" : "";
+                                string dateStr = !string.IsNullOrEmpty(m.Date) ? $" • {TelegramMarkdownEscaper.Escape(m.Date)}{TelegramMarkdownEscaper.Escape(quarterSuffix)}" : "";
 
                                 sb.AppendLine($"⭐️ Оценка: *{TelegramMarkdownEscaper.Escape(markDisplay)}*{weight}{reason}{dateStr}");
                             }
 
-                            // Динамика среднего балла и прогноз четвертной оценки по данному предмету
-                            var subjDynamics = GradeCalculator.ComputeSubjectDynamics(previousMarks, marks, subjectName);
-                            string gpaLine = subjDynamics.FormatSubjectGpaLine();
+                            // Динамика среднего балла и прогноз рассчитываются строго в рамках четверти полученных оценок
+                            var prevQuarterMarks = previousMarks?.Where(x => DiaryInteractionService.GetMarkQuarter(x.Date) == targetQuarter);
+                            var currQuarterMarks = marks.Where(x => DiaryInteractionService.GetMarkQuarter(x.Date) == targetQuarter);
+
+                            var subjDynamics = GradeCalculator.ComputeSubjectDynamics(prevQuarterMarks, currQuarterMarks, subjectName);
+                            string? qLabel = (targetQuarter != currentQuarter) ? $"{targetQuarter}-я четв." : null;
+
+                            string gpaLine = subjDynamics.FormatSubjectGpaLine(qLabel);
                             if (!string.IsNullOrEmpty(gpaLine))
                                 sb.AppendLine(gpaLine);
 
-                            string forecastLine = subjDynamics.FormatForecastLine();
+                            string forecastLine = subjDynamics.FormatForecastLine(qLabel);
                             if (!string.IsNullOrEmpty(forecastLine))
                                 sb.AppendLine(forecastLine);
 
@@ -333,8 +380,10 @@ public class GradeWatcherWorker : BackgroundService
                             sb.AppendLine();
                         }
 
-                        // Динамика общего среднего балла по всем предметам
-                        var overallDynamics = GradeCalculator.ComputeOverallDynamics(previousMarks, marks);
+                        // Динамика общего среднего балла по текущей четверти
+                        var prevOverallMarks = previousMarks?.Where(x => DiaryInteractionService.GetMarkQuarter(x.Date) == currentQuarter);
+                        var currOverallMarks = marks.Where(x => DiaryInteractionService.GetMarkQuarter(x.Date) == currentQuarter);
+                        var overallDynamics = GradeCalculator.ComputeOverallDynamics(prevOverallMarks, currOverallMarks);
                         string overallLine = overallDynamics.FormatOverallGpaLine();
                         if (!string.IsNullOrEmpty(overallLine))
                         {
@@ -344,15 +393,22 @@ public class GradeWatcherWorker : BackgroundService
 
                         sb.AppendLine("💡 _Подробная статистика и цели в меню ниже:_");
 
+                        string firstSubj = freshMarks.FirstOrDefault()?.SubjectName ?? "";
+                        var config = userScope.ServiceProvider.GetService<IConfiguration>();
+                        string baseMiniAppUrl = config?["MiniAppUrl"] ?? "https://miragediary.space";
+                        string encodedSubj = !string.IsNullOrEmpty(firstSubj) ? $"&subject={Uri.EscapeDataString(firstSubj)}" : "";
+                        string simWebAppUrl = $"{baseMiniAppUrl.TrimEnd('/')}/?mode=simulator&userId={user.Id}{encodedSubj}";
+
                         var tgMarkup = new InlineKeyboardMarkup(new[]
                         {
                             new[]
                             {
                                 InlineKeyboardButton.WithCallbackData("📊 Все оценки", "cmd_marks"),
-                                InlineKeyboardButton.WithCallbackData("🎯 Калькулятор целей", "cmd_calc")
+                                InlineKeyboardButton.WithWebApp("🔮 Симулятор оценок", new WebAppInfo { Url = simWebAppUrl })
                             },
                             new[]
                             {
+                                InlineKeyboardButton.WithCallbackData("🎯 Калькулятор целей", "cmd_calc"),
                                 InlineKeyboardButton.WithCallbackData("🏠 Главное меню", "cmd_back_main")
                             }
                         });
@@ -473,13 +529,15 @@ public class GradeWatcherWorker : BackgroundService
         var ordered = marks
             .OrderBy(m => m.SubjectName)
             .ThenBy(m => m.Date)
+            .ThenBy(m => m.Id)
+            .ThenBy(m => m.LessonId)
             .ThenBy(m => m.Value)
             .ThenBy(m => m.WorkKind);
 
         var sb = new StringBuilder();
         foreach (var m in ordered)
         {
-            sb.Append($"{m.SubjectName}|{m.Date}|{m.Value}|{m.Weight}|{m.WorkKind};");
+            sb.Append($"{m.Id}|{m.LessonId}|{m.SubjectName}|{m.Date}|{m.Value}|{m.Weight}|{m.WorkKind};");
         }
 
         using var sha = SHA256.Create();
@@ -491,6 +549,7 @@ public class GradeWatcherWorker : BackgroundService
     {
         if (!string.IsNullOrEmpty(m.Id))
             return m.Id;
-        return $"{m.SubjectName}_{m.Date}_{m.Value}_{m.Weight}_{m.WorkKind}";
+        string lessonSuffix = !string.IsNullOrEmpty(m.LessonId) ? $"_{m.LessonId}" : "";
+        return $"{m.SubjectName}_{m.Date}_{m.Value}_{m.Weight}_{m.WorkKind}{lessonSuffix}";
     }
 }

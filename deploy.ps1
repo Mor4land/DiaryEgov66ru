@@ -40,7 +40,8 @@ Write-Host "Verified: Master keys and connection strings managed via environment
 
 # 5. SCP Files to Production VPS
 Write-Host "[5/6] Transferring release binaries and assets to VPS..." -ForegroundColor Yellow
-scp -i $KeyPath -P $Port -o StrictHostKeyChecking=no -o BatchMode=yes publish_linux/*.dll publish_linux/*.deps.json publish_linux/*.runtimeconfig.json MirageDiary.Server/admins.json MirageDiary.Server/wwwroot/admin.html MirageDiary.Server/wwwroot/privacy.html MirageDiary.Server/wwwroot/index.html start.sh "${User}@${HostName}:${RemoteDir}/"
+$publishFiles = Get-ChildItem "publish_linux" -File | ForEach-Object { $_.FullName }
+scp -i $KeyPath -P $Port -o StrictHostKeyChecking=no -o BatchMode=yes $publishFiles MirageDiary.Server/admins.json MirageDiary.Server/wwwroot/admin.html MirageDiary.Server/wwwroot/privacy.html MirageDiary.Server/wwwroot/index.html start.sh "${User}@${HostName}:${RemoteDir}/"
 scp -i $KeyPath -P $Port -o StrictHostKeyChecking=no -o BatchMode=yes -r MirageDiary.Server/wwwroot/images MirageDiary.Server/wwwroot/assets "${User}@${HostName}:${RemoteDir}/wwwroot/"
 
 if ($LASTEXITCODE -ne 0) {

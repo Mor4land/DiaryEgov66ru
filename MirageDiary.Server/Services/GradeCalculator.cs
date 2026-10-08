@@ -131,33 +131,35 @@ public static class GradeCalculator
         public bool IsPositive => Delta > 0.001;
         public bool IsNegative => Delta < -0.001;
 
-        public string FormatSubjectGpaLine()
+        public string FormatSubjectGpaLine(string? quarterLabel = null)
         {
             var ci = CultureInfo.InvariantCulture;
+            string prefix = !string.IsNullOrEmpty(quarterLabel) ? $"📊 *Средний балл ({quarterLabel}):*" : "📊 *Средний балл:*";
             if (IsFirstMark)
             {
-                return $"📊 *Средний балл:* `{NewGpa.ToString("F2", ci)}` *(первая оценка)*";
+                return $"{prefix} `{NewGpa.ToString("F2", ci)}` *(первая оценка)*";
             }
             if (PreviousWeight > 0 && NewWeight > 0)
             {
                 if (IsPositive)
-                    return $"📊 *Средний балл:* `{PreviousGpa.ToString("F2", ci)}` ➡️ *{NewGpa.ToString("F2", ci)}* (🟢 +{Delta.ToString("F2", ci)})";
+                    return $"{prefix} `{PreviousGpa.ToString("F2", ci)}` ➡️ *{NewGpa.ToString("F2", ci)}* (🟢 +{Delta.ToString("F2", ci)})";
                 if (IsNegative)
-                    return $"📊 *Средний балл:* `{PreviousGpa.ToString("F2", ci)}` ➡️ *{NewGpa.ToString("F2", ci)}* (🔻 {Delta.ToString("F2", ci)})";
-                return $"📊 *Средний балл:* *{NewGpa.ToString("F2", ci)}* *(без изм.)*";
+                    return $"{prefix} `{PreviousGpa.ToString("F2", ci)}` ➡️ *{NewGpa.ToString("F2", ci)}* (🔻 {Delta.ToString("F2", ci)})";
+                return $"{prefix} *{NewGpa.ToString("F2", ci)}* *(без изм.)*";
             }
-            return NewWeight > 0 ? $"📊 *Средний балл:* `{NewGpa.ToString("F2", ci)}`" : "📊 *Средний балл:* —";
+            return NewWeight > 0 ? $"{prefix} `{NewGpa.ToString("F2", ci)}`" : $"{prefix} —";
         }
 
-        public string FormatForecastLine()
+        public string FormatForecastLine(string? quarterLabel = null)
         {
             if (NewForecast <= 0) return string.Empty;
+            string prefix = !string.IsNullOrEmpty(quarterLabel) ? $"🎯 *Прогноз ({quarterLabel}):*" : "🎯 *Прогноз за четверть:*";
             if (PreviousWeight > 0 && PreviousForecast > 0 && PreviousForecast != NewForecast)
             {
                 string icon = NewForecast > PreviousForecast ? "🎉" : "⚠️";
-                return $"🎯 *Прогноз за четверть:* `{PreviousForecast}` ➡️ *{NewForecast}* {icon}";
+                return $"{prefix} `{PreviousForecast}` ➡️ *{NewForecast}* {icon}";
             }
-            return $"🎯 *Прогноз за четверть:* *{NewForecast}*";
+            return $"{prefix} *{NewForecast}*";
         }
 
         public string FormatOverallGpaLine()

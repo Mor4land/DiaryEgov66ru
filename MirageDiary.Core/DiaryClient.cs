@@ -848,9 +848,9 @@ public class DiaryClient
                 if (marks.Count > 0) break;
             }
 
-            // Deduplicate marks by Id (or SubjectName + Date + Value + WorkKind)
+            // Deduplicate marks by Id (or SubjectName + Date + Value + Weight + WorkKind + LessonId)
             var distinctMarks = marks
-                .GroupBy(m => !string.IsNullOrEmpty(m.Id) ? m.Id : $"{m.SubjectName}_{m.Date}_{m.Value}_{m.WorkKind}")
+                .GroupBy(m => !string.IsNullOrEmpty(m.Id) ? m.Id : $"{m.SubjectName}_{m.Date}_{m.Value}_{m.Weight}_{m.WorkKind}_{m.LessonId}")
                 .Select(g => g.First())
                 .OrderByDescending(m => m.Date)
                 .ToList();
@@ -961,14 +961,24 @@ public class DiaryClient
         }
     }
 
-    public static List<string> GetRecentWeekIntervals(int count = 12)
+    public static List<string> GetRecentWeekIntervals(int count = 12, int futureWeeks = 5)
     {
         var list = new List<string>();
         var now = DateTime.UtcNow;
-        var nextWeek = now.AddDays(7);
-        int nwNum = System.Globalization.ISOWeek.GetWeekOfYear(nextWeek);
-        list.Add($"{nwNum:D2}{nextWeek.Year}");
 
+        // 1. Недели вперед (для оценок, выставленных заранее на следующий месяц / следующую четверть)
+        for (int f = futureWeeks; f >= 1; f--)
+        {
+            var dt = now.AddDays(7 * f);
+            int weekNum = System.Globalization.ISOWeek.GetWeekOfYear(dt);
+            string interval = $"{weekNum:D2}{dt.Year}";
+            if (!list.Contains(interval))
+            {
+                list.Add(interval);
+            }
+        }
+
+        // 2. Текущая неделя и прошлые недели четверти
         for (int i = 0; i < count; i++)
         {
             var dt = now.AddDays(-7 * i);

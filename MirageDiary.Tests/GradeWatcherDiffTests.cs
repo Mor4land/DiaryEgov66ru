@@ -1,5 +1,7 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
+using MirageDiary.Core;
 using MirageDiary.Core.Models;
 using MirageDiary.Server.Services;
 using Xunit;
@@ -94,5 +96,59 @@ public class GradeWatcherDiffTests
         Assert.Equal("История", freshMarks[0].SubjectName);
         Assert.Equal("5", freshMarks[0].Value);
         Assert.Equal("2026-09-24", freshMarks[0].Date);
+    }
+
+    [Fact]
+    public void GetMarkKey_IncludesLessonId_WhenPresentAndIdEmpty()
+    {
+        var mark = new GosuslugiMarkItem
+        {
+            Id = "",
+            SubjectName = "Биология",
+            Date = "2026-09-18",
+            Value = "3",
+            Weight = 1,
+            WorkKind = "Ответ на уроке",
+            LessonId = "lesson-123"
+        };
+
+        var key = GradeWatcherWorker.GetMarkKey(mark);
+        Assert.Equal("Биология_2026-09-18_3_1_Ответ на уроке_lesson-123", key);
+    }
+
+    [Fact]
+    public void ComputeMarksHash_DifferentiatesDualGradesOnSameDay()
+    {
+        // Ситуация как на 2026-09-18: две оценки по биологии (3 и 5)
+        var marks = new List<GosuslugiMarkItem>
+        {
+            new() { Id = "mark-3", LessonId = "l-1", SubjectName = "Биология", Date = "2026-09-18", Value = "3", Weight = 1 },
+            new() { Id = "mark-5", LessonId = "l-2", SubjectName = "Биология", Date = "2026-09-18", Value = "5", Weight = 1 }
+        };
+
+        var hash = GradeWatcherWorker.ComputeMarksHash(marks);
+        Assert.False(string.IsNullOrEmpty(hash));
+
+        // Если одна из оценок удаляется или меняется — хэш строго меняется
+        var marksOnly3 = new List<GosuslugiMarkItem>
+        {
+            new() { Id = "mark-3", LessonId = "l-1", SubjectName = "Биология", Date = "2026-09-18", Value = "3", Weight = 1 }
+        };
+        var hashOnly3 = GradeWatcherWorker.ComputeMarksHash(marksOnly3);
+        Assert.NotEqual(hash, hashOnly3);
+    }
+
+    [Fact]
+    public void GetRecentWeekIntervals_IncludesFutureWeeksAhead()
+    {
+        var intervals = DiaryClient.GetRecentWeekIntervals(count: 12, futureWeeks: 5);
+        Assert.NotEmpty(intervals);
+
+        var now = DateTime.UtcNow;
+        var in4Weeks = now.AddDays(28);
+        int expectedWeekNum = System.Globalization.ISOWeek.GetWeekOfYear(in4Weeks);
+        string expectedInterval = $"{expectedWeekNum:D2}{in4Weeks.Year}";
+
+        Assert.Contains(expectedInterval, intervals);
     }
 }

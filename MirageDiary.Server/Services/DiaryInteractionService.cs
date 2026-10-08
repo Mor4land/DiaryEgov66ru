@@ -618,15 +618,17 @@ public class DiaryInteractionService
         }
 
         string studentId = !string.IsNullOrEmpty(tokenData.StudentId) ? tokenData.StudentId : effectiveStudentId;
-        string dbCacheKey = $"marks_db:{studentId}";
+        string userDbCacheKey = $"marks_db:{userId}_{studentId}";
+        string sharedDbCacheKey = $"marks_db:{studentId}";
 
         List<GosuslugiMarkItem>? allMarks = null;
 
-        // 1. Быстрая загрузка из постоянного кэша БД
+        // 1. Быстрая загрузка из постоянного кэша БД (сначала личный кэш пользователя, затем общий)
         bool isDbCacheFresh = false;
         if (!forceRefresh)
         {
-            var dbEntry = await dbContext.Cache.FirstOrDefaultAsync(c => c.CacheKey == dbCacheKey);
+            var dbEntry = await dbContext.Cache.FirstOrDefaultAsync(c => c.CacheKey == userDbCacheKey)
+                       ?? await dbContext.Cache.FirstOrDefaultAsync(c => c.CacheKey == sharedDbCacheKey);
             if (dbEntry != null && !string.IsNullOrEmpty(dbEntry.JsonData))
             {
                 try
@@ -655,7 +657,8 @@ public class DiaryInteractionService
                 if (apiMarks != null)
                 {
                     // Загружаем предыдущие оценки из БД для слияния (чтобы прошлые четверти не терялись при смещении 12-недельного окна)
-                    var existingDb = await dbContext.Cache.FirstOrDefaultAsync(c => c.CacheKey == dbCacheKey);
+                    var existingDb = await dbContext.Cache.FirstOrDefaultAsync(c => c.CacheKey == userDbCacheKey)
+                                  ?? await dbContext.Cache.FirstOrDefaultAsync(c => c.CacheKey == sharedDbCacheKey);
                     var existingList = new List<GosuslugiMarkItem>();
                     if (existingDb != null && !string.IsNullOrEmpty(existingDb.JsonData))
                     {
@@ -669,27 +672,41 @@ public class DiaryInteractionService
                     var mergedDict = new Dictionary<string, GosuslugiMarkItem>(StringComparer.OrdinalIgnoreCase);
                     foreach (var m in existingList)
                     {
-                        string k = !string.IsNullOrEmpty(m.Id) ? m.Id : $"{m.SubjectName}_{m.Date}_{m.Value}_{m.WorkKind}";
+                        string k = !string.IsNullOrEmpty(m.Id) ? m.Id : $"{m.SubjectName}_{m.Date}_{m.Value}_{m.Weight}_{m.WorkKind}_{m.LessonId}";
                         mergedDict[k] = m;
                     }
                     foreach (var m in apiMarks)
                     {
-                        string k = !string.IsNullOrEmpty(m.Id) ? m.Id : $"{m.SubjectName}_{m.Date}_{m.Value}_{m.WorkKind}";
+                        string k = !string.IsNullOrEmpty(m.Id) ? m.Id : $"{m.SubjectName}_{m.Date}_{m.Value}_{m.Weight}_{m.WorkKind}_{m.LessonId}";
                         mergedDict[k] = m;
                     }
 
                     allMarks = mergedDict.Values.OrderByDescending(m => m.Date).ToList();
 
                     string json = JsonSerializer.Serialize(allMarks, DiaryClient.DatamartJsonOptions);
-                    if (existingDb != null)
+
+                    var userDbEntry = await dbContext.Cache.FirstOrDefaultAsync(c => c.CacheKey == userDbCacheKey);
+                    if (userDbEntry != null)
                     {
-                        existingDb.JsonData = json;
-                        existingDb.UpdatedAt = DateTime.UtcNow;
+                        userDbEntry.JsonData = json;
+                        userDbEntry.UpdatedAt = DateTime.UtcNow;
                     }
                     else
                     {
-                        dbContext.Cache.Add(new CachedData { CacheKey = dbCacheKey, JsonData = json, UpdatedAt = DateTime.UtcNow });
+                        dbContext.Cache.Add(new CachedData { CacheKey = userDbCacheKey, JsonData = json, UpdatedAt = DateTime.UtcNow });
                     }
+
+                    var sharedDbEntry = await dbContext.Cache.FirstOrDefaultAsync(c => c.CacheKey == sharedDbCacheKey);
+                    if (sharedDbEntry != null)
+                    {
+                        sharedDbEntry.JsonData = json;
+                        sharedDbEntry.UpdatedAt = DateTime.UtcNow;
+                    }
+                    else
+                    {
+                        dbContext.Cache.Add(new CachedData { CacheKey = sharedDbCacheKey, JsonData = json, UpdatedAt = DateTime.UtcNow });
+                    }
+
                     await dbContext.SaveChangesAsync();
                 }
             }
