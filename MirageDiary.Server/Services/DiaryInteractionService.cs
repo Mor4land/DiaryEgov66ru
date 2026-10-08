@@ -531,9 +531,10 @@ public class DiaryInteractionService
         return 1;
     }
 
-    public static int GetMarkQuarter(string? dateStr)
+    public static bool TryParseMarkDate(string? dateStr, out DateTime markDate)
     {
-        if (string.IsNullOrWhiteSpace(dateStr)) return 0;
+        markDate = default;
+        if (string.IsNullOrWhiteSpace(dateStr)) return false;
         string trimmed = dateStr.Trim();
 
         // 1. Unix timestamp (seconds or milliseconds)
@@ -542,13 +543,10 @@ public class DiaryInteractionService
             try
             {
                 var dtTs = (ts > 10_000_000_000L)
-                    ? DateTimeOffset.FromUnixTimeMilliseconds(ts).DateTime
-                    : DateTimeOffset.FromUnixTimeSeconds(ts).DateTime;
-                int m = dtTs.Month;
-                if (m is 9 or 10) return 1;
-                if (m is 11 or 12) return 2;
-                if (m is 1 or 2 or 3) return 3;
-                if (m is 4 or 5 or 6) return 4;
+                    ? DateTimeOffset.FromUnixTimeMilliseconds(ts).UtcDateTime
+                    : DateTimeOffset.FromUnixTimeSeconds(ts).UtcDateTime;
+                markDate = dtTs.Date;
+                return true;
             }
             catch { }
         }
@@ -556,28 +554,34 @@ public class DiaryInteractionService
         // 2. Direct string extraction (YYYY-MM-DD)
         if (trimmed.Length >= 10 && trimmed[4] == '-' && trimmed[7] == '-')
         {
-            if (int.TryParse(trimmed.Substring(5, 2), out int month))
+            if (DateTime.TryParseExact(trimmed.Substring(0, 10), "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var dt))
             {
-                if (month is 9 or 10) return 1;
-                if (month is 11 or 12) return 2;
-                if (month is 1 or 2 or 3) return 3;
-                if (month is 4 or 5 or 6) return 4;
+                markDate = dt.Date;
+                return true;
             }
         }
 
         // 3. DateTimeOffset / DateTime parsing
         if (DateTimeOffset.TryParse(trimmed, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var dto))
         {
-            int m = dto.Month;
-            if (m is 9 or 10) return 1;
-            if (m is 11 or 12) return 2;
-            if (m is 1 or 2 or 3) return 3;
-            if (m is 4 or 5 or 6) return 4;
+            markDate = dto.UtcDateTime.Date;
+            return true;
         }
 
-        if (DateTime.TryParse(trimmed, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var dt))
+        if (DateTime.TryParse(trimmed, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var generalDt))
         {
-            int m = dt.Month;
+            markDate = generalDt.Date;
+            return true;
+        }
+
+        return false;
+    }
+
+    public static int GetMarkQuarter(string? dateStr)
+    {
+        if (TryParseMarkDate(dateStr, out var markDate))
+        {
+            int m = markDate.Month;
             if (m is 9 or 10) return 1;
             if (m is 11 or 12) return 2;
             if (m is 1 or 2 or 3) return 3;

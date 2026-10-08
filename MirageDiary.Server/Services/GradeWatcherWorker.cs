@@ -166,6 +166,22 @@ public class GradeWatcherWorker : BackgroundService
             if (user == null || string.IsNullOrEmpty(user.AccessToken) || !user.IsGradeWatcherEnabled)
                 continue;
 
+            // Если уведомления пользователя перенаправлены на другую платформу, пропускаем опрос для этого аккаунта
+            if (!string.IsNullOrEmpty(user.NotificationChannel))
+            {
+                bool isMax = user.Id.StartsWith("max_");
+                if (user.NotificationChannel.Equals("telegram", StringComparison.OrdinalIgnoreCase) && isMax)
+                {
+                    _logger.LogInformation($"[GradeWatcher] Пропуск фонового опроса для {user.Id}: уведомления направляются в Telegram.");
+                    continue;
+                }
+                else if (user.NotificationChannel.Equals("max", StringComparison.OrdinalIgnoreCase) && !isMax)
+                {
+                    _logger.LogInformation($"[GradeWatcher] Пропуск фонового опроса для {user.Id}: уведомления направляются в MAX.");
+                    continue;
+                }
+            }
+
             try
             {
                 var tokenData = await tokenStore.GetTokensAsync(user.Id);
@@ -272,6 +288,7 @@ public class GradeWatcherWorker : BackgroundService
                         .OrderByDescending(m => m.Date)
                         .ToList();
 
+                    bool isCorrection = false;
                     // Если нет совершенно новых оценок, проверяем, не исправил ли учитель оценку по существующему ID
                     if (freshMarks.Count == 0)
                     {
@@ -284,20 +301,95 @@ public class GradeWatcherWorker : BackgroundService
                             .Where(m => !string.IsNullOrEmpty(m.Id) && prevById.TryGetValue(m.Id!, out var prev) && prev.Value != m.Value)
                             .OrderByDescending(m => m.Date)
                             .ToList();
+                        if (freshMarks.Count > 0)
+                        {
+                            isCorrection = true;
+                        }
                     }
 
-                    // Если реальных новых или исправленных оценок нет (например, изменился только формат хэша при деплое),
-                    // ложное уведомление НЕ отправляется, а хэш тихо актуализируется в БД.
-                    if (freshMarks.Count > 0)
-                    {
-                        _logger.LogInformation($"[GradeWatcher] 🔔 Найдено свежих оценок: {freshMarks.Count} шт. для user={user.Id} (student={studentId}): " +
-                            string.Join(", ", freshMarks.Select(m => $"{m.SubjectName} '{m.Value}' ({m.Date}, id={m.Id})")));
+                    // Фильтрация давности и защита от флаппинга серверов Госуслуг
+                    var validFreshMarks = new List<GosuslugiMarkItem>();
+                    var today = DateTime.UtcNow.Date;
 
-                        var marksToSend = freshMarks.Take(5).ToList();
+                    foreach (var m in freshMarks)
+                    {
+                        bool hasDate = DiaryInteractionService.TryParseMarkDate(m.Date, out var markDate);
+                        if (hasDate)
+                        {
+                            // 1. Для исправлений: не шлём пуши, если дата оценки старше 7 дней (фоновый синк старых оценок)
+                            if (isCorrection && (today - markDate).TotalDays > 7)
+                            {
+                                _logger.LogInformation($"[GradeWatcher] ℹ️ Пуш подавлен: исправление старой оценки {m.SubjectName} '{m.Value}' за {m.Date} (старше 7 дней, id={m.Id}) для user={user.Id}.");
+                                continue;
+                            }
+
+                            // 2. Для новых оценок: не шлём пуши, если дата урока старше 14 дней (исторический срез)
+                            if (!isCorrection && (today - markDate).TotalDays > 14)
+                            {
+                                _logger.LogInformation($"[GradeWatcher] ℹ️ Пуш подавлен: новая оценка {m.SubjectName} '{m.Value}' за старую дату {m.Date} (старше 14 дней, id={m.Id}) для user={user.Id}.");
+                                continue;
+                            }
+                        }
+
+                        // 3. Защита от флаппинга серверов Госуслуг (когда WAF/ноды чередуют 3 и 5)
+                        if (memCache != null && !string.IsNullOrEmpty(m.Id))
+                        {
+                            string notifValKey = $"last_notif_val:{studentId}_{m.Id}";
+                            if (memCache.TryGetValue(notifValKey, out string? lastSentVal) && string.Equals(lastSentVal, m.Value, StringComparison.OrdinalIgnoreCase))
+                            {
+                                _logger.LogInformation($"[GradeWatcher] ℹ️ Пуш подавлен: оценка {m.SubjectName} '{m.Value}' (id={m.Id}) уже отправлялась недавно.");
+                                continue;
+                            }
+
+                            string flapCountKey = $"notif_flap_cnt:{studentId}_{m.Id}";
+                            int flapCount = memCache.Get<int>(flapCountKey);
+                            if (flapCount >= 2)
+                            {
+                                _logger.LogWarning($"[GradeWatcher] ⚠️ Пуш заблокирован: зафиксирован флаппинг серверов Госуслуг для {m.SubjectName} id={m.Id} (более 2 изменений за сессию).");
+                                continue;
+                            }
+                        }
+
+                        validFreshMarks.Add(m);
+                    }
+
+                    // Если реальных новых или исправленных оценок нет (например, изменился только формат хэша при деплое или оценка старая),
+                    // ложное уведомление НЕ отправляется, а хэш тихо актуализируется в БД.
+                    if (validFreshMarks.Count > 0)
+                    {
+                        if (memCache != null)
+                        {
+                            foreach (var m in validFreshMarks)
+                            {
+                                if (!string.IsNullOrEmpty(m.Id))
+                                {
+                                    string notifValKey = $"last_notif_val:{studentId}_{m.Id}";
+                                    memCache.Set(notifValKey, m.Value, TimeSpan.FromHours(24));
+
+                                    string flapCountKey = $"notif_flap_cnt:{studentId}_{m.Id}";
+                                    int flapCount = memCache.Get<int>(flapCountKey);
+                                    memCache.Set(flapCountKey, flapCount + 1, TimeSpan.FromHours(6));
+                                }
+                            }
+                        }
+
+                        _logger.LogInformation($"[GradeWatcher] 🔔 Найдено свежих оценок: {validFreshMarks.Count} шт. для user={user.Id} (student={studentId}): " +
+                            string.Join(", ", validFreshMarks.Select(m => $"{m.SubjectName} '{m.Value}' ({m.Date}, id={m.Id})")));
+
+                        var marksToSend = validFreshMarks.Take(5).ToList();
                         var sb = new StringBuilder();
-                        sb.AppendLine(marksToSend.Count == 1
-                            ? "🔥 *Новая оценка в электронном журнале!*"
-                            : "🔥 *Новые оценки в электронном журнале!*");
+                        if (isCorrection)
+                        {
+                            sb.AppendLine(marksToSend.Count == 1
+                                ? "✏️ *Исправление оценки в электронном журнале!*"
+                                : "✏️ *Исправление оценок в электронном журнале!*");
+                        }
+                        else
+                        {
+                            sb.AppendLine(marksToSend.Count == 1
+                                ? "🔥 *Новая оценка в электронном журнале!*"
+                                : "🔥 *Новые оценки в электронном журнале!*");
+                        }
 
                         if (user.Role == "Parent" || !string.IsNullOrEmpty(user.SelectedStudentId))
                         {
@@ -371,9 +463,9 @@ public class GradeWatcherWorker : BackgroundService
                             sb.AppendLine();
                         }
 
-                        if (freshMarks.Count > marksToSend.Count)
+                        if (validFreshMarks.Count > marksToSend.Count)
                         {
-                            int remaining = freshMarks.Count - marksToSend.Count;
+                            int remaining = validFreshMarks.Count - marksToSend.Count;
                             string markWord = remaining % 10 == 1 && remaining % 100 != 11 ? "оценка" :
                                               (remaining % 10 is >= 2 and <= 4 && (remaining % 100 < 10 || remaining % 100 >= 20) ? "оценки" : "оценок");
                             sb.AppendLine($"_...и ещё {remaining} {markWord}_");
@@ -393,7 +485,7 @@ public class GradeWatcherWorker : BackgroundService
 
                         sb.AppendLine("💡 _Подробная статистика и цели в меню ниже:_");
 
-                        string firstSubj = freshMarks.FirstOrDefault()?.SubjectName ?? "";
+                        string firstSubj = validFreshMarks.FirstOrDefault()?.SubjectName ?? "";
                         var config = userScope.ServiceProvider.GetService<IConfiguration>();
                         string baseMiniAppUrl = config?["MiniAppUrl"] ?? "https://miragediary.space";
                         string encodedSubj = !string.IsNullOrEmpty(firstSubj) ? $"&subject={Uri.EscapeDataString(firstSubj)}" : "";
@@ -503,7 +595,7 @@ public class GradeWatcherWorker : BackgroundService
                     }
                     else
                     {
-                        _logger.LogInformation($"[GradeWatcher] Хэш изменился для {user.Id}, но новых оценок в сравнении с кэшем нет. Ложное срабатывание предотвращено.");
+                        _logger.LogInformation($"[GradeWatcher] Хэш изменился для {user.Id}, но новых актуальных оценок нет (подавлены фильтром давности/флаппинга). Ложное срабатывание предотвращено.");
                     }
 
                     user.LastMarksHash = currentHash;
