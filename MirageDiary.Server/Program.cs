@@ -17,7 +17,11 @@ builder.Configuration.AddJsonFile("admins.json", optional: true, reloadOnChange:
 builder.Configuration.AddJsonFile(Path.Combine(AppContext.BaseDirectory, "data", "admins.json"), optional: true, reloadOnChange: true);
 
 // 2. Add API Controllers & OpenAPI
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        options.JsonSerializerOptions.Converters.Add(new MirageDiary.Server.Services.SafeMaxAttachmentConverter());
+    });
 builder.Services.AddOpenApi();
 
 // 3. CORS policy (Hardened for Telegram MiniApp & trusted clients)

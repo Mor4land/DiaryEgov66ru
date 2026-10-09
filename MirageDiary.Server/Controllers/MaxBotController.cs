@@ -13,18 +13,18 @@ namespace MirageDiary.Server.Controllers;
 [Route("api/[controller]")]
 public class MaxBotController : ControllerBase
 {
-    private readonly IServiceProvider _serviceProvider;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<MaxBotController> _logger;
     private readonly IConfiguration _configuration;
     private readonly ServiceHealthService _health;
 
     public MaxBotController(
-        IServiceProvider serviceProvider,
+        IServiceScopeFactory scopeFactory,
         ILogger<MaxBotController> logger,
         IConfiguration configuration,
         ServiceHealthService health)
     {
-        _serviceProvider = serviceProvider;
+        _scopeFactory = scopeFactory;
         _logger = logger;
         _configuration = configuration;
         _health = health;
@@ -68,7 +68,7 @@ public class MaxBotController : ControllerBase
         {
             try
             {
-                using var scope = _serviceProvider.CreateScope();
+                using var scope = _scopeFactory.CreateScope();
                 var handleUpdateService = scope.ServiceProvider.GetRequiredService<MaxCommandService>();
                 await handleUpdateService.HandleUpdateAsync(update);
             }
