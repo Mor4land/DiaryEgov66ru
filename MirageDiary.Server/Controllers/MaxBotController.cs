@@ -1,7 +1,10 @@
-using Microsoft.AspNetCore.Mvc;
-using System.Threading.Tasks;
-using MirageDiary.Server.Services;
 using System;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using MirageDiary.Server.Services;
 using MaxUpdate = MAX.Bot.Interfaces.Models.Update;
 
 namespace MirageDiary.Server.Controllers;
@@ -10,18 +13,71 @@ namespace MirageDiary.Server.Controllers;
 [Route("api/[controller]")]
 public class MaxBotController : ControllerBase
 {
-    [HttpPost]
-    public async Task<IActionResult> Post([FromBody] MaxUpdate update, [FromServices] MaxCommandService handleUpdateService)
+    private readonly IServiceProvider _serviceProvider;
+    private readonly ILogger<MaxBotController> _logger;
+    private readonly IConfiguration _configuration;
+    private readonly ServiceHealthService _health;
+
+    public MaxBotController(
+        IServiceProvider serviceProvider,
+        ILogger<MaxBotController> logger,
+        IConfiguration configuration,
+        ServiceHealthService health)
     {
-        try
+        _serviceProvider = serviceProvider;
+        _logger = logger;
+        _configuration = configuration;
+        _health = health;
+    }
+
+    [HttpGet]
+    public IActionResult Get()
+    {
+        return Ok(new
         {
-            await handleUpdateService.HandleUpdateAsync(update);
-        }
-        catch (Exception ex)
+            status = "active",
+            service = "MirageDiary MAX Bot Webhook",
+            timestamp = DateTime.UtcNow
+        });
+    }
+
+    [HttpPost]
+    public IActionResult Post([FromBody] MaxUpdate update)
+    {
+        // 1. Опциональная проверка секретного ключа Webhook
+        var configuredSecret = (_configuration["MaxBot:Secret"] ?? _configuration["MaxBotSecret"])?.Trim();
+        if (!string.IsNullOrEmpty(configuredSecret))
         {
-            Console.WriteLine($"Error handling MAX webhook update: {ex.Message}");
+            if (!Request.Headers.TryGetValue("X-Max-Bot-Api-Secret", out var headerSecret) ||
+                !string.Equals(headerSecret.ToString(), configuredSecret, StringComparison.Ordinal))
+            {
+                _logger.LogWarning("[MaxWebhook] Отклонён запрос: неверный или отсутствующий заголовок X-Max-Bot-Api-Secret.");
+                return Unauthorized();
+            }
         }
-        
+
+        if (update == null)
+        {
+            return Ok();
+        }
+
+        _health.ReportRunning("max", "MAX-бот");
+
+        // 2. Асинхронная обработка в изолированном ServiceScope (немедленный 200 OK шлюзу MAX)
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var scope = _serviceProvider.CreateScope();
+                var handleUpdateService = scope.ServiceProvider.GetRequiredService<MaxCommandService>();
+                await handleUpdateService.HandleUpdateAsync(update);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[MaxWebhook] Ошибка при обработке входящего обновления MAX");
+            }
+        });
+
         return Ok();
     }
 }

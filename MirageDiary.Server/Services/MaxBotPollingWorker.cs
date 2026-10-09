@@ -39,6 +39,27 @@ public class MaxBotPollingWorker : BackgroundService
     {
         _logger.LogInformation("Starting MAX Bot Long Polling worker...");
         _health.Register(HealthKey, HealthName);
+
+        try
+        {
+            var subs = await _botClient.GetSubscriptionsAsync(stoppingToken);
+            if (subs?.Subscriptions != null)
+            {
+                foreach (var s in subs.Subscriptions)
+                {
+                    if (!string.IsNullOrEmpty(s.Url))
+                    {
+                        _logger.LogInformation($"[MaxPolling] Удаление существующего Webhook перед поллингом: {s.Url}");
+                        await _botClient.UnsubscribeAsync(new MAX.Bot.Interfaces.Models.Request.DeleteSubscriptionRequest { Url = s.Url }, stoppingToken);
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning($"[MaxPolling] Предупреждение при очистке подписок Webhook: {ex.Message}");
+        }
+
         bool announced = false;
         long? marker = null;
 

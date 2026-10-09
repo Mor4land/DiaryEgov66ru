@@ -173,7 +173,17 @@ public static class ServiceCollectionExtensions
                 };
                 return new MaxBotClient(maxBotToken, maxHttpClient);
             });
-            services.AddHostedService<MaxBotPollingWorker>();
+
+            var mode = (configuration["MaxBot:Mode"] ?? configuration["MaxBotMode"] ?? "webhook").Trim().ToLowerInvariant();
+            if (mode == "polling")
+            {
+                services.AddHostedService<MaxBotPollingWorker>();
+            }
+            else
+            {
+                services.AddHostedService<MaxBotWebhookService>();
+            }
+
             services.AddScoped<MaxCommandService>();
         }
         else
