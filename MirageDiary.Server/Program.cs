@@ -20,7 +20,8 @@ builder.Configuration.AddJsonFile(Path.Combine(AppContext.BaseDirectory, "data",
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
     {
-        options.JsonSerializerOptions.Converters.Add(new MirageDiary.Server.Services.SafeMaxAttachmentConverter());
+        options.JsonSerializerOptions.PropertyNameCaseInsensitive = true;
+        options.JsonSerializerOptions.AllowOutOfOrderMetadataProperties = true;
     });
 builder.Services.AddOpenApi();
 

@@ -1,4 +1,5 @@
 using System;
+using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
@@ -13,6 +14,12 @@ namespace MirageDiary.Server.Controllers;
 [Route("api/[controller]")]
 public class MaxBotController : ControllerBase
 {
+    private static readonly JsonSerializerOptions MaxJsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        AllowOutOfOrderMetadataProperties = true
+    };
+
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<MaxBotController> _logger;
     private readonly IConfiguration _configuration;
@@ -42,7 +49,7 @@ public class MaxBotController : ControllerBase
     }
 
     [HttpPost]
-    public IActionResult Post([FromBody] MaxUpdate update)
+    public async Task<IActionResult> Post()
     {
         // 1. Опциональная проверка секретного ключа Webhook
         var configuredSecret = (_configuration["MaxBot:Secret"] ?? _configuration["MaxBotSecret"])?.Trim();
@@ -54,6 +61,17 @@ public class MaxBotController : ControllerBase
                 _logger.LogWarning("[MaxWebhook] Отклонён запрос: неверный или отсутствующий заголовок X-Max-Bot-Api-Secret.");
                 return Unauthorized();
             }
+        }
+
+        MaxUpdate? update;
+        try
+        {
+            update = await JsonSerializer.DeserializeAsync<MaxUpdate>(Request.Body, MaxJsonOptions, HttpContext.RequestAborted);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[MaxWebhook] Ошибка десериализации входящего пакета MAX");
+            return Ok();
         }
 
         if (update == null)
