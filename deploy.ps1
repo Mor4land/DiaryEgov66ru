@@ -41,7 +41,7 @@ Write-Host "Verified: Master keys and connection strings managed via environment
 
 # 5. SCP Files to Production VPS
 Write-Host "[5/6] Transferring release binaries and assets to VPS..." -ForegroundColor Yellow
-$publishFiles = Get-ChildItem "publish_linux" -File | ForEach-Object { $_.FullName }
+$publishFiles = Get-ChildItem "publish_linux" -File | Where-Object { $_.Name -notlike "appsettings*.json" } | ForEach-Object { $_.FullName }
 $bindOpt = if (![string]::IsNullOrEmpty($BindAddress)) { "-o BindAddress=$BindAddress" } else { "" }
 scp -i $KeyPath -P $Port $bindOpt -o StrictHostKeyChecking=no -o BatchMode=yes $publishFiles MirageDiary.Server/admins.json MirageDiary.Server/wwwroot/admin.html MirageDiary.Server/wwwroot/privacy.html MirageDiary.Server/wwwroot/index.html start.sh "${User}@${HostName}:${RemoteDir}/"
 scp -i $KeyPath -P $Port $bindOpt -o StrictHostKeyChecking=no -o BatchMode=yes -r MirageDiary.Server/wwwroot/images MirageDiary.Server/wwwroot/assets "${User}@${HostName}:${RemoteDir}/wwwroot/"
