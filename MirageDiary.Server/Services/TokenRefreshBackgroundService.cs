@@ -171,6 +171,11 @@ public class TokenRefreshBackgroundService : BackgroundService
                     double remMin = expUtc != null ? (expUtc.Value - DateTime.UtcNow).TotalMinutes : 0;
                     _logger.LogInformation($"[TokenRefreshWorker] ✅ Токены активны для пользователя {user.Id} (осталось {remMin:F1} мин).");
                 }
+                catch (DiaryMaintenanceException dex)
+                {
+                    _logger.LogWarning($"[TokenRefreshWorker] 🛡️ Gosuslugi rate limit hit for {user.Id}: {dex.Message}. Pausing 15s (tokens NOT revoked).");
+                    await Task.Delay(15000, stoppingToken);
+                }
                 catch (DiarySessionExpiredException)
                 {
                     _logger.LogInformation($"[TokenRefreshWorker] 🔄 Сессия устарела для {user.Id}. Запуск экстренного авто-продления...");

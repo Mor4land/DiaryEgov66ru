@@ -16,6 +16,13 @@ public class DiaryClient
     private readonly ITokenStore _tokenStore;
     private readonly string _userId;
 
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime Expiry, List<GosuslugiStudentInfo> Students)> _studentInfoCache = new();
+
+    public static void InvalidateStudentCache(string userId)
+    {
+        _studentInfoCache.TryRemove(userId, out _);
+    }
+
     private const string GosuslugiBaseUrl = "https://www.gosuslugi.ru/api/myschool/";
 
     public static readonly JsonSerializerOptions DatamartJsonOptions = CreateDatamartJsonOptions();
@@ -224,8 +231,13 @@ public class DiaryClient
     // GOSUSLUGI MY SCHOOL API METHODS
     // =========================================================================
 
-    public async Task<List<GosuslugiStudentInfo>> GetStudentInfoAsync()
+    public async Task<List<GosuslugiStudentInfo>> GetStudentInfoAsync(bool forceRefresh = false)
     {
+        if (!forceRefresh && _studentInfoCache.TryGetValue(_userId, out var cached) && cached.Expiry > DateTime.UtcNow)
+        {
+            return cached.Students;
+        }
+
         await EnsureAuthorizationAsync();
         
         string[] urls = new[]
@@ -295,6 +307,7 @@ public class DiaryClient
                         }
                     }
 
+                    _studentInfoCache[_userId] = (DateTime.UtcNow.AddMinutes(30), list);
                     Console.WriteLine($"[DiaryClient] ✅ Успешно получен профиль ({list.Count} чел., isParent={isParentUrl}) для user={_userId} с {url}");
                     return list;
                 }
@@ -305,6 +318,7 @@ public class DiaryClient
             }
             catch (DiarySessionExpiredException ex) 
             { 
+                InvalidateStudentCache(_userId);
                 Console.WriteLine($"[DiaryClient] ❌ DiarySessionExpiredException на {url}: {ex.Message}");
                 throw; 
             }
@@ -379,6 +393,13 @@ public class DiaryClient
 
     public async Task<List<DatamartResponseItem>> GetDatamartBatchAsync(string studentId, List<string> intervalIds, List<string> objectTypes)
     {
+        if (string.IsNullOrWhiteSpace(studentId) || !Guid.TryParse(studentId, out var parsedGuid))
+        {
+            Console.WriteLine($"[DiaryClient] ⚠️ Datamart studentId '{studentId}' is not a valid UUID. Skipping Datamart request to prevent HTTP 400.");
+            return new List<DatamartResponseItem>();
+        }
+        studentId = parsedGuid.ToString("D");
+
         await EnsureAuthorizationAsync();
         string url = GosuslugiBaseUrl + "v1/datamart";
 
@@ -453,6 +474,10 @@ public class DiaryClient
                         if (errBody.Contains("согласие", StringComparison.OrdinalIgnoreCase))
                         {
                             Console.WriteLine($"[DiaryClient] ⚠️ Datamart (Отсутствует согласие для studentId {studentId}): {errBody}");
+                            return new List<DatamartResponseItem>();
+                        }
+                        if (response.StatusCode == HttpStatusCode.BadRequest || response.StatusCode == HttpStatusCode.NotFound)
+                        {
                             return new List<DatamartResponseItem>();
                         }
                     }
@@ -567,8 +592,17 @@ public class DiaryClient
             List<string> intervals = GetIntervalsForDate(date);
 
             List<string> idsToTry = new List<string>();
-            if (!string.IsNullOrEmpty(studentId)) idsToTry.Add(studentId);
-            if (!string.IsNullOrEmpty(mdmId) && !idsToTry.Contains(mdmId)) idsToTry.Add(mdmId);
+            if (!string.IsNullOrEmpty(studentId) && Guid.TryParse(studentId, out var sGuid)) idsToTry.Add(sGuid.ToString("D"));
+            if (!string.IsNullOrEmpty(mdmId) && Guid.TryParse(mdmId, out var mGuid))
+            {
+                string mStr = mGuid.ToString("D");
+                if (!idsToTry.Contains(mStr)) idsToTry.Add(mStr);
+            }
+
+            if (idsToTry.Count == 0)
+            {
+                return new List<HomeworkItem>();
+            }
 
             var result = new List<HomeworkItem>();
 
@@ -669,6 +703,10 @@ public class DiaryClient
         {
             throw;
         }
+        catch (DiaryMaintenanceException)
+        {
+            throw;
+        }
         catch (Exception)
         {
         }
@@ -735,18 +773,27 @@ public class DiaryClient
         return result;
     }
 
-    public async Task<List<GosuslugiLessonItem>> GetScheduleAsync(string date)
+    public async Task<List<GosuslugiLessonItem>> GetScheduleAsync(string date, string? targetStudentId = null)
     {
         await EnsureAuthorizationAsync();
 
         try
         {
-            var (studentId, mdmId) = await ResolveStudentIdsAsync();
+            var (studentId, mdmId) = await ResolveStudentIdsAsync(targetStudentId);
             var intervals = GetIntervalsForDate(date);
 
             List<string> idsToTry = new List<string>();
-            if (!string.IsNullOrEmpty(studentId)) idsToTry.Add(studentId);
-            if (!string.IsNullOrEmpty(mdmId) && !idsToTry.Contains(mdmId)) idsToTry.Add(mdmId);
+            if (!string.IsNullOrEmpty(studentId) && Guid.TryParse(studentId, out var sGuid)) idsToTry.Add(sGuid.ToString("D"));
+            if (!string.IsNullOrEmpty(mdmId) && Guid.TryParse(mdmId, out var mGuid))
+            {
+                string mStr = mGuid.ToString("D");
+                if (!idsToTry.Contains(mStr)) idsToTry.Add(mStr);
+            }
+
+            if (idsToTry.Count == 0)
+            {
+                return new List<GosuslugiLessonItem>();
+            }
 
             var lessons = new List<GosuslugiLessonItem>();
 
@@ -797,6 +844,10 @@ public class DiaryClient
         {
             throw;
         }
+        catch (DiaryMaintenanceException)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             Console.WriteLine($"[DiaryClient] GetScheduleAsync Error: {ex.Message}");
@@ -804,20 +855,29 @@ public class DiaryClient
         }
     }
 
-    public async Task<List<GosuslugiMarkItem>> GetMarksAsync()
+    public async Task<List<GosuslugiMarkItem>> GetMarksAsync(string? targetStudentId = null)
     {
         await EnsureAuthorizationAsync();
 
         try
         {
-            var (studentId, mdmId) = await ResolveStudentIdsAsync();
+            var (studentId, mdmId) = await ResolveStudentIdsAsync(targetStudentId);
 
             // Query recent week intervals covering the academic quarter (next week + current + previous 10 weeks)
             var intervals = GetRecentWeekIntervals(12);
 
             List<string> idsToTry = new List<string>();
-            if (!string.IsNullOrEmpty(studentId)) idsToTry.Add(studentId);
-            if (!string.IsNullOrEmpty(mdmId) && !idsToTry.Contains(mdmId)) idsToTry.Add(mdmId);
+            if (!string.IsNullOrEmpty(studentId) && Guid.TryParse(studentId, out var sGuid)) idsToTry.Add(sGuid.ToString("D"));
+            if (!string.IsNullOrEmpty(mdmId) && Guid.TryParse(mdmId, out var mGuid))
+            {
+                string mStr = mGuid.ToString("D");
+                if (!idsToTry.Contains(mStr)) idsToTry.Add(mStr);
+            }
+
+            if (idsToTry.Count == 0)
+            {
+                return new List<GosuslugiMarkItem>();
+            }
 
             var marks = new List<GosuslugiMarkItem>();
 
@@ -858,6 +918,10 @@ public class DiaryClient
             return distinctMarks;
         }
         catch (DiarySessionExpiredException)
+        {
+            throw;
+        }
+        catch (DiaryMaintenanceException)
         {
             throw;
         }
@@ -954,6 +1018,10 @@ public class DiaryClient
         try
         {
             await GetStudentInfoAsync();
+        }
+        catch (DiaryMaintenanceException)
+        {
+            throw;
         }
         catch (Exception ex)
         {

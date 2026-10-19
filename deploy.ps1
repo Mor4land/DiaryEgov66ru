@@ -2,8 +2,9 @@ param (
     [string]$HostName = "lorian.dev",
     [int]$Port = 44,
     [string]$User = "mlowers",
-    [string]$KeyPath = "C:\Users\mlowers\key",
-    [string]$RemoteDir = "/home/mlowers/miragediary"
+    [string]$KeyPath = $(if (Test-Path "$HOME\.ssh\id_ed25519") { "$HOME\.ssh\id_ed25519" } else { "C:\Users\mlowers\key" }),
+    [string]$RemoteDir = "/home/mlowers/miragediary",
+    [string]$BindAddress = "192.168.0.108"
 )
 
 $ErrorActionPreference = "Stop"
@@ -41,8 +42,9 @@ Write-Host "Verified: Master keys and connection strings managed via environment
 # 5. SCP Files to Production VPS
 Write-Host "[5/6] Transferring release binaries and assets to VPS..." -ForegroundColor Yellow
 $publishFiles = Get-ChildItem "publish_linux" -File | ForEach-Object { $_.FullName }
-scp -i $KeyPath -P $Port -o StrictHostKeyChecking=no -o BatchMode=yes $publishFiles MirageDiary.Server/admins.json MirageDiary.Server/wwwroot/admin.html MirageDiary.Server/wwwroot/privacy.html MirageDiary.Server/wwwroot/index.html start.sh "${User}@${HostName}:${RemoteDir}/"
-scp -i $KeyPath -P $Port -o StrictHostKeyChecking=no -o BatchMode=yes -r MirageDiary.Server/wwwroot/images MirageDiary.Server/wwwroot/assets "${User}@${HostName}:${RemoteDir}/wwwroot/"
+$bindOpt = if (![string]::IsNullOrEmpty($BindAddress)) { "-o BindAddress=$BindAddress" } else { "" }
+scp -i $KeyPath -P $Port $bindOpt -o StrictHostKeyChecking=no -o BatchMode=yes $publishFiles MirageDiary.Server/admins.json MirageDiary.Server/wwwroot/admin.html MirageDiary.Server/wwwroot/privacy.html MirageDiary.Server/wwwroot/index.html start.sh "${User}@${HostName}:${RemoteDir}/"
+scp -i $KeyPath -P $Port $bindOpt -o StrictHostKeyChecking=no -o BatchMode=yes -r MirageDiary.Server/wwwroot/images MirageDiary.Server/wwwroot/assets "${User}@${HostName}:${RemoteDir}/wwwroot/"
 
 if ($LASTEXITCODE -ne 0) {
     Write-Error "SCP file transfer failed!"
@@ -51,12 +53,12 @@ if ($LASTEXITCODE -ne 0) {
 
 # Ensure wwwroot updated on remote
 $remoteScript = "cp ${RemoteDir}/admin.html ${RemoteDir}/wwwroot/admin.html ; cp ${RemoteDir}/privacy.html ${RemoteDir}/wwwroot/privacy.html ; cp ${RemoteDir}/index.html ${RemoteDir}/wwwroot/index.html ; chmod +x ${RemoteDir}/start.sh ; chmod 600 ${RemoteDir}/miragediary.db ${RemoteDir}/token_master.key ${RemoteDir}/appsettings.json 2>/dev/null"
-ssh -i $KeyPath -p $Port -o StrictHostKeyChecking=no -o BatchMode=yes "${User}@${HostName}" $remoteScript
+ssh -i $KeyPath -p $Port $bindOpt -o StrictHostKeyChecking=no -o BatchMode=yes "${User}@${HostName}" $remoteScript
 
 # 6. Restart Server Supervisor and Healthcheck
 Write-Host "[6/6] Restarting server supervisor and waiting for socket binding..." -ForegroundColor Yellow
 $probeCmd = "/home/mlowers/miragediary/start.sh && for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do if curl -s -I http://127.0.0.1:5000/privacy | grep -q '200'; then echo 'Application socket is LIVE'; exit 0; fi; sleep 1; done; echo 'Timeout waiting for service'; exit 1"
-ssh -i $KeyPath -p $Port -o StrictHostKeyChecking=no -o BatchMode=yes "${User}@${HostName}" "$probeCmd"
+ssh -i $KeyPath -p $Port $bindOpt -o StrictHostKeyChecking=no -o BatchMode=yes "${User}@${HostName}" "$probeCmd"
 
 Write-Host "==========================================================" -ForegroundColor Cyan
 Write-Host "RELEASE DEPLOYMENT COMPLETE!" -ForegroundColor Green

@@ -192,14 +192,22 @@ public class GradeWatcherWorker : BackgroundService
                 var diaryClient = new DiaryClient(client, tokenStore, user.Id);
 
                 // Получаем актуальные оценки за текущую четверть
-                var marks = await diaryClient.GetMarksAsync();
+                string preferredStudentId = !string.IsNullOrEmpty(user.SelectedStudentId)
+                    ? user.SelectedStudentId
+                    : (!string.IsNullOrEmpty(tokenData.StudentId) ? tokenData.StudentId : user.StudentId);
+
+                var marks = await diaryClient.GetMarksAsync(preferredStudentId);
                 if (marks == null || marks.Count == 0)
+                {
+                    _logger.LogDebug($"[GradeWatcher] ℹ️ Оценки для user={user.Id} не получены (0 шт.). Пропуск цикла.");
+                    await Task.Delay(1500, stoppingToken);
                     continue;
+                }
 
                 // Синхронизируем с кэшем БД:
                 // 1) Личный срез пользователя (marks_db:{user.Id}_{studentId}) для расчета диффов без интерференции между родителем и учеником
                 // 2) Общий срез студента (marks_db:{studentId}) для мгновенной загрузки дневника при открытии бота
-                string studentId = !string.IsNullOrEmpty(tokenData.StudentId) ? tokenData.StudentId : user.Id;
+                string studentId = !string.IsNullOrEmpty(preferredStudentId) ? preferredStudentId : user.Id;
                 string userDbCacheKey = $"marks_db:{user.Id}_{studentId}";
                 string sharedDbCacheKey = $"marks_db:{studentId}";
 
@@ -601,10 +609,20 @@ public class GradeWatcherWorker : BackgroundService
                     user.LastMarksHash = currentHash;
                     await db.SaveChangesAsync(stoppingToken);
                 }
+                else
+                {
+                    // Хэш не изменился — новых оценок нет, но сохраняем актуализированный UpdatedAt в кэше
+                    await db.SaveChangesAsync(stoppingToken);
+                }
             }
             catch (DiarySessionExpiredException)
             {
                 // Сессия устарела, воркер рефреша подхватит её отдельно
+            }
+            catch (DiaryMaintenanceException mex)
+            {
+                _logger.LogWarning($"[GradeWatcher] 🛡️ Gosuslugi rate limit hit for {user.Id}: {mex.Message}. Pausing worker loop for 15s.");
+                await Task.Delay(15000, stoppingToken);
             }
             catch (Exception ex)
             {

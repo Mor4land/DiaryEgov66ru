@@ -629,23 +629,20 @@ public class DiaryInteractionService
 
         // 1. Быстрая загрузка из постоянного кэша БД (сначала личный кэш пользователя, затем общий)
         bool isDbCacheFresh = false;
-        if (!forceRefresh)
+        var dbEntry = await dbContext.Cache.FirstOrDefaultAsync(c => c.CacheKey == userDbCacheKey)
+                   ?? await dbContext.Cache.FirstOrDefaultAsync(c => c.CacheKey == sharedDbCacheKey);
+        if (dbEntry != null && !string.IsNullOrEmpty(dbEntry.JsonData))
         {
-            var dbEntry = await dbContext.Cache.FirstOrDefaultAsync(c => c.CacheKey == userDbCacheKey)
-                       ?? await dbContext.Cache.FirstOrDefaultAsync(c => c.CacheKey == sharedDbCacheKey);
-            if (dbEntry != null && !string.IsNullOrEmpty(dbEntry.JsonData))
+            try
             {
-                try
+                allMarks = JsonSerializer.Deserialize<List<GosuslugiMarkItem>>(dbEntry.JsonData, DiaryClient.DatamartJsonOptions);
+                // Считаем кэш свежим, если он обновлялся менее 5 минут назад
+                if (!forceRefresh && allMarks != null && allMarks.Count > 0 && (DateTime.UtcNow - dbEntry.UpdatedAt).TotalMinutes < 5)
                 {
-                    allMarks = JsonSerializer.Deserialize<List<GosuslugiMarkItem>>(dbEntry.JsonData, DiaryClient.DatamartJsonOptions);
-                    // Считаем кэш свежим, если он обновлялся менее 5 минут назад
-                    if (allMarks != null && allMarks.Count > 0 && (DateTime.UtcNow - dbEntry.UpdatedAt).TotalMinutes < 5)
-                    {
-                        isDbCacheFresh = true;
-                    }
+                    isDbCacheFresh = true;
                 }
-                catch { }
             }
+            catch { }
         }
 
         // 2. Если в БД нет данных, кэш старше 5 минут или запрошено принудительное обновление — идем в API Госуслуг
@@ -657,8 +654,8 @@ public class DiaryInteractionService
 
             try
             {
-                var apiMarks = await clientWithUser.GetMarksAsync();
-                if (apiMarks != null)
+                var apiMarks = await clientWithUser.GetMarksAsync(effectiveStudentId);
+                if (apiMarks != null && apiMarks.Count > 0)
                 {
                     // Загружаем предыдущие оценки из БД для слияния (чтобы прошлые четверти не терялись при смещении 12-недельного окна)
                     var existingDb = await dbContext.Cache.FirstOrDefaultAsync(c => c.CacheKey == userDbCacheKey)
@@ -717,6 +714,14 @@ public class DiaryInteractionService
             catch (DiarySessionExpiredException)
             {
                 // Если есть сохраненные оценки в кэше БД — продолжаем работу на их основе, не выбрасывая ошибку
+                if (allMarks == null || allMarks.Count == 0)
+                {
+                    throw;
+                }
+            }
+            catch (DiaryMaintenanceException mex)
+            {
+                Console.WriteLine($"[DiaryInteractionService] 🛡️ Госуслуги временно ограничили частоту: {mex.Message}. Используем кэш БД.");
                 if (allMarks == null || allMarks.Count == 0)
                 {
                     throw;
