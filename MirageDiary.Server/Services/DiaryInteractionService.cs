@@ -591,6 +591,22 @@ public class DiaryInteractionService
         return 0;
     }
 
+    public static int GetMarkQuarter(GosuslugiMarkItem? mark)
+    {
+        if (mark == null) return 0;
+
+        if (!string.IsNullOrWhiteSpace(mark.PeriodId))
+        {
+            string p = mark.PeriodId;
+            if (p.Contains("IV четверть", StringComparison.OrdinalIgnoreCase) || p.Contains("-4-") || p.Contains("4 четверть", StringComparison.OrdinalIgnoreCase)) return 4;
+            if (p.Contains("III четверть", StringComparison.OrdinalIgnoreCase) || p.Contains("-3-") || p.Contains("3 четверть", StringComparison.OrdinalIgnoreCase)) return 3;
+            if (p.Contains("II четверть", StringComparison.OrdinalIgnoreCase) || p.Contains("-2-") || p.Contains("2 четверть", StringComparison.OrdinalIgnoreCase)) return 2;
+            if (p.Contains("I четверть", StringComparison.OrdinalIgnoreCase) || p.Contains("-1-") || p.Contains("1 четверть", StringComparison.OrdinalIgnoreCase)) return 1;
+        }
+
+        return GetMarkQuarter(mark.Date);
+    }
+
     public async Task<List<SubjectGradeSummary>> GetSubjectGradesSummaryAsync(string userId, int? quarter = null, bool forceRefresh = false)
     {
         int currentQ = GetCurrentQuarter();
@@ -697,15 +713,33 @@ public class DiaryInteractionService
                         dbContext.Cache.Add(new CachedData { CacheKey = userDbCacheKey, JsonData = json, UpdatedAt = DateTime.UtcNow });
                     }
 
+                    var existingShared = new List<GosuslugiMarkItem>();
                     var sharedDbEntry = await dbContext.Cache.FirstOrDefaultAsync(c => c.CacheKey == sharedDbCacheKey);
+                    if (sharedDbEntry != null && !string.IsNullOrEmpty(sharedDbEntry.JsonData))
+                    {
+                        try
+                        {
+                            existingShared = JsonSerializer.Deserialize<List<GosuslugiMarkItem>>(sharedDbEntry.JsonData, DiaryClient.DatamartJsonOptions) ?? new();
+                        }
+                        catch { }
+                    }
+
+                    var sharedMap = existingShared.GroupBy(GradeWatcherWorker.GetMarkKey).ToDictionary(g => g.Key, g => g.First());
+                    foreach (var m in allMarks)
+                    {
+                        sharedMap[GradeWatcherWorker.GetMarkKey(m)] = m;
+                    }
+                    var mergedShared = sharedMap.Values.OrderByDescending(m => m.Date).ToList();
+                    string sharedJson = JsonSerializer.Serialize(mergedShared, DiaryClient.DatamartJsonOptions);
+
                     if (sharedDbEntry != null)
                     {
-                        sharedDbEntry.JsonData = json;
+                        sharedDbEntry.JsonData = sharedJson;
                         sharedDbEntry.UpdatedAt = DateTime.UtcNow;
                     }
                     else
                     {
-                        dbContext.Cache.Add(new CachedData { CacheKey = sharedDbCacheKey, JsonData = json, UpdatedAt = DateTime.UtcNow });
+                        dbContext.Cache.Add(new CachedData { CacheKey = sharedDbCacheKey, JsonData = sharedJson, UpdatedAt = DateTime.UtcNow });
                     }
 
                     await dbContext.SaveChangesAsync();
@@ -737,11 +771,11 @@ public class DiaryInteractionService
 
         // 3. Фильтрация по четвертям (если targetQ == 0, показываем за весь учебный год)
         var marksForQuarter = (targetQ > 0)
-            ? allMarks.Where(m => GetMarkQuarter(m.Date) == targetQ).ToList()
+            ? allMarks.Where(m => GetMarkQuarter(m) == targetQ).ToList()
             : allMarks;
 
-        // Если в текущей четверти еще нет оценок, но в журнале есть оценки за другие периоды или без точной даты — используем allMarks
-        if (marksForQuarter.Count == 0 && allMarks.Count > 0)
+        // Если в текущей четверти еще нет оценок, но даты в дневнике отсутствуют или не распознаны — используем allMarks только для текущей четверти
+        if (targetQ == currentQ && marksForQuarter.Count == 0 && allMarks.Count > 0 && allMarks.All(m => GetMarkQuarter(m) == 0))
         {
             marksForQuarter = allMarks;
         }
@@ -885,9 +919,10 @@ public class DiaryInteractionService
                     string safeSubject = TelegramMarkdownEscaper.Escape(s.SubjectName);
                     sb.AppendLine($"{s.StatusEmoji} *{safeSubject}* — `{gpaStr}`{forecastStr}");
 
-                    // List marks
+                    // List marks in chronological order (oldest to newest, left-to-right)
                     var markStrings = s.Marks
                         .Where(m => !string.IsNullOrEmpty(m.Value))
+                        .OrderBy(m => m.Date)
                         .Select(m =>
                         {
                             int w = (m.Weight.HasValue && m.Weight.Value > 1) ? m.Weight.Value : 1;

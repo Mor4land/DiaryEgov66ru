@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -278,6 +279,72 @@ public class QuarterAndParentTests : IDisposable
         Assert.Equal("child_2", updated.SelectedStudentId);
         Assert.Equal("child_2", updated.StudentId);
         Assert.Equal("child_2:initial", updated.LastMarksHash);
+    }
+
+    [Theory]
+    [InlineData("660708-2026/2027-1-101-I четверть", "2026-11-02", 1)]
+    [InlineData("660708-2026/2027-2-101-II четверть", "2026-10-30", 2)]
+    [InlineData("660708-2026/2027-3-101-III четверть", "2026-12-20", 3)]
+    [InlineData("660708-2026/2027-4-101-IV четверть", "2027-03-20", 4)]
+    [InlineData(null, "2026-09-15", 1)]
+    [InlineData(null, "2026-11-15", 2)]
+    public void GetMarkQuarter_WithPeriodId_PrefersPeriodIdOverDate(string? periodId, string dateStr, int expectedQ)
+    {
+        var mark = new GosuslugiMarkItem
+        {
+            PeriodId = periodId ?? "",
+            Date = dateStr,
+            Value = "5"
+        };
+        int q = DiaryInteractionService.GetMarkQuarter(mark);
+        Assert.Equal(expectedQ, q);
+    }
+
+    [Fact]
+    public async Task GetSubjectGradesSummaryAsync_TargetQuarterEmpty_DoesNotDumpQuarter1MarksIntoQuarter2()
+    {
+        string userId = "test_quarter_filter_user";
+        string studentId = "student_q_filter_1";
+        var enc = _sp.GetRequiredService<ITokenEncryptionService>();
+        var user = new UserEntity
+        {
+            Id = userId,
+            StudentId = studentId,
+            AccessToken = enc.Encrypt("mock_access_token_123"),
+            Role = "Student",
+            HasAcceptedPrivacyPolicy = true
+        };
+        _db.Users.Add(user);
+
+        // Prepopulate Cache with only Q1 marks (September)
+        var q1Marks = new List<GosuslugiMarkItem>
+        {
+            new() { Id = "m1", SubjectName = "Алгебра", Date = "2026-09-15", Value = "5", Weight = 1, PeriodId = "I четверть" },
+            new() { Id = "m2", SubjectName = "Геометрия", Date = "2026-09-20", Value = "4", Weight = 1, PeriodId = "I четверть" }
+        };
+        _db.Cache.Add(new CachedData
+        {
+            CacheKey = $"marks_db:{userId}_{studentId}",
+            JsonData = JsonSerializer.Serialize(q1Marks, DiaryClient.DatamartJsonOptions),
+            UpdatedAt = DateTime.UtcNow
+        });
+        await _db.SaveChangesAsync();
+
+        var diaryService = _sp.GetRequiredService<DiaryInteractionService>();
+
+        // 1. Query Quarter 1 -> Should return 2 subjects
+        var q1Summary = await diaryService.GetSubjectGradesSummaryAsync(userId, quarter: 1, forceRefresh: false);
+        Assert.Equal(2, q1Summary.Count);
+        Assert.Contains(q1Summary, s => s.SubjectName == "Алгебра" && s.AverageGpa == 5.0);
+
+        // 2. Query Quarter 2 -> Must be empty! NOT contain Q1 marks
+        var q2Summary = await diaryService.GetSubjectGradesSummaryAsync(userId, quarter: 2, forceRefresh: false);
+        Assert.Empty(q2Summary);
+
+        // 3. Render marks string for Q2 -> must report no marks
+        var q2String = await diaryService.GetMarksStringAsync(userId, quarter: 2, forceRefresh: false);
+        Assert.Contains("2-ю четверть пока нет", q2String);
+        Assert.DoesNotContain("Алгебра", q2String);
     }
 
     [Fact]

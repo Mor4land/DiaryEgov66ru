@@ -229,12 +229,12 @@ public class GradeWatcherWorker : BackgroundService
 
                 bool isInitialSync = previousMarks == null || previousMarks.Count == 0;
 
-                // Для планового фонового опроса запрашиваем только окно текущей/прошлой недели (2 недели назад + 1 вперед = 4 интервала).
-                // Полный срез за всю четверть (12+5 = 17 интервалов) запрашивается только при первом запуске или ручном открытии в UI.
+                // Запрашиваем полный срез четверти (12 недель назад + 2 вперед = 14 интервалов в 1 пакете Datamart),
+                // чтобы исключить пропуски оценок при перезапусках, продлении сессий или выставлении оценок задним числом.
                 var fetchedMarks = await diaryClient.GetMarksAsync(
                     preferredStudentId,
-                    pastWeeks: isInitialSync ? 12 : 2,
-                    futureWeeks: isInitialSync ? 5 : 1);
+                    pastWeeks: 12,
+                    futureWeeks: 2);
 
                 if (isInitialSync && (fetchedMarks == null || fetchedMarks.Count == 0))
                 {
@@ -243,27 +243,19 @@ public class GradeWatcherWorker : BackgroundService
                     continue;
                 }
 
-                List<GosuslugiMarkItem> marks;
-                if (isInitialSync)
-                {
-                    marks = fetchedMarks ?? new List<GosuslugiMarkItem>();
-                }
-                else
-                {
-                    // Бесшовно объединяем свежие оценки с сохраненным срезом четверти
-                    var marksMap = (previousMarks ?? new List<GosuslugiMarkItem>())
-                        .GroupBy(GetMarkKey)
-                        .ToDictionary(g => g.Key, g => g.First());
+                // Бесшовно объединяем свежие оценки с сохраненным срезом четверти
+                var marksMap = (previousMarks ?? new List<GosuslugiMarkItem>())
+                    .GroupBy(GetMarkKey)
+                    .ToDictionary(g => g.Key, g => g.First());
 
-                    if (fetchedMarks != null)
+                if (fetchedMarks != null && fetchedMarks.Count > 0)
+                {
+                    foreach (var fresh in fetchedMarks)
                     {
-                        foreach (var fresh in fetchedMarks)
-                        {
-                            marksMap[GetMarkKey(fresh)] = fresh;
-                        }
+                        marksMap[GetMarkKey(fresh)] = fresh;
                     }
-                    marks = marksMap.Values.OrderByDescending(m => m.Date).ToList();
                 }
+                var marks = marksMap.Values.OrderByDescending(m => m.Date).ToList();
 
                 string marksJson = JsonSerializer.Serialize(marks, DiaryClient.DatamartJsonOptions);
 
@@ -278,15 +270,37 @@ public class GradeWatcherWorker : BackgroundService
                     db.Cache.Add(new CachedData { CacheKey = userDbCacheKey, JsonData = marksJson, UpdatedAt = DateTime.UtcNow });
                 }
 
-                // Актуализируем общий срез студента для быстрого открытия меню в боте
+                // Актуализируем общий срез студента: объединяем с существующим общим кэшем, чтобы не затереть срез другого родителя/ученика
+                var existingShared = new List<GosuslugiMarkItem>();
+                if (sharedDbEntry != null && !string.IsNullOrEmpty(sharedDbEntry.JsonData))
+                {
+                    try
+                    {
+                        existingShared = JsonSerializer.Deserialize<List<GosuslugiMarkItem>>(sharedDbEntry.JsonData, DiaryClient.DatamartJsonOptions) ?? new();
+                    }
+                    catch { }
+                }
+
+                var sharedMap = existingShared
+                    .GroupBy(GetMarkKey)
+                    .ToDictionary(g => g.Key, g => g.First());
+
+                foreach (var m in marks)
+                {
+                    sharedMap[GetMarkKey(m)] = m;
+                }
+
+                var mergedShared = sharedMap.Values.OrderByDescending(m => m.Date).ToList();
+                string sharedMarksJson = JsonSerializer.Serialize(mergedShared, DiaryClient.DatamartJsonOptions);
+
                 if (sharedDbEntry != null)
                 {
-                    sharedDbEntry.JsonData = marksJson;
+                    sharedDbEntry.JsonData = sharedMarksJson;
                     sharedDbEntry.UpdatedAt = DateTime.UtcNow;
                 }
                 else
                 {
-                    db.Cache.Add(new CachedData { CacheKey = sharedDbCacheKey, JsonData = marksJson, UpdatedAt = DateTime.UtcNow });
+                    db.Cache.Add(new CachedData { CacheKey = sharedDbCacheKey, JsonData = sharedMarksJson, UpdatedAt = DateTime.UtcNow });
                 }
 
                 var memCache = userScope.ServiceProvider.GetService<IMemoryCache>();
@@ -457,7 +471,7 @@ public class GradeWatcherWorker : BackgroundService
 
                             // Определяем целевую четверть для данного предмета (если оценка выставлена на ноябрь / следующую четверть)
                             int targetQuarter = group
-                                .Select(x => DiaryInteractionService.GetMarkQuarter(x.Date))
+                                .Select(x => DiaryInteractionService.GetMarkQuarter(x))
                                 .FirstOrDefault(q => q > 0);
                             if (targetQuarter == 0) targetQuarter = currentQuarter;
 
@@ -475,7 +489,7 @@ public class GradeWatcherWorker : BackgroundService
                                     reason = $" ({commentStr})";
 
                                 string weight = (m.Weight.HasValue && m.Weight.Value > 1) ? $" [вес: {m.Weight.Value}]" : "";
-                                int markQuarter = DiaryInteractionService.GetMarkQuarter(m.Date);
+                                int markQuarter = DiaryInteractionService.GetMarkQuarter(m);
                                 string quarterSuffix = (markQuarter > 0 && markQuarter != currentQuarter) ? $" [{markQuarter}-я четверть]" : "";
                                 string dateStr = !string.IsNullOrEmpty(m.Date) ? $" • {TelegramMarkdownEscaper.Escape(m.Date)}{TelegramMarkdownEscaper.Escape(quarterSuffix)}" : "";
 
@@ -483,8 +497,8 @@ public class GradeWatcherWorker : BackgroundService
                             }
 
                             // Динамика среднего балла и прогноз рассчитываются строго в рамках четверти полученных оценок
-                            var prevQuarterMarks = previousMarks?.Where(x => DiaryInteractionService.GetMarkQuarter(x.Date) == targetQuarter);
-                            var currQuarterMarks = marks.Where(x => DiaryInteractionService.GetMarkQuarter(x.Date) == targetQuarter);
+                            var prevQuarterMarks = previousMarks?.Where(x => DiaryInteractionService.GetMarkQuarter(x) == targetQuarter);
+                            var currQuarterMarks = marks.Where(x => DiaryInteractionService.GetMarkQuarter(x) == targetQuarter);
 
                             var subjDynamics = GradeCalculator.ComputeSubjectDynamics(prevQuarterMarks, currQuarterMarks, subjectName);
                             string? qLabel = (targetQuarter != currentQuarter) ? $"{targetQuarter}-я четв." : null;
@@ -510,8 +524,8 @@ public class GradeWatcherWorker : BackgroundService
                         }
 
                         // Динамика общего среднего балла по текущей четверти
-                        var prevOverallMarks = previousMarks?.Where(x => DiaryInteractionService.GetMarkQuarter(x.Date) == currentQuarter);
-                        var currOverallMarks = marks.Where(x => DiaryInteractionService.GetMarkQuarter(x.Date) == currentQuarter);
+                        var prevOverallMarks = previousMarks?.Where(x => DiaryInteractionService.GetMarkQuarter(x) == currentQuarter);
+                        var currOverallMarks = marks.Where(x => DiaryInteractionService.GetMarkQuarter(x) == currentQuarter);
                         var overallDynamics = GradeCalculator.ComputeOverallDynamics(prevOverallMarks, currOverallMarks);
                         string overallLine = overallDynamics.FormatOverallGpaLine();
                         if (!string.IsNullOrEmpty(overallLine))

@@ -301,9 +301,18 @@ public class DiaryClient
 
                 if (list != null && list.Count > 0)
                 {
+                    using (var doc = JsonDocument.Parse(json))
+                    {
+                        foreach (var elem in doc.RootElement.EnumerateArray())
+                        {
+                            var props = elem.EnumerateObject().Select(p => $"{p.Name}={(p.Name.Contains("name", StringComparison.OrdinalIgnoreCase) || p.Name.Contains("birth", StringComparison.OrdinalIgnoreCase) ? "***" : p.Value.ToString())}");
+                            Console.WriteLine($"[DiaryClient] 👤 Full profile for user={_userId}: {string.Join(", ", props)}");
+                        }
+                    }
                     bool isParentUrl = url.Contains("role=parent", StringComparison.OrdinalIgnoreCase);
                     foreach (var item in list)
                     {
+                        Console.WriteLine($"[DiaryClient] 👤 Parsed profile item for user={_userId}: sid={item.StudentId}, mdmId={item.MdmId}, oid={item.StudentOid}, region={item.StudentRegion}, regActive={item.StudentRegionActive}, trusted={item.Trusted}, permMark={item.PermissionMark}");
                         if (isParentUrl || item.KidId != null)
                         {
                             item.IsParentChild = true;
@@ -504,6 +513,11 @@ public class DiaryClient
                 // If we have data or if the status is not pending (e.g. ready/snapshot or empty dataset), return immediately.
                 if (hasData || !isPending)
                 {
+                    if (!hasData)
+                    {
+                        string details = string.Join(", ", parsed.Select(p => $"{p.IntervalId}:{p.DataStatus}:c={p.Data?.Count ?? 0}"));
+                        Console.WriteLine($"[DiaryClient] ⚠️ Datamart hasData=false for user={_userId}, sid={studentId}, items={parsed.Count}. Details: {details}");
+                    }
                     return parsed;
                 }
 
@@ -880,6 +894,8 @@ public class DiaryClient
                 if (!idsToTry.Contains(mStr)) idsToTry.Add(mStr);
             }
 
+            Console.WriteLine($"[DiaryClient] 🔍 GetMarksAsync for user={_userId}: targetStudentId={targetStudentId}, resolved studentId={studentId}, mdmId={mdmId}, idsToTry=[{string.Join(',', idsToTry)}]");
+
             if (idsToTry.Count == 0)
             {
                 return new List<GosuslugiMarkItem>();
@@ -890,6 +906,8 @@ public class DiaryClient
             foreach (var sid in idsToTry)
             {
                 var datamart = await GetDatamartBatchAsync(sid, intervals, new List<string> { "student_marks" });
+                string firstStatus = datamart.Count > 0 ? $"{datamart[0].DataStatus} (hash={datamart[0].Hash})" : "empty";
+                Console.WriteLine($"[DiaryClient] Datamart response for user={_userId}, sid={sid}: datamart items={datamart.Count}, status0={firstStatus}, marks in data={datamart.Where(i => i.ObjType == "student_marks" && i.Data != null).Sum(i => i.Data!.Count)} | {string.Join(", ", datamart.Select(d => $"{d.IntervalId}:{d.DataStatus}:c={d.Data?.Count ?? 0}"))}");
                 foreach (var item in datamart)
                 {
                     if (item.ObjType == "student_marks" && item.Data != null)
@@ -920,6 +938,8 @@ public class DiaryClient
                 .Select(g => g.First())
                 .OrderByDescending(m => m.Date)
                 .ToList();
+
+            Console.WriteLine($"[DiaryClient] 📊 Marks for user={_userId}: fetched {distinctMarks.Count} distinct marks ({marks.Count} raw) across {intervals.Count} intervals.");
 
             return distinctMarks;
         }
