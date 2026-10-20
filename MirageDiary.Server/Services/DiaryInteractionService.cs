@@ -963,6 +963,27 @@ public class DiaryInteractionService
             }
 
             string qText = (targetQ > 0) ? $"{targetQ}-ю четверть" : "выбранный период";
+
+            // Если оценок нет, проверяем: возможно, школа не привязала СНИЛС к региональному ЭЖД (mdmId отсутствует)
+            try
+            {
+                using var scope = _serviceProvider.CreateScope();
+                var tokenStore = scope.ServiceProvider.GetRequiredService<ITokenStore>();
+                var httpClientFactory = scope.ServiceProvider.GetRequiredService<System.Net.Http.IHttpClientFactory>();
+                var client = httpClientFactory.CreateClient("diary-proxy");
+                var clientWithUser = new DiaryClient(client, tokenStore, userId);
+                var (sId, mdmId) = await clientWithUser.ResolveStudentIdsAsync(effectiveStudentId);
+
+                if (string.IsNullOrEmpty(mdmId))
+                {
+                    return $"📊 *Оценок за {qText} пока нет*\n\n" +
+                           $"⚠️ *ЭЖД отсутствует в Госуслугах*\n" +
+                           $"В вашей учетной записи Госуслуг отсутствует привязка к региональному электронному журналу (ЭЖД).\n\n" +
+                           $"💡 *Что делать:* обратитесь к классному руководителю или школьному администратору с просьбой привязать ваш СНИЛС к школьному журналу. Как только школа внесет данные, оценки начнут отображаться автоматически.";
+                }
+            }
+            catch { }
+
             return $"📊 Оценок в дневнике Госуслуг за {qText} пока нет.";
         }
         catch (DiarySessionExpiredException ex)
