@@ -189,20 +189,11 @@ public class GradeWatcherWorker : BackgroundService
                     continue;
 
                 var client = httpFactory.CreateClient("diary-proxy");
-                var diaryClient = new DiaryClient(client, tokenStore, user.Id);
+                var diaryClient = new DiaryClient(client, tokenStore, user.Id, isBackground: true);
 
-                // Получаем актуальные оценки за текущую четверть
                 string preferredStudentId = !string.IsNullOrEmpty(user.SelectedStudentId)
                     ? user.SelectedStudentId
                     : (!string.IsNullOrEmpty(tokenData.StudentId) ? tokenData.StudentId : user.StudentId);
-
-                var marks = await diaryClient.GetMarksAsync(preferredStudentId);
-                if (marks == null || marks.Count == 0)
-                {
-                    _logger.LogDebug($"[GradeWatcher] ℹ️ Оценки для user={user.Id} не получены (0 шт.). Пропуск цикла.");
-                    await Task.Delay(1500, stoppingToken);
-                    continue;
-                }
 
                 // Синхронизируем с кэшем БД:
                 // 1) Личный срез пользователя (marks_db:{user.Id}_{studentId}) для расчета диффов без интерференции между родителем и учеником
@@ -234,6 +225,44 @@ public class GradeWatcherWorker : BackgroundService
                         previousMarks = JsonSerializer.Deserialize<List<GosuslugiMarkItem>>(sharedDbEntry.JsonData, DiaryClient.DatamartJsonOptions);
                     }
                     catch { }
+                }
+
+                bool isInitialSync = previousMarks == null || previousMarks.Count == 0;
+
+                // Для планового фонового опроса запрашиваем только окно текущей/прошлой недели (2 недели назад + 1 вперед = 4 интервала).
+                // Полный срез за всю четверть (12+5 = 17 интервалов) запрашивается только при первом запуске или ручном открытии в UI.
+                var fetchedMarks = await diaryClient.GetMarksAsync(
+                    preferredStudentId,
+                    pastWeeks: isInitialSync ? 12 : 2,
+                    futureWeeks: isInitialSync ? 5 : 1);
+
+                if (isInitialSync && (fetchedMarks == null || fetchedMarks.Count == 0))
+                {
+                    _logger.LogDebug($"[GradeWatcher] ℹ️ Оценки для user={user.Id} не получены (0 шт.). Пропуск цикла.");
+                    await Task.Delay(1500, stoppingToken);
+                    continue;
+                }
+
+                List<GosuslugiMarkItem> marks;
+                if (isInitialSync)
+                {
+                    marks = fetchedMarks ?? new List<GosuslugiMarkItem>();
+                }
+                else
+                {
+                    // Бесшовно объединяем свежие оценки с сохраненным срезом четверти
+                    var marksMap = (previousMarks ?? new List<GosuslugiMarkItem>())
+                        .GroupBy(GetMarkKey)
+                        .ToDictionary(g => g.Key, g => g.First());
+
+                    if (fetchedMarks != null)
+                    {
+                        foreach (var fresh in fetchedMarks)
+                        {
+                            marksMap[GetMarkKey(fresh)] = fresh;
+                        }
+                    }
+                    marks = marksMap.Values.OrderByDescending(m => m.Date).ToList();
                 }
 
                 string marksJson = JsonSerializer.Serialize(marks, DiaryClient.DatamartJsonOptions);
@@ -656,8 +685,8 @@ public class GradeWatcherWorker : BackgroundService
             }
             catch (DiaryMaintenanceException mex)
             {
-                _logger.LogWarning($"[GradeWatcher] 🛡️ Gosuslugi rate limit hit for {user.Id}: {mex.Message}. Pausing worker loop for 15s.");
-                await Task.Delay(15000, stoppingToken);
+                _logger.LogWarning($"[GradeWatcher] 🛡️ Gosuslugi rate limit hit for {user.Id}: {mex.Message}. Pausing worker loop for 30s.");
+                await Task.Delay(30000, stoppingToken);
             }
             catch (Exception ex)
             {

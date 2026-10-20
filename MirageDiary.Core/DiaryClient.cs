@@ -40,11 +40,14 @@ public class DiaryClient
         return options;
     }
 
-    public DiaryClient(HttpClient client, ITokenStore tokenStore, string userId)
+    public bool IsBackground { get; set; } = false;
+
+    public DiaryClient(HttpClient client, ITokenStore tokenStore, string userId, bool isBackground = false)
     {
         _client = client;
         _tokenStore = tokenStore;
         _userId = userId;
+        IsBackground = isBackground;
     }
 
     public static DateTime? GetTokenExpirationUtc(string rawToken)
@@ -252,7 +255,7 @@ public class DiaryClient
 
         foreach (var url in urls)
         {
-            await AcquireGosuslugiRateLimitAsync();
+            await AcquireGosuslugiRateLimitAsync(IsBackground);
             try
             {
                 Console.WriteLine($"[DiaryClient] 🔍 Запрос профиля у Госуслуг: GET {url} (user={_userId})");
@@ -333,7 +336,7 @@ public class DiaryClient
             }
             finally
             {
-                ReleaseGosuslugiRateLimit();
+                ReleaseGosuslugiRateLimit(IsBackground);
             }
         }
 
@@ -345,7 +348,7 @@ public class DiaryClient
                 Console.WriteLine($"[DiaryClient] 🔄 Повторный запрос профиля после успешного продления сессии для user={_userId}...");
                 foreach (var url in urls)
                 {
-                    await AcquireGosuslugiRateLimitAsync();
+                    await AcquireGosuslugiRateLimitAsync(IsBackground);
                     try
                     {
                         var response = await _client.GetAsync(url);
@@ -374,7 +377,7 @@ public class DiaryClient
                     catch { }
                     finally
                     {
-                        ReleaseGosuslugiRateLimit();
+                        ReleaseGosuslugiRateLimit(IsBackground);
                     }
                 }
             }
@@ -424,7 +427,7 @@ public class DiaryClient
 
         for (int retry = 0; retry < 4; retry++)
         {
-            await AcquireGosuslugiRateLimitAsync();
+            await AcquireGosuslugiRateLimitAsync(IsBackground);
             try
             {
                 using var req = new HttpRequestMessage(HttpMethod.Post, url)
@@ -515,7 +518,7 @@ public class DiaryClient
             }
             finally
             {
-                ReleaseGosuslugiRateLimit();
+                ReleaseGosuslugiRateLimit(IsBackground);
             }
         }
 
@@ -800,10 +803,12 @@ public class DiaryClient
             foreach (var sid in idsToTry)
             {
                 var datamart = await GetDatamartBatchAsync(sid, intervals, new List<string> { "student_lessons" });
+                Console.WriteLine($"[DiaryClient] GetScheduleAsync: targetDate={date}, sid={sid}, intervals=[{string.Join(',', intervals)}], datamart items={datamart.Count}");
                 foreach (var item in datamart)
                 {
                     if (item.ObjType == "student_lessons" && item.Data != null)
                     {
+                        Console.WriteLine($"[DiaryClient] Datamart student_lessons count={item.Data.Count}");
                         foreach (var elem in item.Data)
                         {
                             try
@@ -811,6 +816,7 @@ public class DiaryClient
                                 var lesson = JsonSerializer.Deserialize<GosuslugiLessonItem>(elem.GetRawText(), DatamartJsonOptions);
                                 if (lesson != null)
                                 {
+                                    string lDate = !string.IsNullOrEmpty(lesson.Date) ? lesson.Date : (!string.IsNullOrEmpty(lesson.StartDatetime) ? lesson.StartDatetime[..Math.Min(10, lesson.StartDatetime.Length)] : "");
                                     bool matchesDate = (!string.IsNullOrEmpty(lesson.Date) && lesson.Date.Equals(date, StringComparison.OrdinalIgnoreCase))
                                         || (!string.IsNullOrEmpty(lesson.StartDatetime) && lesson.StartDatetime.StartsWith(date, StringComparison.OrdinalIgnoreCase));
 
@@ -855,7 +861,7 @@ public class DiaryClient
         }
     }
 
-    public async Task<List<GosuslugiMarkItem>> GetMarksAsync(string? targetStudentId = null)
+    public async Task<List<GosuslugiMarkItem>> GetMarksAsync(string? targetStudentId = null, int pastWeeks = 12, int futureWeeks = 5)
     {
         await EnsureAuthorizationAsync();
 
@@ -863,8 +869,8 @@ public class DiaryClient
         {
             var (studentId, mdmId) = await ResolveStudentIdsAsync(targetStudentId);
 
-            // Query recent week intervals covering the academic quarter (next week + current + previous 10 weeks)
-            var intervals = GetRecentWeekIntervals(12);
+            // Query recent week intervals covering the academic quarter or requested window
+            var intervals = GetRecentWeekIntervals(pastWeeks, futureWeeks);
 
             List<string> idsToTry = new List<string>();
             if (!string.IsNullOrEmpty(studentId) && Guid.TryParse(studentId, out var sGuid)) idsToTry.Add(sGuid.ToString("D"));
@@ -933,12 +939,13 @@ public class DiaryClient
     }
 
     // ── ANTI-DDOS / RATE LIMITING THROTTLE & CIRCUIT BREAKER ──
-    private static readonly System.Threading.SemaphoreSlim _gosuslugiThrottle = new System.Threading.SemaphoreSlim(3, 3);
+    private static readonly System.Threading.SemaphoreSlim _gosuslugiThrottle = new System.Threading.SemaphoreSlim(2, 2);
+    private static readonly System.Threading.SemaphoreSlim _backgroundThrottle = new System.Threading.SemaphoreSlim(1, 1);
     private static DateTime _circuitBreakerUntil = DateTime.MinValue;
     private static readonly object _delayLock = new object();
     private static DateTime _lastRequestTime = DateTime.MinValue;
 
-    public static async Task AcquireGosuslugiRateLimitAsync()
+    public static async Task AcquireGosuslugiRateLimitAsync(bool isBackground = false)
     {
         if (DateTime.UtcNow < _circuitBreakerUntil)
         {
@@ -946,17 +953,22 @@ public class DiaryClient
             throw new DiaryMaintenanceException($"🛡️ Защита от бана Госуслуг: повторите запрос через {remainingSec} сек.");
         }
 
-        await _gosuslugiThrottle.WaitAsync();
+        if (isBackground)
+        {
+            await _backgroundThrottle.WaitAsync();
+        }
 
         try
         {
+            await _gosuslugiThrottle.WaitAsync();
+
             int delayMs = 0;
             lock (_delayLock)
             {
                 var elapsed = (DateTime.UtcNow - _lastRequestTime).TotalMilliseconds;
-                if (elapsed < 250)
+                if (elapsed < 300)
                 {
-                    delayMs = 250 - (int)elapsed;
+                    delayMs = 300 - (int)elapsed;
                 }
                 _lastRequestTime = DateTime.UtcNow.AddMilliseconds(delayMs);
             }
@@ -968,14 +980,21 @@ public class DiaryClient
         }
         catch
         {
-            _gosuslugiThrottle.Release();
+            if (isBackground)
+            {
+                try { _backgroundThrottle.Release(); } catch { }
+            }
             throw;
         }
     }
 
-    public static void ReleaseGosuslugiRateLimit()
+    public static void ReleaseGosuslugiRateLimit(bool isBackground = false)
     {
         try { _gosuslugiThrottle.Release(); } catch { }
+        if (isBackground)
+        {
+            try { _backgroundThrottle.Release(); } catch { }
+        }
     }
 
     private void CheckResponseStatus(HttpResponseMessage response)

@@ -1236,7 +1236,7 @@ public class DiaryInteractionService
                     var bgTokenStore = bgScope.ServiceProvider.GetRequiredService<ITokenStore>();
                     var bgDbContext = bgScope.ServiceProvider.GetRequiredService<AppDbContext>();
                     var bgHttpFactory = bgScope.ServiceProvider.GetRequiredService<System.Net.Http.IHttpClientFactory>();
-                    var bgClient = new DiaryClient(bgHttpFactory.CreateClient("diary-proxy"), bgTokenStore, userId);
+                    var bgClient = new DiaryClient(bgHttpFactory.CreateClient("diary-proxy"), bgTokenStore, userId, isBackground: true);
 
                     var years = new[] { DateTime.UtcNow.Year.ToString(), (DateTime.UtcNow.Year - 1).ToString() };
                     string foundClass = "";

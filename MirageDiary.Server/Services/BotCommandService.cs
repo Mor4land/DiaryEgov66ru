@@ -57,6 +57,7 @@ public class BotCommandService : IBotPlatformAdapter
             {
                 var msg = update.Message;
                 var chatId = msg.Chat.Id;
+                Console.WriteLine($"[Telegram] 📩 Inbound Message from ChatId={chatId}, User=@{msg.From?.Username} (Id={msg.From?.Id}): '{msg.Text}'");
                 RecordMessageId(chatId, msg.MessageId);
 
                 if (!CheckUserCooldown(chatId))
@@ -303,8 +304,23 @@ public class BotCommandService : IBotPlatformAdapter
     private async Task<Message?> SafeSendMessageAsync(long chatId, string text, InlineKeyboardMarkup? markup = null)
     {
         Message? sent = null;
-        try { sent = await _botClient.SendMessage(chatId, text, ParseMode.Markdown, replyMarkup: markup); }
-        catch { try { sent = await _botClient.SendMessage(chatId, text, replyMarkup: markup); } catch { return null; } }
+        try 
+        { 
+            sent = await _botClient.SendMessage(chatId, text, ParseMode.Markdown, replyMarkup: markup); 
+        }
+        catch (Exception ex1)
+        { 
+            Console.WriteLine($"[Telegram] ⚠️ SendMessage (Markdown) to ChatId={chatId} failed: {ex1.Message}. Retrying plain...");
+            try 
+            { 
+                sent = await _botClient.SendMessage(chatId, text, replyMarkup: markup); 
+            } 
+            catch (Exception ex2)
+            { 
+                Console.WriteLine($"[Telegram] ❌ SendMessage (Plain) to ChatId={chatId} failed: {ex2.Message}");
+                return null; 
+            } 
+        }
         if (sent != null) RecordMessageId(chatId, sent.MessageId);
         return sent;
     }

@@ -63,6 +63,7 @@ public class MaxCommandService : IBotPlatformAdapter
                 var msg = msgCreated.Message;
                 long chatId = msg?.Sender?.Id ?? 0;
                 if (chatId == 0) return;
+                Console.WriteLine($"[MAX] 📩 Inbound Message from ChatId={chatId}, User=@{msg?.Sender?.Username} (Id={msg?.Sender?.Id}): '{msg?.Body?.Text}'");
                 RecordMessageId(chatId, msg?.Body?.Mid);
 
                 if (!CheckUserCooldown(chatId)) return;

@@ -134,6 +134,7 @@ public class TelegramBotPollingWorker : BackgroundService
 
     private Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, CancellationToken cancellationToken)
     {
+        _logger.LogInformation(">>> [Telegram] Received Update ID {UpdateId}, Type {Type}", update.Id, update.Type);
         _ = Task.Run(async () =>
         {
             try

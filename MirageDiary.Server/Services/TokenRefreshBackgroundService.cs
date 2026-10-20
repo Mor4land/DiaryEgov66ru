@@ -163,7 +163,7 @@ public class TokenRefreshBackgroundService : BackgroundService
 
                 // If token is still healthy with plenty of time remaining, verify it
                 var client = httpClientFactory.CreateClient();
-                var diaryClient = new DiaryClient(client, tokenStore, user.Id);
+                var diaryClient = new DiaryClient(client, tokenStore, user.Id, isBackground: true);
                 
                 try
                 {
