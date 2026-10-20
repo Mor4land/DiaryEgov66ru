@@ -174,7 +174,7 @@ public static class ServiceCollectionExtensions
                 return new MaxBotClient(maxBotToken, maxHttpClient);
             });
 
-            var mode = (configuration["MaxBot:Mode"] ?? configuration["MaxBotMode"] ?? "webhook").Trim().ToLowerInvariant();
+            var mode = (configuration["MaxBot:Mode"] ?? configuration["MaxBotMode"] ?? "polling").Trim().ToLowerInvariant();
             if (mode == "polling")
             {
                 services.AddHostedService<MaxBotPollingWorker>();

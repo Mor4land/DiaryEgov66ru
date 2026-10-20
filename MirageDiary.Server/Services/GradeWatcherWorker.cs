@@ -598,6 +598,41 @@ public class GradeWatcherWorker : BackgroundService
                         catch (Exception tex)
                         {
                             _logger.LogWarning($"[GradeWatcher] Не удалось отправить пуш пользователю {user.Id}: {tex.Message}");
+
+                            if (!string.IsNullOrEmpty(user.LinkedUserId))
+                            {
+                                try
+                                {
+                                    if (user.LinkedUserId.StartsWith("max_") && maxBotClient != null)
+                                    {
+                                        if (long.TryParse(user.LinkedUserId.Replace("max_", ""), out long peerMaxId))
+                                        {
+                                            await maxBotClient.SendMessageAsync(new SendMessageRequest
+                                            {
+                                                UserId = peerMaxId,
+                                                Text = sb.ToString(),
+                                                Format = MessageFormat.Markdown,
+                                                Attachments = maxAttachments
+                                            });
+                                            _logger.LogInformation($"[GradeWatcher] 🔀 Резервный пуш успешно доставлен в связанный MAX аккаунт {user.LinkedUserId}.");
+                                        }
+                                    }
+                                    else if (!user.LinkedUserId.StartsWith("max_") && botClient != null)
+                                    {
+                                        await botClient.SendMessage(
+                                            chatId: user.LinkedUserId,
+                                            text: sb.ToString(),
+                                            parseMode: ParseMode.Markdown,
+                                            replyMarkup: tgMarkup,
+                                            cancellationToken: stoppingToken);
+                                        _logger.LogInformation($"[GradeWatcher] 🔀 Резервный пуш успешно доставлен в связанный TG аккаунт {user.LinkedUserId}.");
+                                    }
+                                }
+                                catch (Exception peerEx)
+                                {
+                                    _logger.LogWarning($"[GradeWatcher] Резервная доставка в связанный аккаунт {user.LinkedUserId} также не удалась: {peerEx.Message}");
+                                }
+                            }
                         }
                         }
                     }

@@ -33,7 +33,11 @@ public static class TelegramClientConfiguration
             {
                 var handler = new SocketsHttpHandler
                 {
-                    PooledConnectionLifetime = TimeSpan.FromMinutes(15)
+                    PooledConnectionLifetime = TimeSpan.FromMinutes(2),
+                    PooledConnectionIdleTimeout = TimeSpan.FromSeconds(45),
+                    KeepAlivePingDelay = TimeSpan.FromSeconds(20),
+                    KeepAlivePingTimeout = TimeSpan.FromSeconds(10),
+                    EnableMultipleHttp2Connections = true
                 };
 
                 // 1. Explicit proxy configuration (if defined in appsettings/env)
@@ -71,6 +75,7 @@ public static class TelegramClientConfiguration
         {
             var httpClientFactory = sp.GetRequiredService<IHttpClientFactory>();
             var httpClient = httpClientFactory.CreateClient("tgwebhook");
+            httpClient.Timeout = TimeSpan.FromSeconds(70);
             return new TelegramBotClient(botToken, httpClient);
         });
 
